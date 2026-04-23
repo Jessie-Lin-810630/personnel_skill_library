@@ -53,6 +53,7 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
     5. Container: Docker
     6. AI Layer:  Claude API（第三層 agent）
     7. Workflow: Github Actions
+    8. tool management: pyenv + poetry
 
 - Planned branches:
     1. main     # release the branch2`develop` once it pass the tests.
