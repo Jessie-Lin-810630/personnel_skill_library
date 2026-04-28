@@ -29,16 +29,18 @@ def upsert_notes(db, notes: list[dict]) -> None:
         operations.append(an_operation)
 
     result = collection.bulk_write(operations)
-    logger.info(f"obsidian_notes upsert 完成 | "
-                f"新增: {result.upserted_count} | 更新: {result.modified_count}"
-                )
+    logger.success(f"obsidian_notes upsert 完成 | "
+                   f"新增: {result.upserted_count} | 更新: {result.modified_count}"
+                   )
 
 
-def upsert_summary(db, summary: dict) -> None:
-    """以 snapshot_date 為鍵，每天只保留最新一筆快照"""
+def upsert_note_summary(db, summary: dict) -> None:
+    """
+    以 snapshot_date 為鍵，每天只保留最新一筆快照
+    """
     collection = db["obsidian_summary"]  # A collection object
     collection.update_one({"snapshot_date": summary["snapshot_date"]},
                           {"$set": summary},
                           upsert=True
                           )
-    logger.info(f"obsidian_summary 快照已更新：{summary['snapshot_date']}")
+    logger.success(f"obsidian_summary 快照已更新，快照日期：{summary['snapshot_date']}")
