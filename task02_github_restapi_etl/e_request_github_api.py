@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 import time
 from loguru import logger
 import requests
@@ -15,7 +16,8 @@ Extract：透過 GitHub REST API 的多個 endpoints 分別抓取
 
 函式設計：
 - _get_headers(token, username): 產生 headers 供後續打 API 使用)
-- _paginate(url, headers, params): 處理 Github API 分頁邏輯，同時利用重試機制應對 rate-limit 風險。回傳完整list of dicts。
+- _check_and_wait_rate_limit(): 主動在每次取得 response 後檢查剩餘配額，若剩餘配額達到緩衝值就主動暫停到reset時間點，避免真的觸發403或429的錯誤。
+- _paginate(): 處理 Github API 分頁邏輯，同時利用重試機制應對 rate-limit 風險。回傳完整list of dicts。
 - fetch_repos(headers): 抓取所有 repos，中途呼叫_paginate()
 - fetch_a_repo_commits(): 抓取單一 repo 的 commits，中途呼叫_paginate()
 - fetch_a_repo_readme(): 抓取單一 repo 的 README.md 內容
@@ -34,6 +36,48 @@ def _get_headers(token: str, username: str) -> dict:
     }
 
 
+def _check_and_wait_rate_limit(response: requests.Response,
+                               rate_limit_buffer: int = 100) -> None:
+    """
+    用於每次拿到 response 後呼叫。此函式從 response header 讀取剩餘配額，
+    若剩餘配額達到 rate_limit_buffer 就主動 sleep 到 reset 時間點。
+
+    GitHub 回傳的 rate limit headers：
+      x-ratelimit-remaining : 這個小時內還剩幾次 request (str of int)
+      x-ratelimit-reset     : 配額重置的 UTC epoch seconds (str of int)
+      retry-after           : 若觸發 secondary rate limit，要等幾秒 (優先處理)
+    """
+    # 優先處理 retry-after（secondary rate limit 用）
+    retry_after = response.headers.get("retry-after")
+    if retry_after:
+        wait_sec = int(retry_after)
+        logger.warning(f"Received retry-after, so wait for {wait_sec} seconds...")
+        time.sleep(wait_sec)
+        return None
+
+    remaining = response.headers.get("x-ratelimit-remaining")
+    reset_ts = response.headers.get("x-ratelimit-reset")
+
+    if remaining is None or reset_ts is None:
+        return None  # 某些 endpoint 不回傳這些 header，直接跳過
+
+    remaining = int(remaining)
+    reset_ts = int(reset_ts)
+
+    logger.debug(f"Rate limit remains：{remaining} requests, will reset at epoch {reset_ts} seconds.")
+
+    if remaining <= rate_limit_buffer:
+        now_epoch = int(datetime.now(timezone.utc).timestamp())
+        wait_sec = max(reset_ts - now_epoch + 5, 0)  # +5 秒緩衝避免時差
+        reset_time_str = datetime.fromtimestamp(reset_ts, tz=timezone.utc).strftime("%H:%M:%S UTC")
+        logger.warning(f"Rate limit remains {remaining} requests, lower than the buffer [{rate_limit_buffer}]."
+                       f"Will pause for {wait_sec} seconds until reach {reset_time_str}..."
+                       )
+        time.sleep(wait_sec)
+        return None
+    return None
+
+
 def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
     """
     通用分頁抓取器。
@@ -42,8 +86,7 @@ def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
     results = []
     params = params or {}
     params["per_page"] = 100
-    page = 1
-    params["page"] = page
+    params["page"] = 1
     attempts = 3
     while True:
         try:
@@ -51,12 +94,16 @@ def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
                 logger.info(f"Requesting {url} with page {params["page"]} and attempt {i + 1}/{attempts}....")
                 resp = requests.get(url, headers=headers, params=params, timeout=10)
 
+                # 每次 response 都檢查 rate limit，主動在耗盡前暫停
+                _check_and_wait_rate_limit(resp)
+
                 # 遇到 rate limit（403/429）就等 300 秒重試一次
                 if resp.status_code in (403, 429):
                     logger.warning(
                         f"Rate limit reached，wait for 300 seconds before retrying... (page={params["page"]})")
                     time.sleep(300)
                     continue
+
                 elif resp.status_code == 200:
                     logger.info(f"Successfully requested url {url}，page: {params["page"]}")
                     break
