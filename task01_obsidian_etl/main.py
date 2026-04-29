@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
 from loguru import logger
-from e_scan_obsidian import scan_vault
-from t_clean_obsidian import build_note_documents, build_summary_document
-from l_load_to_mongodb import get_db, upsert_notes, upsert_summary
+from .e_scan_obsidian import scan_vault
+from .t_clean_obsidian import build_note_documents, build_summary_document
+from .l_load_to_mongodb import get_db, upsert_notes, upsert_note_summary
 
 """
 執行E、T、L。
@@ -33,7 +33,7 @@ def run_task01():
     # L：Load
     db = get_db(mongo_uri, db_name)
     upsert_notes(db, notes)
-    upsert_summary(db, summary)
+    upsert_note_summary(db, summary)
 
     logger.success("=== Task 01: Obsidian ETL 完成 ===")
 

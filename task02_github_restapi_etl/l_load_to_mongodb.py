@@ -2,8 +2,7 @@
 from pymongo import MongoClient, UpdateOne
 from pymongo.collection import Collection
 from loguru import logger
-from dotenv import load_dotenv
-import os
+
 
 """
 程式架構：

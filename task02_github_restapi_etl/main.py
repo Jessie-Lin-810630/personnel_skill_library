@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
 from loguru import logger
-from e_request_github_api import _get_headers, fetch_repos, fetch_a_repo_commits, fetch_a_repo_readme
-from t_transform_github import build_repo_document, build_summary_document
-from l_load_to_mongodb import get_db, upsert_repos, upsert_repo_summary
+from .e_request_github_api import _get_headers, fetch_repos, fetch_a_repo_commits, fetch_a_repo_readme
+from .t_transform_github import build_repo_document, build_summary_document
+from .l_load_to_mongodb import get_db, upsert_repos, upsert_repo_summary
 
 """
 一次執行E、T、L。
