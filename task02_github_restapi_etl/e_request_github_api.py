@@ -89,6 +89,7 @@ def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
     params["page"] = 1
     attempts = 3
     while True:
+        resp = None
         try:
             for i in range(attempts):
                 logger.info(f"Requesting {url} with page {params["page"]} and attempt {i + 1}/{attempts}....")
@@ -107,9 +108,18 @@ def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
                 elif resp.status_code == 200:
                     logger.info(f"Successfully requested url {url}，page: {params["page"]}")
                     break
-        except requests.RequestException as e:
-            logger.error(f"Error when requesting. Status code: {resp.status_code}, Error msg: {e}")
-            raise Exception(f"Requesting failed in No. {i} attempt.")
+
+             # for 迴圈結束後，補上這個保險，以避免"在連續三次403/429跳出迴圈後，仍然執行了else後面的程序"。
+            if resp.status_code != 200 or resp is None:
+                raise Exception(f"All {attempts} attempts failed for {url}, last status: {resp.status_code}")
+
+            # HTTP 4xx/5xx（例如：409，排除403&429這種rate limit），讓呼叫_paginate()的外層函式決定怎麼處理
+            # 因為每個409的情況隨使用的endpoint不同而可能有不同處理方式
+            resp.raise_for_status()
+
+        except requests.ConnectionError as e:  # 網路層錯誤（DNS 失敗、連線中斷等）直接往外拋，不需要重試
+            logger.error(f"Network error when requesting {url}, msg error: {e}")
+            raise
         else:
             batch = resp.json()
             if not batch:
@@ -146,7 +156,7 @@ def fetch_a_repo_commits(owner: str,
         commits = _paginate(url, headers)
         logger.success(f"Completed requesting. Total commits fetched: {len(commits)}")
         return commits
-    except requests.RequestException as e:
+    except requests.HTTPError as e:
         # 空 repo（沒有任何 commit）會回傳 409，需要跳過
         if e.response.status_code == 409:
             logger.warning(f"{repo_name}：空 repo，跳過 commits 抓取")
@@ -159,7 +169,7 @@ def fetch_a_repo_commits(owner: str,
 def fetch_a_repo_readme(owner: str,
                         repo_name: str,
                         headers: dict,
-                        returned_max_chars: int = 300) -> str:
+                        returned_max_chars: int = 300) -> dict:
     """
     抓取 README，回傳前 returned_max_chars個字符。
     找不到 README 回傳空字串。
@@ -169,7 +179,7 @@ def fetch_a_repo_readme(owner: str,
     try:
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 404:
-            return ""
+            return {"readme_html_url": "", "readme_summary": ""}
     except requests.RequestException as e:
         logger.error(f"Error when requesting README. Status code: {resp.status_code}, Error msg: {e}")
         raise Exception(f"Error when requesting README for {repo_name}.")
