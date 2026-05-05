@@ -10,9 +10,9 @@ from dotenv import load_dotenv
 """
 程式架構：
 Extract：透過 GitHub REST API 的多個 endpoints 分別抓取 
-(1) Endpoint `/user/repos`: 抓取所有repo 清單
-(2) Endpoint `repos/{owner}/{repo_name}/commits`: 抓取單一 repo 的 commits 歷史
-(3) Endpoint `repos/{owner}/{repo_name}/readme`: 抓取單一 repo 的 README.md 文字內容
+(1) GET Endpoint `/user/repos`: 抓取所有repo 清單。
+(2) GET Endpoint `repos/{owner}/{repo_name}/commits`: 抓取單一 repo 的 commits 歷史
+(3) GET Endpoint `repos/{owner}/{repo_name}/readme`: 抓取單一 repo 的 README.md 文字內容
 
 函式設計：
 - _get_headers(token, username): 產生 headers 供後續打 API 使用)
