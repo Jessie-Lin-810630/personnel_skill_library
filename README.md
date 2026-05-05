@@ -13,7 +13,7 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
         GitHub API         →  MongoDB                            → Streamlit
         （REST API 抓取）       (repo metadata& readme abstracts)  （plotly 圖表）
                             
-        LeetCode（手動輸入） →  MongoDB
+        LeetCode&ccClub刷題紀錄 →  MongoDB
         Udemy（手動輸入）    →  MongoDB
     ```
     2. `Knowledge Factory`: A graph describes the technique used in this project. Some flowchart of ETL pipeline showing the steps from extracting from data sources, transformining, loading to database, data visualization and final deployment. The number of flowchart depends on the required processes. A block showning three milestones, executing the ETL and frontend web pages in docker containers on premises, deploying web service to GCP cloud run and cloud scheduler, adding Github Actions to perform CI/CD workflow.
@@ -49,7 +49,7 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
 - Planned technique stacks:
     1. Frontend:  Streamlit
     2. Backend:   Python + Flask API
-    3. Database:  MongoDB（存筆記metadata） + MySQL（結構化進度數據）
+    3. Database:  MongoDB
     4. Cloud:     GCP（Cloud Run 部署容器）
     5. Container: Docker
     6. AI Layer:  Claude API（第三層 agent）
