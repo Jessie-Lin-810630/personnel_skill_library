@@ -6,14 +6,15 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
     1. `HOME`: An overview about your personnel skills in two domains (e.g. biotechnoloy + data engineering). For each domain it represents a radar chart containing the proficieny in 5-8 subjects. In the middle layer of page, five KPI cards represent, note nodes in  Obsidian vault, experienced project amount shown on Github, finished problems about SQL on leetcode, finished problems about python on leetcode, learning progress on Udemy.
     To generate two radar charts and five KPI cards, we need to perform at least four ETL processes.
     ```
-        資料來源（ETL）          存儲             呈現
-        ─────────────────────────────────────────────
-        Obsidian vault     →  MongoDB        ↘
+        資料來源（ETL）          存儲                                    呈現
+        ─────────────────────────────────────────────────────────────────────────
+        Obsidian vault     →  MongoDB                            ↘
         （本地資料夾掃描）      （筆記 metadata）
-        GitHub API         →  MySQL          → Streamlit
-        （REST API 抓取）       （進度數字）     （plotly 圖表）
-        LeetCode（手動輸入） →  MySQL
-        Udemy（手動輸入）    →  MySQL
+        GitHub API         →  MongoDB                            → Streamlit
+        （REST API 抓取）       (repo metadata& readme abstracts)  （plotly 圖表）
+                            
+        LeetCode（手動輸入） →  MongoDB
+        Udemy（手動輸入）    →  MongoDB
     ```
     2. `Knowledge Factory`: A graph describes the technique used in this project. Some flowchart of ETL pipeline showing the steps from extracting from data sources, transformining, loading to database, data visualization and final deployment. The number of flowchart depends on the required processes. A block showning three milestones, executing the ETL and frontend web pages in docker containers on premises, deploying web service to GCP cloud run and cloud scheduler, adding Github Actions to perform CI/CD workflow.
     ```
