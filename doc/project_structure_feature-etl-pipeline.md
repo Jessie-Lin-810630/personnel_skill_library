@@ -82,6 +82,7 @@
                     }
                     ],
         "readme_summary": "This project is an ETL pipeline...",  // 前 300 字
+        "readme_html_url": "https://github.com/jessie/my_repo/blob/main/README.md",
         "topics": ["etl", "python", "mongodb"],
         "stars": 0,
         "fetched_at": "2026-04-28T10:00:00Z"
@@ -99,5 +100,55 @@
     "recent_repos": [              
         { "repo_name": "...", "pushed_at": "...", "language": "..." }
     ]
+    }
+```
+
+# Schema design of MongoDB collection in task03
+```json
+    // Collection name: `solved_problems_on_ccClub` (One document means one problem solved before)
+    {
+        {"problem_id": "180001",
+        "problem_type": "ACM", 
+        "score": 0, 
+        "topic": ["String"], 
+        "difficulty": "Low"
+        }
+    }
+```
+
+```json
+    // Collection name: `solved_problems_on_leetcode` (One document means one problem solved before)
+    {
+    {"frontendQuestionId": "1", // 對應API回傳的data/problemsetQuestionList/questions/frontendQuestionId
+    "title": "Two Sum",// 對應API回傳的data/problemsetQuestionList/questions/title
+    "topic": ["string", "database"], // 對應API回傳的data/problemsetQuestionList/questions/topicTags之name欄位
+    "difficulty": "Low" //對應API回傳的data/problemsetQuestionList/questions/difficulty
+    }
+    }
+```
+
+```json
+    // Collection name: `ccClub&leetcode_summary`
+    {
+    "snapshot_date": "2026-04-28",
+    "totalSolvedProblemsOnCCclub": 264, // 計算collection documents
+    "totalSolvedProblemsOnLeetcode": 15, // 計算collection documents
+    "problemDifficultyOnLeetcode": [ { "difficulty": "Easy", 
+                                    "percentage": 81.71},
+                                  {"difficulty": "Medium",
+                                   "percentage": 17.74},
+                                  {"difficulty": "Hard",
+                                  "percentage": null}
+                                ], // 對應API回傳的data/matchedUser/problemsSolvedBeatsStats
+    "problemDifficultyOnCCclub": [ {   
+                                  "difficulty": "Easy",
+                                    "percentage": 81.71},
+                                  {"difficulty": "Medium",
+                                   "percentage": 17.74},
+                                  {"difficulty": "Hard",
+                                  "percentage": null}
+                                ], // 需要自行從collection `solved_problems_on_ccClub`自行計算
+    "topicsPercentOnCCclub": {"string": 20.0, "math": 80.0, "link-list": 0}, // 從計算collection `solved_problems_on_ccClub`的topic，計算後以百分比呈現
+    "topicsPercentOnLeetcode": {"string": 13.4,     "math": 12.6, "link-list": 74.0}// 取自collection `solved_problems_on_leetcode`的topic，計算後以百分比呈現
     }
 ```
