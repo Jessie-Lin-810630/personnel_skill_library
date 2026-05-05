@@ -2,6 +2,7 @@
 ```
     feature/etl-pipeline/
         ├── .env
+        ├── poetry.lock
         ├── pyproject.toml
         ├── task01_obsidian_etl/
         │   ├── __init__.py
@@ -17,8 +18,20 @@
         │   ├── l_load_to_mongodb.py     # 寫入 MongoDB
         │   └── main.py                  # 執行
         │
-        └── tests/
-            └── test_task01_obsidian_etl.py   # 快速驗證用
+        ├── task03_leetcode_ccClub_etl/
+        │   ├── __init__.py
+        │   ├── e_crawler_ccClub.py                     # 獲取ccClub上解過的題型與題型特徵
+        │   ├── t_transform_ccClub.py                   # 清洗、分類、統計邏輯
+        │   ├── l_load_ccClub_doc_to_mongodb.py         # 寫入 MongoDB
+        │   ├── e_query_leetcode_graphql.py             # 獲取leetcode上解過的題型與題型特徵
+        │   ├── t_transform_leetcode.py                 # 清洗、分類、統計邏輯
+        │   ├── l_load_leetcode_doc_to_mongodb.py       # 寫入 MongoDB
+        │   └── main.py                                 # 執行兩支 ETL 流程。
+        │
+        └── tests/                          # 單元測試
+                ├── test_task01_obsidian_etl.py
+                ├── test_task02_github_restapi_etl.py
+                └── test_task03_leetcode_ccClub_etl.py
 ```
 
 # Schema design of MongoDB collection in task01
@@ -107,12 +120,12 @@
 ```json
     // Collection name: `solved_problems_on_ccClub` (One document means one problem solved before)
     {
-        {"problem_id": "180001",
-        "problem_type": "ACM", 
-        "score": 0, 
-        "topic": ["String"], 
-        "difficulty": "Low"
-        }
+    {"problem_id": "180001",
+    "problem_type": "ACM", 
+    "score": 0, 
+    "topic": ["String"], 
+    "difficulty": "Low"
+    }
     }
 ```
 
@@ -133,12 +146,12 @@
     "snapshot_date": "2026-04-28",
     "totalSolvedProblemsOnCCclub": 264, // 計算collection documents
     "totalSolvedProblemsOnLeetcode": 15, // 計算collection documents
-    "problemDifficultyOnLeetcode": [ { "difficulty": "Easy", 
+    "problemDifficultyOnLeetcode": [{ "difficulty": "Easy", 
                                     "percentage": 81.71},
-                                  {"difficulty": "Medium",
-                                   "percentage": 17.74},
-                                  {"difficulty": "Hard",
-                                  "percentage": null}
+                                    {"difficulty": "Medium",
+                                    "percentage": 17.74},
+                                    {"difficulty": "Hard",
+                                    "percentage": null}
                                 ], // 對應API回傳的data/matchedUser/problemsSolvedBeatsStats
     "problemDifficultyOnCCclub": [ {   
                                   "difficulty": "Easy",
