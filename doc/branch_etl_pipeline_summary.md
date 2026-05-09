@@ -1,10 +1,10 @@
 # Feature Branch: `feature/etl-pipeline` — 第一層開發執行成果摘要
 
-> **開發目標**：大範圍展示一個從生技領域跨足到資料工程的雙棲求職者所具備的知識庫與資料工程技術。
+> **開發目標**：展示一個從生技領域跨足到資料工程的雙棲求職者所具備的知識庫與資料工程技術。從LeetCode、ccClub、GitHub、 Google Sheet、local Obsidian 盤點個人技能範疇，並寫入 MongoDB，作為後續 Dashboard 資料來源，包含轉換為可視覺化的生技與資料工程雙雷達圖。
 
-> **完成日期**：2026-05-05
+> **完成日期**：2026-05-09
 
-> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB localhost
+> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB localhost / Google Sheets API service account
 
 ---
 
@@ -40,10 +40,17 @@ feature/etl-pipeline/
 │   ├── l_load_leetcode_doc_to_mongodb.py       # 寫入 MongoDB
 │   └── main.py                                 # 串接兩支 ETL 流程
 │
+├──task05_googlesheet_skill_etl/
+|   ├── e_fetch_google_sheet.py  # 使用 service account 讀取 Google Sheet worksheet
+│   ├── t_transform_skills.py    # 任務分數計算、雷達軸彙總、level 分級
+│   ├── l_load_to_mongodb.py     # 寫入 MongoDB collections
+│   └── main.py                  # 串接 Extract / Transform / Load 流程
+│
 └── tests/
     ├── test_task01_obsidian_etl.py
     ├── test_task02_github_restapi_etl.py
-    └── test_task03_leetcode_ccClub_etl.py
+    ├── test_task03_leetcode_ccClub_etl.py
+    └── test_task05_googlesheet_skill_etl.py
 ```
 
 ---
@@ -285,51 +292,221 @@ MONGO_DB_NAME=
 ```
 
 ---
+## Task 05 — Google Sheet Skill Radar ETL
 
-## 第一層整體架構總覽
+### 資料來源
+
+Google Spreadsheet：`Personal Skill Radar Calculation`
+
+| Worksheet | 說明 | 輸出雷達圖名稱 |
+|-----------|------|----------------|
+| `生技` | 生技領域任務與能力盤點 | `雷達圖1生技` |
+| `資料工程` | 資料工程任務與能力盤點 | `雷達圖2資料工程` |
+
+### 雷達軸設計
+
+**生技雷達軸**
+
+| 雷達軸 |
+|--------|
+| `製程技術 (細胞分注、反應器操作) 操作能力` |
+| `流程設計能力` |
+| `跨專案數據整合能力` |
+| `文件撰寫能力` |
+| `簡報口說能力` |
+
+**資料工程雷達軸**
+
+| 雷達軸 |
+|--------|
+| `ELT/ELT pipeline 操作與維護` |
+| `雲端 (GCP) 服務技術` |
+| `Orchestration` |
+| `資料庫資料模型設計` |
+| `文案設計與歸納` |
+| `資料視覺化` |
+| `資料品質與血緣維護` |
+
+---
+
+### ETL 設計重點
+
+- **Extract** : 使用 `pygsheets.authorize(service_account_json=...)` 透過 service account JSON key 授權後，以 pygsheet 套件開啟google sheet `Personal Skill Radar Calculation`，開啟後分別讀取 `生技` 與 `資料工程` 兩張worksheets，並也是使用 pygsheet 轉為 pandas DataFrame
+
+- **Transform** : 將欄位中標記為 `Y` 的能力旗標轉為 `1`，其他值轉為 `0`，接著每個任務以三個面向計分：
+    - **複雜性**
+    - **獨立性**
+    - **影響力**
+  由於生技與資料工程的複雜性欄位名稱不同，因此拆成 `build_biotech_task_docs()` 與 `build_de_task_docs()` 兩套轉換函式、分別產出兩個 DataFrame，然後再從中計算出單項任務總分後，映射出雷達軸層級 (level)後，生技與資料工程的映射結果則匯總存於同個 DataFrame，因此總計 Transform 階段有三個 DataFrames。其中此 level 會作為雷達圖的軸刻度。
+
+- **Load** : 將前次步驟產出的三個 DataFrame寫入 MongoDB 文檔集`skill_scores_biotech`、`skill_scores_data_eng`、`skill_radar_summary`。前兩個文檔集以 `雷達軸` 為 upsert 條件；文檔集skill_radar_summary則以`snapshot_date + 雷達軸 + 雷達圖名稱` 為複合 upsert 條件，支援定期快照更新。
+
+---
+
+### 計分規則
+
+#### 生技任務分數
+
+- **複雜性權重**
+
+  | 欄位 | 權重 |
+  |------|------|
+  | `複雜性 - 純紀錄` | 1 |
+  | `複雜性 - 執行操作` | 3 |
+  | `複雜性 - 制定方向` | 3 |
+  | `複雜性 - 優化與故障排除` | 3 |
+
+- **獨立性權重**
+
+  | 欄位 | 權重 |
+  |------|------|
+  | `獨立性 - 需要指導後才能照規章做` | 1 |
+  | `獨立性 - 不需指導即可理解並遵照組織規章做` | 5 |
+  | `獨立性 - 自訂架構` | 9 |
+
+- **影響力權重**
+
+  | 欄位 | 權重 |
+  |------|------|
+  | `影響力 -  不具備教學的經驗` | 0 |
+  | `影響力 - 具備部門內教學經驗` | 1 |
+  | `影響力 - 具備跨部門教學經驗` | 5 |
+  | `影響力 - 具備公司外出教學經驗` | 9 |
+
+- **單項任務總分**
+
+  ```
+  單項任務總分 = 複雜性總分 * 1 + 獨立性總分 * 1 + 影響力總分 * 2
+  ```
+
+#### 資料工程任務分數
+
+- **複雜性權重**
+
+  | 欄位 | 權重 |
+  |------|------|
+  | `複雜性 - 純紀錄與理解` | 1 |
+  | `複雜性 - 開發測試` | 3 |
+  | `複雜性 - 接手部署` | 3 |
+  | `複雜性 - 優化與故障排除` | 3 |
+
+- **獨立性與影響力權重**
+  ```
+  資料工程任務沿用生技任務的獨立性與影響力權重。
+  ```
+
+- **單項任務總分**
+
+  ```
+  單項任務總分 = 複雜性總分 * 1 + 獨立性總分 * 2 + 影響力總分 * 1
+  ```
+
+#### 雷達軸 summary 分數
+
+- **每個雷達軸以任務數與單項任務最高分計算**
+
+  ```
+  任務經驗值 = round(log2(經手任務個數), 6)
+  單軸總分 = round(各軸向任務最高分 + 任務經驗值, 2)
+  ```
+
+- **Level 分級**
+
+  | 單軸總分區間 | level |
+  |--------------|-------|
+  | `< 5` | 1 |
+  | `5 <= score < 12` | 2 |
+  | `12 <= score < 15` | 3 |
+  | `15 <= score < 23` | 4 |
+  | `>= 23` | 5 |
+
+---
+
+### MongoDB Collections
+
+**`skill_scores_biotech`** 每筆代表一個生技 worksheet 中的任務資料，並附加計算後的分數欄位。
+
+```json
+{
+  "雷達軸": "流程設計能力",
+  "經手任務": "製程流程設計與優化",
+  "複雜性 - 純紀錄": 0,
+  "複雜性 - 執行操作": 1,
+  "複雜性 - 制定方向": 1,
+  "複雜性 - 優化與故障排除": 0,
+  "獨立性 - 需要指導後才能照規章做": 0,
+  "獨立性 - 不需指導即可理解並遵照組織規章做": 1,
+  "獨立性 - 自訂架構": 0,
+  "影響力 - 具備公司外出教學經驗": 0,
+  "影響力 - 具備跨部門教學經驗": 1,
+  "影響力 - 具備部門內教學經驗": 0,
+  "影響力 -  不具備教學的經驗": 0,
+  "複雜性總分": 6,
+  "獨立性總分": 5,
+  "影響力總分": 5,
+  "單項任務總分": 21
+}
+```
+
+**`skill_scores_data_eng`** 每筆代表一個資料工程 worksheet 中的任務資料，並附加計算後的分數欄位。
+```json
+{
+  "雷達軸": "Orchestration",
+  "經手任務": "xxx project Airflow DAG pipeline 維護",
+  "複雜性 - 純紀錄與理解": 0,
+  "複雜性 - 開發測試": 1,
+  "複雜性 - 接手部署": 0,
+  "複雜性 - 優化與故障排除": 1,
+  "獨立性 - 需要指導後才能照規章做": 1,
+  "獨立性 - 不需指導即可理解並遵照組織規章做": 0,
+  "獨立性 - 自訂架構": 1,
+  "影響力 - 具備公司外出教學經驗": 0,
+  "影響力 - 具備跨部門教學經驗": 0,
+  "影響力 - 具備部門內教學經驗": 1,
+  "影響力 -  不具備教學的經驗": 0,
+  "複雜性總分": 6,
+  "獨立性總分": 10,
+  "影響力總分": 1,
+  "單項任務總分": 27
+}
+```
+
+**`skill_radar_summary`** 每筆代表某一天、某張雷達圖、某個雷達軸的彙總結果。
+
+```json
+{
+  "雷達圖名稱": "雷達圖2資料工程",
+  "雷達軸": "Orchestration",
+  "經手任務個數": 4,
+  "任務經驗值": 2.0,
+  "各軸向任務最高分": 27,
+  "單軸總分": 29.0,
+  "level": 5,
+  "snapshot_date": "2026-05-09"
+}
+```
+### 套件依賴
 
 ```
-資料來源                    Extract                 Transform               Load（MongoDB）
-────────────────────────────────────────────────────────────────────────────────────────────
-Obsidian vault          e_scan_obsidian.py      t_transform_obsidian    obsidian_notes
-  本地 .md 檔案掃描                               .py                     obsidian_summary
-
-GitHub REST API         e_request_github_api    t_transform_github      github_repos
-  /user/repos           .py                     .py                     github_summary
-  /repos/{}/commits
-  /repos/{}/readme
-
-LeetCode GraphQL        e_query_leetcode_       t_transform_leetcode    solved_problems_on_leetcode
-  problemsetQuestion    graphql.py              .py                     ccClub&leetcode_summary
-  List
-  getUserProfile
-
-ccClub REST API         e_crawler_ccClub.py     t_transform_ccClub      solved_problems_on_ccClub
-  /api/login                                    .py                     ccClub&leetcode_summary
-  /api/profile
-  /api/problem
+pymongo, pygsheets, pandas, numpy, python-dotenv, loguru
 ```
 
 ---
 
-## MongoDB Collections 彙整
+### .env 金鑰
 
-| Collection 名稱 | 所屬 Task | upsert 唯一鍵 | 用途 |
-|----------------|-----------|--------------|------|
-| `obsidian_notes` | Task 01 | `file_path` | 每份筆記的 metadata |
-| `obsidian_summary` | Task 01 | `snapshot_date` | 每日筆記數量快照 |
-| `github_repos` | Task 02 | `repo_id` | 每個 repo 的詳細資訊 |
-| `github_summary` | Task 02 | `snapshot_date` | 每日 repo 統計快照 |
-| `solved_problems_on_leetcode` | Task 03 | `frontendQuestionId` | 每道 AC 題目 |
-| `solved_problems_on_ccClub` | Task 03 | `problem_id` | 每道已解 ccClub 題目 |
-| `ccClub&leetcode_summary` | Task 03 | `snapshot_date` | 兩平台刷題統計快照 |
+```
+GS_CREDENTIAL_FILE_PATH=
+MONGO_URI=
+MONGO_DB_NAME=
+```
 
 ---
 
 ## 待辦事項（Task 04 以後）
 
 - [ ] **Task 04**：Udemy 學習歷程 ETL（購買課程數、觀看進度）→ 存入 MySQL
-- [ ] **Task 05**：Docker Compose 容器化（MongoDB + MySQL + 4 支 ETL 腳本），並 export `requirements.txt` + `Dockerfile` + `docker-compose.yml`
+- [ ] **Task 06**：Docker Compose 容器化（MongoDB + MySQL + 4 支 ETL 腳本），並 export `requirements.txt` + `Dockerfile` + `docker-compose.yml`
 - [ ] **Streamlit Dashboard**：以上述 MongoDB collections 為資料來源，繪製雙雷達圖、KPI 卡片、圓餅圖
 
 ---
