@@ -210,3 +210,4 @@ __marimo__/
 tmp_test_*.py
 settings.json
 ccClub_judge.json
+googlesheet-user.json
