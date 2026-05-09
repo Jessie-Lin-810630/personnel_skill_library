@@ -1,5 +1,10 @@
+from task02_github_restapi_etl import t_transform_github
+from task02_github_restapi_etl import main
+from task02_github_restapi_etl import l_load_to_mongodb
+from task02_github_restapi_etl import e_request_github_api
 import base64
 import os
+import requests
 import sys
 import unittest
 from datetime import datetime, timezone
@@ -13,11 +18,6 @@ TASK_DIR = PROJECT_ROOT / "task02_github_restapi_etl"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(TASK_DIR))
 
-from task02_github_restapi_etl import e_request_github_api
-from task02_github_restapi_etl import l_load_to_mongodb
-from task02_github_restapi_etl import main
-from task02_github_restapi_etl import t_transform_github
-
 
 class FakeResponse:
     def __init__(self, status_code=200, payload=None, headers=None):
@@ -27,6 +27,10 @@ class FakeResponse:
 
     def json(self):
         return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
 
 
 class GithubExtractTests(unittest.TestCase):
@@ -160,7 +164,7 @@ class GithubExtractTests(unittest.TestCase):
                 "octocat", "hello-world", {"Authorization": "Bearer token"}
             )
 
-        self.assertEqual(readme, "")
+        self.assertEqual(readme, {"readme_html_url": "", "readme_summary": ""})
 
 
 class GithubTransformTests(unittest.TestCase):
