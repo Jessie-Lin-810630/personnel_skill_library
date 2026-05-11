@@ -16,13 +16,14 @@ def get_db(mongo_uri: str, db_name: str):
 
 def upsert_skill_scores(db, collection_name: str, df: pd.dataFrame) -> None:
     """
-    以 雷達軸 為唯一鍵做 upsert：已存在就更新; 不存在則新增
+    以 雷達軸、經手任務 為唯一鍵做 upsert：已存在就更新; 不存在則新增
     """
     docs = df.to_dict("records")  # 轉成 list of dict
     collection = db[collection_name]  # A collection object
     operations = []
     for doc in docs:
-        an_operation = UpdateOne({"雷達軸": doc["雷達軸"]},
+        an_operation = UpdateOne({"雷達軸": doc["雷達軸"],
+                                  "經手任務": doc["經手任務"]},
                                  {"$set": doc},
                                  upsert=True
                                  )
