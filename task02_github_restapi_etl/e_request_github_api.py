@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 """
 程式架構：
-Extract：透過 GitHub REST API 的多個 endpoints 分別抓取 
+Extract：透過 GitHub REST API 的多個 endpoints 分別抓取
 (1) GET Endpoint `/user/repos`: 抓取所有repo 清單。
 (2) GET Endpoint `repos/{owner}/{repo_name}/commits`: 抓取單一 repo 的 commits 歷史
 (3) GET Endpoint `repos/{owner}/{repo_name}/readme`: 抓取單一 repo 的 README.md 文字內容
@@ -78,7 +78,7 @@ def _check_and_wait_rate_limit(response: requests.Response,
     return None
 
 
-def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
+def _paginate(url: str, headers: dict, params: dict = None, *, timeout: int = 10) -> list[dict]:
     """
     通用分頁抓取器。
     GitHub 預設每頁 30 筆，per_page 最大 100，這裡統一設 100 減少 request 次數。
@@ -93,7 +93,7 @@ def _paginate(url: str, headers: dict, params: dict = None) -> list[dict]:
         try:
             for i in range(attempts):
                 logger.info(f"Requesting {url} with page {params["page"]} and attempt {i + 1}/{attempts}....")
-                resp = requests.get(url, headers=headers, params=params, timeout=10)
+                resp = requests.get(url, headers=headers, params=params, timeout=timeout)
 
                 # 每次 response 都檢查 rate limit，主動在耗盡前暫停
                 _check_and_wait_rate_limit(resp)
@@ -144,26 +144,48 @@ def fetch_repos(headers: dict) -> list[dict]:
     return all_repos
 
 
+def fetch_all_branches(owner: str, repo_name: str, headers: dict) -> list:
+    """抓取單一 repo 所有的 branches 名稱"""
+    url = f"{BASE_URL}/repos/{owner}/{repo_name}/branches"
+    required_branches = []
+    try:
+        branches = _paginate(url, headers)
+        logger.info(f"Successfully requesting for repo {repo_name}. Total branches fetched: {len(branches)}")
+        for b in branches:
+            required_branches.append(b.get("name"))
+        return required_branches
+    except requests.HTTPError as e:
+        logger.error(f"Error when requesting the repo {repo_name}. Status code: {branches.status_code}, Error msg: {e}")
+        raise Exception(f"Error when requesting {url}.")
+
+
 def fetch_a_repo_commits(owner: str,
                          repo_name: str,
-                         headers: dict) -> list[dict]:
+                         headers: dict,
+                         branches: list[str]) -> list[dict]:
     """
     抓取單一 repo 的所有 commits。
     回傳欄位：sha、commit.message、commit.author.date
     """
     url = f"{BASE_URL}/repos/{owner}/{repo_name}/commits"
-    try:
-        commits = _paginate(url, headers)
-        logger.success(f"Completed requesting. Total commits fetched: {len(commits)}")
-        return commits
-    except requests.HTTPError as e:
-        # 空 repo（沒有任何 commit）會回傳 409，需要跳過
-        if e.response.status_code == 409:
-            logger.warning(f"{repo_name}：空 repo，跳過 commits 抓取")
-            return []
+    all_commits = []
+    for b in branches:
+        try:
+            params = {"sha": b}
+            commits = _paginate(url, headers, params, timeout=30)
+            logger.info(f"Already requesting. For the branch {b}, Total commits fetched: {len(commits)}")
+            all_commits.extend(commits)
+        except requests.HTTPError as e:
+            # 空 repo（沒有任何 commit）會回傳 409，需要跳過
+            if e.response.status_code == 409:
+                logger.warning(f"{repo_name}：空 repo、空 branch，跳過 commits 抓取")
+                return []
 
-        logger.error(f"Error when requesting. Status code: {commits.status_code}, Error msg: {e}")
-        raise Exception(f"Error when requesting {url}.")
+            logger.error(f"Error when requesting the branch {b}. Status code: {commits.status_code}, Error msg: {e}")
+            raise Exception(f"Error when requesting {url}.")
+
+    logger.info(f"Successfully requesting. Total commits fetched in the repo: {len(all_commits)}")
+    return all_commits
 
 
 def fetch_a_repo_readme(owner: str,
@@ -211,6 +233,9 @@ if __name__ == "__main__":
     repo_name = all_repos[0].get("name")
     owner = all_repos[0].get("owner", {}).get("login")
 
+    # 測試找尋該 repo 下的 branches
+    branch_list = fetch_all_branches(owner, repo_name, headers)
+
     # 測試 commits 與 README endpoint 正常回傳資料
-    repo_commits = fetch_a_repo_commits(owner, repo_name, headers)
-    repo_reame = fetch_a_repo_readme(owner, repo_name, headers)
+    repo_commits = fetch_a_repo_commits(owner, repo_name, headers, branch_list)
+    # repo_reame = fetch_a_repo_readme(owner, repo_name, headers)

@@ -1,7 +1,11 @@
 import os
 from dotenv import load_dotenv
 from loguru import logger
-from .e_request_github_api import _get_headers, fetch_repos, fetch_a_repo_commits, fetch_a_repo_readme
+from .e_request_github_api import (_get_headers,
+                                   fetch_repos,
+                                   fetch_all_branches,
+                                   fetch_a_repo_commits,
+                                   fetch_a_repo_readme)
 from .t_transform_github import build_repo_document, build_summary_document
 from .l_load_to_mongodb import get_db, upsert_repos, upsert_repo_summary
 
@@ -15,13 +19,14 @@ load_dotenv()
 def run_task02() -> None:
     git_token = os.getenv("GITHUB_TOKEN")
     git_username = os.getenv("GITHUB_USERNAME")
+    git_mail = os.getenv("GITHUB_MAIL")
     headers = _get_headers(git_token, git_username)
     mongo_uri = os.getenv("MONGO_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([git_token, git_username, mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / MONGO_URI / MONGO_DB_NAME")
+        logger.error("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 2: GitHub REST API ETL 開始 ===")
 
@@ -35,13 +40,16 @@ def run_task02() -> None:
         repo_name = raw_repo.get("name")
         owner = raw_repo.get("owner", {}).get("login")
 
+        # 找尋該 repo 下的 branches
+        branch_list = fetch_all_branches(owner, repo_name, headers)
+
         # 從 /commits 與 /readme endpoint 獲取資料
-        repo_commits = fetch_a_repo_commits(owner, repo_name, headers)
+        repo_commits = fetch_a_repo_commits(owner, repo_name, headers, branch_list)
         repo_readme = fetch_a_repo_readme(owner, repo_name, headers)
 
         # ======== Transform ========
         # 建立單一repo文檔
-        a_repo_doc = build_repo_document(raw_repo, git_username, repo_commits, repo_readme)
+        a_repo_doc = build_repo_document(raw_repo, git_username, git_mail, repo_commits, repo_readme)
         all_repo_docs.append(a_repo_doc)
 
     # 建立摘要文檔

@@ -12,6 +12,7 @@ from loguru import logger
 
 def build_repo_document(raw_repo: dict,
                         github_username: str,
+                        github_mail: str,
                         raw_commits: list[dict],
                         raw_readme: dict[str],) -> dict:
     """
@@ -23,10 +24,12 @@ def build_repo_document(raw_repo: dict,
     # 只取需要的 commit 欄位
     commits = []
     for c in raw_commits:
-        commit_info = {"sha": c["sha"][:7],  # 只存短 sha 省空間
-                       "message": c["commit"]["message"],
-                       "committed_at": c["commit"]["author"]["date"], }
-        commits.append(commit_info)
+        if c["commit"]["committer"]["email"] == github_mail:
+            commit_info = {"sha": c["sha"][:7],  # 只存短 sha 省空間
+                           "message": c["commit"]["message"],
+                           "committed_at": c["commit"]["author"]["date"], }
+            if commit_info not in commits:  # 分支出去或merge過來的同個 commit 事件之sha 會一樣，故不需要重複計算 commit
+                commits.append(commit_info)
 
     repo_doc = {"repo_id": raw_repo["id"],
                 "repo_name": raw_repo["name"],
@@ -92,6 +95,7 @@ if __name__ == "__main__":
     e_request_github_api.load_dotenv()
     git_token = e_request_github_api.os.getenv("GITHUB_TOKEN")
     git_username = e_request_github_api.os.getenv("GITHUB_USERNAME")
+    git_mail = e_request_github_api.os.getenv("GITHUB_MAIL")
     headers = e_request_github_api._get_headers(git_token, git_username)
 
     # 以 headers 抓取所有 repos，回傳 list of dicts
@@ -104,15 +108,18 @@ if __name__ == "__main__":
         repo_name = raw_repo.get("name")
         owner = raw_repo.get("owner", {}).get("login")
 
+        # 測試找尋該 repo 下的 branches
+        branch_list = e_request_github_api.fetch_all_branches(owner, repo_name, headers)
+
         # 測試 commits 與 README endpoint 正常回傳資料
-        repo_commits = e_request_github_api.fetch_a_repo_commits(owner, repo_name, headers)
+        repo_commits = e_request_github_api.fetch_a_repo_commits(owner, repo_name, headers, branch_list)
         repo_readme = e_request_github_api.fetch_a_repo_readme(owner, repo_name, headers)
 
         # 測試 build_repo_document()
-        a_repo_doc = build_repo_document(raw_repo, git_username, repo_commits, repo_readme)
+        a_repo_doc = build_repo_document(raw_repo, git_username, git_mail, repo_commits, repo_readme)
 
         # 測試 build_summary_document()
         all_repo_docs.append(a_repo_doc)
         break
-    summary_docs = build_summary_document(all_repo_docs)
-    print(summary_docs)
+    # summary_docs = build_summary_document(all_repo_docs)
+    # print(summary_docs)
