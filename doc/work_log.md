@@ -75,3 +75,36 @@
 1. To branch `feature/etl-pipeline`, fixed the logistic transformation error about task02 that would repeatedly count the same commits in all branches so that the commit counts were overestimated.
 2. To branch `feature/etl-pipeline`, fixed the design error on the upserting in the function `upsert_skill_scores` about task05.
 3. To branch `feature/etl-pipeline`, correct the typo of label name on radar axis.
+4. Created app.py as `HOME page` via streamlit. The precomputing functions before render was defined in [dashboard_ui/utils](../dashboard_ui/utils/).
+5. Asked Codex to polish the draft of app.py. Major improvements:
+```
+    1. 面臨問題：`app.py` 有 hard-coding 靜態資料。  
+    我提供的解決方向：改成調用 `dashboard_ui/utils/interact_with_mongodb.py` 內讀取 MongoDB 的函式，並生成 `app2.py`。  
+    Codex最後修改的方向：建立 `app2.py`，用 MongoDB utils 取得雷達圖、KPI、GitHub、刷題題型等資料，並加上必要格式轉換。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    2. 面臨問題：`make_radar()` 的 hover tooltip 因內容太長被切邊。  
+    我提供的解決方向：修正 hover 顯示。  
+    Codex最後修改的方向：新增 hover 文字換行 helper，將任務內容自動插入 `<br>`，並調整雷達圖 margin/domain。  
+    最終是否解決：Yes
+
+    3. 面臨問題：修正 hover 後發生 `update_layout()` 重複傳入 `margin` 的 TypeError。  
+    我提供的解決方向：回報錯誤訊息。  
+    Codex最後修改的方向：建立 `radar_layout = {**plotly_layout_base, "margin": ...}`，避免 `margin` 被重複作為 keyword 傳入。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    4. 面臨問題：MongoDB utils 回傳值新增 `snapshot_date` / `fetched_date`，頁面需要顯示最近更新日期。  
+    我提供的解決方向：在兩個雷達圖與 KPI 四張卡片，共 6 處加上「最近更新日期」。  
+    Codex最後修改的方向：雷達圖使用 `st.caption()` 顯示日期；KPI 初版也先用 caption 顯示。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    5. 面臨問題：`get_obsidian_kpi()` 與 `get_github_kpi()` 已改成 tuple 最後一個元素固定為更新日期，先前相容 dict/tuple 的 helper 變得多餘。  
+    我提供的解決方向：再次修改 `app2.py`，刪掉多餘函式，並把 KPI 更新日期改成 `_format_delta()` 的 `suffix` 傳入。  
+    Codex最後修改的方向：移除 `_date_from_result()`，直接 unpack tuple，將四張 KPI 的更新日期併入 `st.metric()` delta 字串。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    6. 面臨問題：`biotech_labels` 中 `"製程技術 (細胞分注、反應器操作) 操作能力"` 太長，radar 軸標籤被切到。  
+    我提供的解決方向：調整斷行。  
+    Codex最後修改的方向：新增 radar label formatting，將該標籤顯示成三行，並用 label normalization 保持 hover 任務查找正常。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+```
