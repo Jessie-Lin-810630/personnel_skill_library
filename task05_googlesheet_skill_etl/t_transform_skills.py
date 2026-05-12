@@ -9,7 +9,7 @@ BIOTECH_RADAR_LABELS = ["製程技術 (細胞分注、反應器操作) 操作能
                         "文件撰寫能力",
                         "簡報口說能力"]
 
-DE_RADER_LABELS = ["ELT/ELT pipeline 操作與維護",
+DE_RADER_LABELS = ["ETL/ELT pipeline 操作與維護",
                    "雲端 (GCP) 服務技術",
                    "Orchestration",
                    "資料庫資料模型設計",
@@ -169,7 +169,7 @@ def build_summary_for_radar(df: pd.DataFrame, radar_plot_name) -> pd.DataFrame:
                                                         各軸向任務最高分=("單項任務總分", "max"),
                                                         )
 
-    df_group["任務經驗值"] = np.round((np.log2(df_group["經手任務個數"])), 6)
+    df_group["任務經驗值"] = np.round((np.log10(df_group["經手任務個數"])), 6)
     df_group["單軸總分"] = np.round((df_group["各軸向任務最高分"] + df_group["任務經驗值"]), 2)
 
     # 定義邊界 (Bins) 與 對應的標籤 (Labels)

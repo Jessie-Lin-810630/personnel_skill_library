@@ -148,10 +148,10 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
 | Collaborator repos | 身為協作者的 public repos |
 
 ### ETL 設計重點
-- **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 呼叫 `/commits` 與 `/readme`；分頁器 `_paginate()` 每頁 100 筆
+- **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 獲取 brach names；逐 repo與branch 呼叫 `/commits` 與 `/readme`；分頁器 `_paginate()` 每頁 100 筆
 - **Rate Limit 控制**：每次 response 後讀取 `x-ratelimit-remaining` 與 `x-ratelimit-reset`；剩餘配額低於緩衝值（100）時，精準 sleep 至 reset 時間點；優先處理 `retry-after` header（secondary rate limit）
-- **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；README 取 base64 解碼後前 300 字；`readme_html_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
-- **Load**：以 `repo_id` 為唯一鍵 upsert；summary 以 `snapshot_date` 為鍵每日更新
+- **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；以 `if c["commit"]["committer"]["email"] == github_mail:` 過濾出committer是自己帳號的commit；README 取 base64 解碼後前 300 字；`readme_html_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
+- **Load**：存兩份文檔集，`文檔集 github_repos`以 `repo_id` 為唯一鍵 upsert；`文檔集 github_summary` 以 `snapshot_date` 為鍵每日更新
 
 ### MongoDB Collections
 
@@ -198,6 +198,7 @@ pymongo, requests, python-dotenv, loguru
 ```
 GITHUB_USERNAME=
 GITHUB_TOKEN=           # PAT (classic) 
+GITHUB_MAIL=
 MONGO_URI=
 MONGO_DB_NAME=
 ```
@@ -339,7 +340,7 @@ Google Spreadsheet：`Personal Skill Radar Calculation`
     - **影響力**
   由於生技與資料工程的複雜性欄位名稱不同，因此拆成 `build_biotech_task_docs()` 與 `build_de_task_docs()` 兩套轉換函式、分別產出兩個 DataFrame，然後再從中計算出單項任務總分後，映射出雷達軸層級 (level)後，生技與資料工程的映射結果則匯總存於同個 DataFrame，因此總計 Transform 階段有三個 DataFrames。其中此 level 會作為雷達圖的軸刻度。
 
-- **Load** : 將前次步驟產出的三個 DataFrame寫入 MongoDB 文檔集`skill_scores_biotech`、`skill_scores_data_eng`、`skill_radar_summary`。前兩個文檔集以 `雷達軸` 為 upsert 條件；文檔集skill_radar_summary則以`snapshot_date + 雷達軸 + 雷達圖名稱` 為複合 upsert 條件，支援定期快照更新。
+- **Load** : 將前次步驟產出的三個 DataFrame寫入 MongoDB 文檔集`skill_scores_biotech`、`skill_scores_data_eng`、`skill_radar_summary`。前兩個文檔集以 `雷達軸` 與 `經手任務` 為 upsert 條件；文檔集skill_radar_summary則以`snapshot_date + 雷達軸 + 雷達圖名稱` 為複合 upsert 條件，支援定期快照更新。
 
 ---
 
