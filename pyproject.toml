@@ -14,9 +14,9 @@ dependencies = [
     "loguru (>=0.7.3,<0.8.0)",
     "requests (>=2.33.1,<3.0.0)",
     "beautifulsoup4 (>=4.14.3,<5.0.0)",
-    "pygsheet (>=0.1.19b25,<0.2.0)",
     "streamlit (>=1.57.0,<2.0.0)",
     "plotly (>=6.7.0,<7.0.0)",
+    "pygsheets (>=2.0.6,<3.0.0)",
 ]
 
 
