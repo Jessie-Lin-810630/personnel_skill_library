@@ -70,3 +70,8 @@
 6. Appended the file path of JSON key to the .env file.
 7. Polished the scripts at step 5 via Claude. After that, python-logger was added to improve readability. Also, dataframe.copy() method was implemented to a little lines to prevent from `SettingWithCopyWarning`.
 8. Establish the unit tests for task05 and all the testing results are pass.
+
+# 20260511 Work log
+1. To branch `feature/etl-pipeline`, fixed the logistic transformation error about task02 that would repeatedly count the same commits in all branches so that the commit counts were overestimated.
+2. To branch `feature/etl-pipeline`, fixed the design error on the upserting in the function `upsert_skill_scores` about task05.
+3. To branch `feature/etl-pipeline`, correct the typo of label name on radar axis.
