@@ -75,8 +75,10 @@
 1. To branch `feature/etl-pipeline`, fixed the logistic transformation error about task02 that would repeatedly count the same commits in all branches so that the commit counts were overestimated.
 2. To branch `feature/etl-pipeline`, fixed the design error on the upserting in the function `upsert_skill_scores` about task05.
 3. To branch `feature/etl-pipeline`, correct the typo of label name on radar axis.
-4. Created app.py as `HOME page` via streamlit. The precomputing functions before render was defined in [dashboard_ui/utils](../dashboard_ui/utils/).
-5. Asked Codex to polish the draft of app.py. Major improvements:
+
+# 20260512 Work log
+1. Created app.py as `HOME page` via streamlit. The precomputing functions before render was defined in [dashboard_ui/utils](../dashboard_ui/utils/).
+2. Asked Codex to polish the draft of app.py. Major improvements:
 ```
     1. 面臨問題：`app.py` 有 hard-coding 靜態資料。  
     我提供的解決方向：改成調用 `dashboard_ui/utils/interact_with_mongodb.py` 內讀取 MongoDB 的函式，並生成 `app2.py`。  
