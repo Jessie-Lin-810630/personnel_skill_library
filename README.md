@@ -41,7 +41,7 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
 
             3. 部署ETL task03: 打包 task03 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task03 ETL 容器，利用 secret managers 定義的 cookies 等資訊來抓取個人刷題紀錄，經清洗生成三份文檔集`solved_problems_on_ccClub`、`solved_problems_on_leetcode` 與 `ccClub&leetcode_summary`，存入 `MongoDB Altas`。
 
-            4. 部署ETL task05: 打包 task05 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task05 ETL 容器，利用 .env 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`，存入 `MongoDB Altas`。
+            4. 部署ETL task05: 打包 task05 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task05 ETL 容器，利用 secret managers 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`，存入 `MongoDB Altas`。
 
             5. 部署streamlit web service: 打包腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run service 開啟無伺服器服務，開放8080端口監聽外部公網，根據進站流量自動水平擴展容器。
         
