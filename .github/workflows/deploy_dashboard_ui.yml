@@ -8,6 +8,7 @@ on:
       - '.streamlit/**'
       - 'docker/Dockerfile.dashboard_ui'
       - 'requirements.txt'
+      - '.github/workflows/deploy_dashboard_ui.yml'
 
 jobs:
   build-and-push:
