@@ -6,32 +6,63 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
     1. `HOME`: An overview about your personnel skills in two domains (e.g. biotechnoloy + data engineering). For each domain it represents a radar chart containing the proficieny in 5-8 subjects. In the middle layer of page, five KPI cards represent, note nodes in  Obsidian vault, experienced project amount shown on Github, finished problems about SQL on leetcode, finished problems about python on leetcode, learning progress on Udemy.
     To generate two radar charts and five KPI cards, we need to perform at least four ETL processes.
     ```
-        資料來源（ETL）          存儲                                    呈現
+        資料來源（ETL）                 存儲                               呈現
         ─────────────────────────────────────────────────────────────────────────
-        Obsidian vault     →  MongoDB                            ↘
-        （本地資料夾掃描）      （筆記 metadata）
-        GitHub API         →  MongoDB                            → Streamlit
-        （REST API 抓取）       (repo metadata& readme abstracts)  （plotly 圖表）
-                            
-        LeetCode&ccClub刷題紀錄 →  MongoDB
-        Udemy（手動輸入）    →  MongoDB
+        Obsidian vault          →  MongoDB                            
+        （本地資料夾掃描）           （筆記 metadata）
+
+        GitHub API              →  MongoDB                             Streamlit
+        （REST API 抓取）           (repo metadata& readme abstracts) （plotly 圖表）
+
+        LeetCode&ccClub刷題紀錄   →  MongoDB
+
+        Udemy（web scraping）    →  MongoDB
+
+        Personal skill          →  MongoDB
+        dashbaord (googlesheet)
     ```
     2. `Knowledge Factory`: A graph describes the technique used in this project. Some flowchart of ETL pipeline showing the steps from extracting from data sources, transformining, loading to database, data visualization and final deployment. The number of flowchart depends on the required processes. A block showning three milestones, executing the ETL and frontend web pages in docker containers on premises, deploying web service to GCP cloud run and cloud scheduler, adding Github Actions to perform CI/CD workflow.
-    ```
-    部署架構圖：
+    - 專案架構說明 (phase I - On-premise)
+        1. 開發ETL task01: 從地端 Obisidan Vault 遞迴搜尋 .md 檔，根據 frontmatter 清洗生成兩份文檔集`obsidian_notes` 與 `obsidian_summary`。[文檔集欄位設定](./doc/branch_etl_pipeline_summary.md#mongodb-collections)。phase I 的 ETL task01 在地端執行。
 
-    本地開發環境
-    └─ Docker Compose
-        ├─ streamlit app (port 8501)
-        ├─ flask api    (port 5000)
-        ├─ mongodb      (port 27017)
-        └─ mysql        (port 3306)
-            ↓ docker push
-    GCP Cloud Run
-    └─ Container Registry 存放 image
-        ├─ Cloud Scheduler（定時觸發 ETL 腳本）
-        └─ Cloud Storage（存放靜態資源）
+        2. 開發ETL task02: phase I 的 ETL task02 在地端執行，利用 .env 定義的 token 等資訊來抓取個人 public & private repo、個人參與的 public repo 的 commmit 訊息、commit 頻率、README.md file URL、README.md abstract，經清洗生成兩份文檔集`github_repos` 與 `github_summary`。 
+
+        3. 開發ETL task03: phase I 的 ETL task03 在地端執行，利用 .env 定義的 cookies 等資訊來抓取個人刷題紀錄，經清洗生成三份文檔集`solved_problems_on_ccClub`、`solved_problems_on_leetcode` 與 `ccClub&leetcode_summary`。
+
+        4. 開發ETL task05: phase I 的 ETL task05 在地端執行，利用 .env 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`。
+
+        5. 開發dashboard：phase I 的 dashboard UI 使用 python-streamlit 開發，設計三頁，主頁從 1~4 ETL 存入的文檔集做極輕量聚合計算或簡易查詢，總結個人知識、技能總結。第二頁繪製本網站 (本專案專案架構歷程)。第三頁使用obsidian md files 轉出的 MongoDB Altas 向量化資料庫，串接 AI文字摘要 與 學習地圖生成式 AI 機器人兩種 Agent。phase I 只開發頁1 & 2。
+
+    - 專案架構說明 (phase II - Deploying on GCP Cloud Run Service/Job, Secret Managers, GCS, Artifact Registry and MongoDB Altas)
+        1. 部署ETL task01: 從 Obsidian vault 手動上傳、`gsutil rsync` 或是 `git sync` .md files 至 GCS。打包 task01 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task01 ETL 容器，容器遞迴搜尋 GCS 的 .md檔，根據 frontmatter 清洗生成兩份文檔集`obsidian_notes` 與 `obsidian_summary`，存入 `MongoDB Altas`。
+
+        2. 部署ETL task02: 打包 task02 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task02 ETL 容器，利用 secret managers 定義的 token 等資訊來抓取個人 public & private repo、個人參與的 public repo 的 commmit 訊息、commit 頻率、README.md file URL、README.md abstract，經清洗生成兩份文檔集`github_repos` 與 `github_summary`，存入 `MongoDB Altas`。
+
+        3. 部署ETL task03: 打包 task03 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task03 ETL 容器，利用 secret managers 定義的 cookies 等資訊來抓取個人刷題紀錄，經清洗生成三份文檔集`solved_problems_on_ccClub`、`solved_problems_on_leetcode` 與 `ccClub&leetcode_summary`，存入 `MongoDB Altas`。
+
+        4. 部署ETL task05: 打包 task05 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task05 ETL 容器，利用 .env 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`，存入 `MongoDB Altas`。
+
+        5. 部署streamlit web service: 打包腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run service 開啟無伺服器服務，開放8080端口監聽外部公網，根據進站流量自動水平擴展容器。
+    
+    - 專案架構說明 (phase III - Establish Plugin AI agents)
+        1. 開發ETL task06: 從地端 Obisidan Vault 遞迴搜尋 .md 檔，將內容資料切塊、embedding 生成文檔集`obsidian_vectors` ， upsert 存入 `MongoDB Altas`。
+
+        2. 在 `MongDB Altas` 建立 文檔集 `chat_history`，記載 AI agent 對話紀錄。
+
+        3. 部署ETL task06: 打包 task06 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task06 ETL 容器，容器遞迴搜尋 GCS 的 .md檔，將內容資料切塊、embedding 生成文檔集`obsidian_vectors` ， upsert 存入 `MongoDB Altas`。
+
+        4. 串接語意檢索 top-K 相關筆記片段，Claude API（claude-sonnet-4）
+            - 傳入：使用者問題 + 檢索到的筆記片段
+            - 以streamlit輸出：摘要回答 / 學習地圖
+
+        5. 更新dashboard：設計第三頁，串接 AI Agent。
+
+    - 專案架構說明 (phase IV - 加入告警機制)
+        1. 設計Cloud Run Job 執行 ETL calling API 過程中，如果遇回應 403或非200，捕捉例外、發送通知（Email 或 Pub/Sub）
+
+        2. 例外原因判斷後排除問題。
     ```
+
     3. `AI knowledge agent`: A session to search for the abstract or text from your library in the vault of Obsidian. A suggesetion of learing map generated on basis of mindset that your are used. A session to automatically record the history between you and AI agent.
     ```
     Obsidian .md 檔案
@@ -48,21 +79,28 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
     ```
 - Planned technique stacks:
     1. Frontend:  Streamlit
-    2. Backend:   Python + Flask API
-    3. Database:  MongoDB
-    4. Cloud:     GCP（Cloud Run 部署容器）
+    2. Backend:   Python
+    3. Database:  MongoDB on-premise -> MongoDB Altas
+    4. Cloud:     cloud run、GCS、artifact registry
     5. Container: Docker
-    6. AI Layer:  Claude API（第三層 agent）
+    6. AI Layer:  Claude API
     7. Workflow: Github Actions
     8. tool management: pyenv + poetry
 
 - Planned branches:
     1. main     # release the branch2`develop` once it pass the tests.
+        - 週期：phase II~
     2. develop  # use Github Actions to deploy to UAT once the branches 3 `feature/*` completed.
+        - 週期：phase I~III
+        - 整合所有 features
     3. feature/etl-pipeline
+        - 週期：phase I~IV
     4. feature/dashboard-ui
-    5. feature/knowledge-factory
-    6. feature/ai-agent
+        - 週期：phase I~III
+    5. feature/ai-agent
+        - 週期：phase III~
+    6. feature/alert-monitoring  
+        - 週期：Phase IV~
 
 # Working Items
     | Week | Task description                                    |

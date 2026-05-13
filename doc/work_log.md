@@ -110,3 +110,7 @@
     Codex最後修改的方向：新增 radar label formatting，將該標籤顯示成三行，並用 label normalization 保持 hover 任務查找正常。  
     最終是否解決：Yes，app2.py 合併入 app.py
 ```
+
+# 20260513 Work log
+1. Reviewed `README.md` to consolidated the project milestone again. Defining tasks of the feature developments and deployment on cloud services clearly, and exported in the paragraph of [2. `Knowledge Factory`](../README.md).
+2. Based on the revised paragraph mentioned at 1., created the [2nd streamlit page](../dashboard_ui/pages/knowledge_factory.py). Because there were miscellaneous elements on UI of `HOME` and `Knowledge Factory` pages, the UI components were concluded in the new scripts, [ui_elements.py](../dashboard_ui/utils/ui_elements.py) in order to make the codes more readable.
