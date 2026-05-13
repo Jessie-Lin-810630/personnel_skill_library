@@ -209,3 +209,5 @@ __marimo__/
 # python scripts for testing
 tmp_test_*.py
 settings.json
+ccClub_judge.json
+googlesheet-user.json
