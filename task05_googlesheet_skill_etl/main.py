@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 from loguru import logger
 from .e_fetch_google_sheet import get_google_sheet_client, open_spreadsheet_get_worksheet
 from .t_transform_skills import (build_biotech_task_docs,
@@ -14,17 +13,15 @@ from .l_load_to_mongodb import get_db, upsert_skill_scores, upsert_skill_radar_s
 執行E、T、L。
 """
 
-load_dotenv()
-
 
 def run_task05():
     credential_file_path = os.getenv("GS_CREDENTIAL_FILE_PATH")
-    mongo_uri = os.getenv("MONGO_URI")
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([credential_file_path, mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_URI / MONGO_DB_NAME")
+        logger.error("請確認 secret manager 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 05: Google Sheet skills records ETL 開始 ===")
 

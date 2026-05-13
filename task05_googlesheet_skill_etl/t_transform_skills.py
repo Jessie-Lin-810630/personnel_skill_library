@@ -210,27 +210,3 @@ def build_combined_summaries(dfs: list[pd.DataFrame]) -> pd.DataFrame:
         df_combined = pd.concat(dfs, ignore_index=True)
         logger.success(f"Combined Radar summary rows: {len(df_combined)}")
         return df_combined
-
-
-# if __name__ == "__main__":
-#     # 測試區
-#     from .e_fetch_google_sheet import get_google_sheet_client, open_spreadsheet_get_worksheet
-#     import os
-#     from dotenv import load_dotenv
-
-#     load_dotenv()
-#     CREDENTIAL_FILE_PATH = os.getenv("GS_CREDENTIAL_FILE_PATH")
-#     client = get_google_sheet_client(CREDENTIAL_FILE_PATH)
-
-#     # E
-#     df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
-#                                                 "生技")
-#     df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
-#                                            "資料工程")
-
-#     # T
-#     df_biotech_stats = build_biotech_task_docs(df_biotech, BIOTECH_RADAR_LABELS)
-#     df_de_stats = build_de_task_docs(df_de, DE_RADER_LABELS)
-#     df_both_summary = build_combined_summaries([build_summary_for_radar(df_biotech_stats, "雷達圖1生技"),
-#                                                build_summary_for_radar(df_de_stats, "雷達圖2資料工程")
-#                                                 ])

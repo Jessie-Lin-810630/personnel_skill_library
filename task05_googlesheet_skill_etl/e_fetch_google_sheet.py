@@ -2,7 +2,6 @@ import pygsheets
 from pygsheets.client import Client
 import pandas as pd
 import os
-from dotenv import load_dotenv
 from loguru import logger
 
 
@@ -36,16 +35,3 @@ def open_spreadsheet_get_worksheet(client: Client,
         logger.success(
             f"Successfully opened the spreadsheet/worksheet '{spdsheets.title}/{worksheet_title}'")
         return df
-
-
-# if __name__ == "__main__":
-#     # 測試區
-#     load_dotenv()
-
-#     CREDENTIAL_FILE_PATH = os.getenv("GS_CREDENTIAL_FILE_PATH")
-#     client = get_google_sheet_client(CREDENTIAL_FILE_PATH)
-
-#     df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
-#                                                 "生技")
-#     df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
-#                                            "資料工程")
