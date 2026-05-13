@@ -35,7 +35,7 @@ def _format_radar_label(label):
     if label == "製程技術 (細胞分注、反應器操作) 操作能力":
         return "製程技術<br>(細胞分注、反應器操作)<br>操作能力"
     elif label == "ETL/ELT pipeline 操作與維護":
-        return "ETL/ELT pipeline 操作與維護"
+        return "ETL/ELT pipeline <br>操作與維護"
     return label
 
 
