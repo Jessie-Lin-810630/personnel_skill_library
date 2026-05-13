@@ -40,15 +40,3 @@ def build_summary_document(raw_notes: list[dict]) -> dict:
                           }
     logger.success(f"Built summary documents for {len(summary_notes_docs)} notes.")
     return summary_notes_docs
-
-
-if __name__ == "__main__":
-    # 測試區：
-    import e_scan_obsidian
-
-    e_scan_obsidian.load_dotenv()
-    obsidian_vault_path = e_scan_obsidian.os.getenv("OBSIDIAN_VAULT_PATH")
-    raw_notes = e_scan_obsidian.scan_vault(obsidian_vault_path)
-    # print(build_note_documents(raw_notes)[0])
-    summary = build_summary_document(raw_notes)
-    print(summary)
