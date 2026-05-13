@@ -7,6 +7,7 @@ on:
       - 'task03_leetcode_ccClub_etl/**'
       - 'docker/Dockerfile.task03'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task03_leetcode_ccClub_etl.yml'
 
 jobs:
   build-and-push:
