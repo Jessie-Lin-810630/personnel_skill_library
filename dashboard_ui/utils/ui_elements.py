@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 import textwrap
-from dashboard_ui.utils.precomputing import (_normalize_radar_label)
+from utils.precomputing import (_normalize_radar_label)
 
 # ─────────────────────────────────────────
 # Plotly 色條
@@ -15,7 +15,8 @@ color_map = dict(BG="#0d1526",
                  PINK="#ff6dbd",
                  FONT_CLR="#e0e8f8",
                  ORANGE="#f97316",
-                 WHITE="#ffffff",)
+                 WHITE="#ffffff",
+                 LIGHTBLUE="#90c2ff")
 
 plotly_layout_base = dict(
     paper_bgcolor="rgba(0,0,0,0)",  # 代表完全透明 (Alpha = 0)
@@ -23,6 +24,19 @@ plotly_layout_base = dict(
     font=dict(color=color_map["FONT_CLR"], family="sans-serif"),
     margin=dict(l=10, r=10, t=30, b=10),
 )
+
+# ─────────────────────────────────────────
+# UI 元件定義
+# ─────────────────────────────────────────
+
+
+def _render_side_bar():
+    """Customize demonstrating style of the nevigation bar after switch off 
+        `showSidebarNavigation` in .streamlit/config.toml.
+    """
+    st.sidebar.page_link("app.py", label="HOME", icon="🏠")
+    st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
+    return None
 
 
 def _wrap_hover_text(text: str, width=27):
