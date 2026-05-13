@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY dashboard_ui/ ./dashboard_ui/
 COPY .streamlit/ ./.streamlit/
 
-# Streamlit預設監聽8501，
+# Streamlit預設監聽8501
 # 但因為以後要遷移streamlit到cloud run執行，為了配合cloud Run習慣，在啟動指令中指定監聽8080
 EXPOSE 8080
 
