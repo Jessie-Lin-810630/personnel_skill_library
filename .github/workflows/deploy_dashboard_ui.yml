@@ -33,7 +33,7 @@ jobs:
         run: |
           docker build \
             --platform=linux/amd64 \
-            -f docker/Dockerfile.dashboard \
+            -f docker/Dockerfile.dashboard_ui \
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/dashboard-ui:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/dashboard-ui:latest
