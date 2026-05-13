@@ -73,21 +73,3 @@ def build_leetcode_summary_partial(feature_docs: list[dict],
     logger.success(
         f"Built documents for partial summarizing {len(partial_summary_docs_leetcode)} problems on leetcode.")
     return partial_summary_docs_leetcode
-
-
-if __name__ == "__main__":
-    import e_query_leetcode_graphql
-
-    # 拼出 headers
-    e_query_leetcode_graphql.load_dotenv()
-    csrf_token = e_query_leetcode_graphql.os.getenv("CSRF_TOKEN")
-    leetcode_session = e_query_leetcode_graphql.os.getenv("LEETCODE_SESSION")
-    username = e_query_leetcode_graphql.os.getenv("LEETCODE_USERNAME")
-    headers = e_query_leetcode_graphql._get_headers(csrf_token, leetcode_session, username)
-
-    raw_solved_problem_stats = e_query_leetcode_graphql.fetch_solved_problem_stats(headers, username)
-    raw_solved_problem_feat = e_query_leetcode_graphql.fetch_solved_problems_features(headers)
-    feature_docs = build_problem_feat_documents(raw_solved_problem_feat)
-    summary_docs_leetcode = build_leetcode_summary_partial(feature_docs, raw_solved_problem_stats)
-    print(feature_docs)
-    print(summary_docs_leetcode)

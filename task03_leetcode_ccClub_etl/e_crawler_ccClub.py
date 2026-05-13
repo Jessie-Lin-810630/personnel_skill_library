@@ -2,7 +2,6 @@ import time
 import requests
 from requests import Session
 from loguru import logger
-from dotenv import load_dotenv
 import os
 
 
@@ -21,7 +20,6 @@ Extract：透過 ccClub Judge REST API 抓取已解題清單。拜訪四次 Endp
 - fetch_all_solved_problems() : 整合上方兩支函式，回傳 raw problem list
 """
 
-load_dotenv()
 
 CCCLUB_BASE_URL = "https://judge.ccclub.io/api"
 
@@ -36,8 +34,8 @@ def _get_session_and_headers() -> tuple[Session, dict]:
     password = os.getenv("CCCLUB_PASSWORD")
 
     if not all([username, password]):
-        logger.error("缺乏登入必要資訊，請確認 .env 已設定 CCCLUB_USERNAME / CCCLUB_PASSWORD")
-        raise EnvironmentError("請確認 .env 已設定 CCCLUB_USERNAME / CCCLUB_PASSWORD")
+        logger.error("缺乏登入必要資訊，請確認 secret manager 已設定 CCCLUB_USERNAME / CCCLUB_PASSWORD")
+        raise EnvironmentError("請確認 secret manager 已設定 CCCLUB_USERNAME / CCCLUB_PASSWORD")
 
     # 建立 Session，它會自動記錄登入後的 Cookie
     session = requests.Session()

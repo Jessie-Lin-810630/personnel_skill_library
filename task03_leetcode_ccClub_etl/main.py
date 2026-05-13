@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 from loguru import logger
 from pymongo import MongoClient
 
@@ -15,21 +14,20 @@ from .l_load_ccClub_doc_to_mongodb import upsert_ccclub_problems, upsert_ccclub_
 """
 一次執行 Task 3-A：LeetCode GraphQL ETL。
 """
-load_dotenv()
 
 
 def run_task03_leetcode() -> None:
     username = os.getenv("LEETCODE_USERNAME")
     session = os.getenv("LEETCODE_SESSION")
     csrf_token = os.getenv("CSRF_TOKEN")
-    mongo_uri = os.getenv("MONGO_URI")
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([username, session, csrf_token, mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-                     "LEETCODE_CSRF_TOKEN / MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-                               "LEETCODE_CSRF_TOKEN / MONGO_URI / MONGO_DB_NAME"
+        logger.error("請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
+                     "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
+                               "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
                                )
 
     logger.info("=== Task 3-A: LeetCode GraphQL ETL 開始 ===")
@@ -57,12 +55,12 @@ def run_task03_leetcode() -> None:
 
 
 def run_task03_ccclub() -> None:
-    mongo_uri = os.getenv("MONGO_URI")
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
+        logger.error("請確認  secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 3-B: ccClub ETL 開始 ===")
 
@@ -87,5 +85,5 @@ def run_task03_ccclub() -> None:
 
 
 if __name__ == "__main__":
-    # run_task03_leetcode()
+    run_task03_leetcode()
     run_task03_ccclub()

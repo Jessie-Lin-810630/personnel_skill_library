@@ -3,7 +3,6 @@ import os
 import time
 import requests
 from loguru import logger
-from dotenv import load_dotenv
 
 
 LEETCODE_GRAPHQL_URL = "https://leetcode.com/graphql/"
@@ -211,16 +210,3 @@ def _login_and_get_csrf(account, password):
     new_csrf = session.cookies.get("CSRF_TOKEN")
     leetcode_session = session.cookies.get("LEETCODE_SESSION")
     return csrf_token, new_csrf, leetcode_session
-
-
-if __name__ == "__main__":
-    # 測試區
-    # 拼出 headers
-    load_dotenv()
-    csrf_token = os.getenv("CSRF_TOKEN")
-    leetcode_session = os.getenv("LEETCODE_SESSION")
-    username = os.getenv("LEETCODE_USERNAME")
-    headers = _get_headers(csrf_token, leetcode_session, username)
-
-    print(fetch_solved_problem_stats(headers, username))
-    print(fetch_solved_problems_features(headers))
