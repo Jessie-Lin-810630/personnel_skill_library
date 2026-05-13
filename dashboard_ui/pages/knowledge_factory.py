@@ -174,7 +174,7 @@ for task in ETL_TASKS:
 # ─────────────────────────────────────────
 # SECTION 3 — 專案架構演進
 # ─────────────────────────────────────────
-st.header("🗺 Four mildstones 專案架構演進時程")
+st.header("🗺 Four milestones 專案架構演進時程")
 
 PHASES = {
     "Phase I": {
