@@ -33,6 +33,6 @@ jobs:
           docker build \
             --platform=linux/amd64 \
             -f docker/Dockerfile.task03 \
-            -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccClub-etl:latest \
+            -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccclub-etl:latest \
             .
-          docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccClub-etl:latest
+          docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccclub-etl:latest
