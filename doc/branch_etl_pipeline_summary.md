@@ -150,7 +150,7 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
 ### ETL 設計重點
 - **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 獲取 brach names；逐 repo與branch 呼叫 `/commits` 與 `/readme`；分頁器 `_paginate()` 每頁 100 筆
 - **Rate Limit 控制**：每次 response 後讀取 `x-ratelimit-remaining` 與 `x-ratelimit-reset`；剩餘配額低於緩衝值（100）時，精準 sleep 至 reset 時間點；優先處理 `retry-after` header（secondary rate limit）
-- **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；以 `if c["commit"]["committer"]["email"] == github_mail:` 過濾出committer是自己帳號的commit；README 取 base64 解碼後前 300 字；`readme_html_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
+- **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；以 `if c["commit"]["committer"]["email"] == github_mail:` 過濾出committer是自己帳號的commit；README 取 base64 解碼後前 300 字；`readme_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
 - **Load**：存兩份文檔集，`文檔集 github_repos`以 `repo_id` 為唯一鍵 upsert；`文檔集 github_summary` 以 `snapshot_date` 為鍵每日更新
 
 ### MongoDB Collections
@@ -167,10 +167,10 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
   "role": "owner",
   "created_at": "2024-01-01T00:00:00Z",
   "pushed_at": "2025-04-23T10:00:00Z",
-  "commit_count": 42,
+  "commit_counts": 42,
   "commits": [{ "sha": "abc123", "message": "init: scaffold ETL structure", "committed_at": "2025-04-20T09:00:00Z" }],
   "readme_summary": "This project is an ETL pipeline...",
-  "readme_html_url": "https://github.com/yourname/etl-pipeline/blob/main/README.md",
+  "readme_url": "https://github.com/yourname/etl-pipeline/blob/main/README.md",
   "topics": ["etl", "python", "mongodb"],
   "stars": 0,
   "fetched_at": "2026-04-28T10:00:00Z"
