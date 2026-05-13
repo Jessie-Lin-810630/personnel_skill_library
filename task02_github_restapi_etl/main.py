@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 from loguru import logger
 from .e_request_github_api import (_get_headers,
                                    fetch_repos,
@@ -13,20 +12,19 @@ from .l_load_to_mongodb import get_db, upsert_repos, upsert_repo_summary
 一次執行E、T、L。
 """
 
-load_dotenv()
-
 
 def run_task02() -> None:
     git_token = os.getenv("GITHUB_TOKEN")
     git_username = os.getenv("GITHUB_USERNAME")
     git_mail = os.getenv("GITHUB_MAIL")
     headers = _get_headers(git_token, git_username)
-    mongo_uri = os.getenv("MONGO_URI")
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([git_token, git_username, mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_URI / MONGO_DB_NAME")
+        logger.error("請確認 secret managers 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError(
+            "請確認 secret managers 已設定 GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 2: GitHub REST API ETL 開始 ===")
 

@@ -4,7 +4,6 @@ import time
 from loguru import logger
 import requests
 import os
-from dotenv import load_dotenv
 
 
 """
@@ -24,7 +23,6 @@ Extract：透過 GitHub REST API 的多個 endpoints 分別抓取
 """
 
 BASE_URL = "https://api.github.com"  # 根據後綴字拼接出不同 endpoint URL
-load_dotenv()
 
 
 def _get_headers(token: str, username: str) -> dict:
@@ -215,27 +213,3 @@ def fetch_a_repo_readme(owner: str,
               }
     logger.success(f"Completed requesting the README.md of {repo_name}.")
     return readme
-
-
-if __name__ == "__main__":
-    # 測試區：
-
-    # 拼湊 headers
-    git_token = os.getenv("GITHUB_TOKEN")
-    git_username = os.getenv("GITHUB_USERNAME")
-    headers = _get_headers(git_token, git_username)
-
-    # 以 headers 抓取所有 repos，回傳 list of dicts
-    all_repos = fetch_repos(headers)
-
-    # 先用一個 repo 測試，確認能夠進一步請求到 commits 與 README
-    # 測試前需要擷取repo_name 與 owner 供下面兩支函式
-    repo_name = all_repos[0].get("name")
-    owner = all_repos[0].get("owner", {}).get("login")
-
-    # 測試找尋該 repo 下的 branches
-    branch_list = fetch_all_branches(owner, repo_name, headers)
-
-    # 測試 commits 與 README endpoint 正常回傳資料
-    repo_commits = fetch_a_repo_commits(owner, repo_name, headers, branch_list)
-    # repo_reame = fetch_a_repo_readme(owner, repo_name, headers)
