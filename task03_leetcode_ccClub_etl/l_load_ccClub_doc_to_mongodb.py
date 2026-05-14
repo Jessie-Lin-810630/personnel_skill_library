@@ -27,11 +27,17 @@ def upsert_ccclub_problems(db, problem_docs: list[dict]) -> None:
                                     upsert=True,
                                     )
                           )
-    result = collection.bulk_write(operations)
-    logger.success(f"solved_problems_on_ccClub upsert 完成 | "
-                   f"新增: {result.upserted_count} | 更新: {result.modified_count}"
-                   )
-    return None
+    try:
+        if not operations:
+            print("No operations to perform, skipping bulk_write.")
+            return None
+        result = collection.bulk_write(operations)
+        logger.success(f"solved_problems_on_ccClub upsert 完成 | "
+                       f"新增: {result.upserted_count} | 更新: {result.modified_count}"
+                       )
+    except Exception as e:
+        print(f"Bulk write failed! Error: {e}")
+        raise
 
 
 def upsert_ccclub_summary_partial(db, summary_partial: dict) -> None:
