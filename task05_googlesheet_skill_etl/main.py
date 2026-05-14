@@ -26,7 +26,7 @@ def run_task05():
     logger.info("=== Task 05: Google Sheet skills records ETL 開始 ===")
 
     # Extract
-    client = get_google_sheet_client(CREDENTAIL_JSONS_FROM_ENVAR=google_sheet_key)
+    client = get_google_sheet_client(CREDENTAIL_JSONS_FROM_ENVAR="GOOGLE_SHEET_KEY")
     df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
                                                 "生技")
     df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
