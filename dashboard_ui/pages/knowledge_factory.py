@@ -44,15 +44,15 @@ st.markdown(f"""
         Knowledge Factory
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
-        專案架構 — 不斷演進、不斷學習
+        本站專案架構 — 持續演進、不斷學習
     </p>
     <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
         <a href="https://github.com/Jessie-Lin-810630"
         target="_blank"
         style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
-        Github
+        認識我: Github
         </a>
-        <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+        <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130"
         target="_blank"
         style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
           |  LinkedIn
@@ -67,7 +67,7 @@ st.markdown(f"""
 st.header("🛠 Tech. Stack 技術堆疊")
 
 stacks = [
-    ("Frontend",        "Python-Streamlit"),
+    ("Frontend",        "Python-Streamlit, Figma"),
     ("Backend",         "Python, Python-Pymongo"),
     ("Database",        "MongoDB Atlas"),
     ("Container",       "Docker"),
@@ -75,7 +75,8 @@ stacks = [
                         "<br>Cloud Run Jobs, GCS, "
                         "<br>Pub/Sub, Artifact Registry"),
     ("CI/CD",           "GitHub Actions"),
-    ("AI Layer",        "TBD"),
+    ("AI Layer",        "Chat Agent for knowledge summary: TBD<br>"
+                        "SQL Agent for querying skill KPI"),
     ("Tool Management", "pyenv, poetry"),
 ]
 
@@ -123,7 +124,7 @@ st.header("⚙️ ETL Pipeline 數據管道 x 5")
 ETL_TASKS = [
     {
         "icon": "📝", "title": "Obsidian ETL", "badge": "task01",
-        "flow": "Obsidian Vault (.md) 遞迴掃描  →  frontmatter 解析  →  清洗  →  🗄 MongoDB",
+        "flow": "Google storage lake → Obsidian Vault (.md) 遞迴掃描  →  frontmatter 解析  →  清洗  →  🗄 MongoDB",
         "tags": ["obsidian_notes", "obsidian_summary"],
     },
     {
@@ -143,7 +144,7 @@ ETL_TASKS = [
     },
     {
         "icon": "🧠", "title": "Vector Embedding ETL", "badge": "task06",
-        "flow": "Obsidian Vault (content)  →  文檔切塊  →  text-embedding-004  →  向量化  →  🗄 MongoDB Atlas",
+        "flow": "Obsidian Vault (content)  →  文檔切塊  →  向量化  →  🗄 MongoDB Atlas",
         "tags": ["obsidian_vectors", "obsidian_metadata", "chat_history"],
     },
 ]
@@ -223,7 +224,7 @@ PHASES = {
         "name": "告警與監控",
         "desc": "ETL 失敗通知 + Cookie 過期管理",
         "items": [
-            ("ETL 失敗捕捉", "Cloud Run Job 回傳非 200 / 403 時捕捉例外"),
+            ("ETL 失敗捕捉", "Cloud Run Job 回傳非 200 / 403 時捕捉例外，使用 Log explorer 追溯例外紀錄"),
             ("Pub/Sub + Email 通知", "觸發 Pub/Sub topic，為資料工程師寄送告警 Email"),
             ("Secret Manager 更新流程", "cookie 過期時手動更新 Secrets，Job 標記失敗易於追蹤"),
             ("GCP Console 監控", "Cloud Run Job 執行狀態紅色標記，配合 Log Explorer 除錯"),],
@@ -335,7 +336,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown(f"""
 <div style="text-align:center; color:{color_map["FONT_CLR"]} font-size:1.1rem; padding:1rem 0;">
     💗 Feel free to reach out me on 
-    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
+    <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
        target="_blank" 
        style="color:#90c2ff; text-decoration:none;">
        LinkedIn
