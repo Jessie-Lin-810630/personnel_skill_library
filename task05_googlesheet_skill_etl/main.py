@@ -15,18 +15,18 @@ from .l_load_to_mongodb import get_db, upsert_skill_scores, upsert_skill_radar_s
 
 
 def run_task05():
-    credential_file_path = os.getenv("GS_CREDENTIAL_FILE_PATH")
+    google_sheet_key = os.getenv("GOOGLE_SHEET_KEY")
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
-    if not all([credential_file_path, mongo_uri, db_name]):
-        logger.error("請確認 secret manager 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_ALTAS_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 secret manager 已設定 GS_CREDENTIAL_FILE_PATH / MONGO_ALTAS_URI / MONGO_DB_NAME")
+    if not all([google_sheet_key, mongo_uri, db_name]):
+        logger.error("請確認 secret manager 已設定 GOOGLE_SHEET_KEY / MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 GOOGLE_SHEET_KEY / MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 05: Google Sheet skills records ETL 開始 ===")
 
     # Extract
-    client = get_google_sheet_client(credential_file_path)
+    client = get_google_sheet_client(CREDENTAIL_JSONS_FROM_ENVAR=google_sheet_key)
     df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
                                                 "生技")
     df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation",
