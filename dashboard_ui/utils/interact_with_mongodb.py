@@ -3,19 +3,15 @@ from pymongo import MongoClient, UpdateOne
 from pymongo.collection import Collection
 from loguru import logger
 import os
-from dotenv import load_dotenv
-
-
-load_dotenv()
 
 
 def get_db():
-    mongo_uri = os.getenv("MONGO_URI")
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
+        logger.error("請確認 Secert Manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 Secert Manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     client = MongoClient(mongo_uri)
     return client[db_name]
