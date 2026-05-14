@@ -148,16 +148,16 @@ st.markdown(f"""
         Jessie Lin 生技製藥 x 資料工程雙棲夢
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
-        我是 Jessie，一個沈浸8年生技製藥產業，領悟對數據的熱忱，並且在未來10年追求極致有效率的資料治理工程的化工人。<br>
+        I am Jessie，一個沈浸8年生技製藥產業，領悟對數據的熱忱，並且在未來10年追求極致有效率的資料治理工程的化工人。<br>
         這裡紀錄著我的學習歷程、工作產出，與知識庫。
     </p>
     <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
         <a href="https://github.com/Jessie-Lin-810630" 
         target="_blank" 
         style="color:#90c2ff; text-decoration:none;">
-        Github
+        認識我: Github
         </a>
-        <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
+        <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
         target="_blank" 
         style="color:#90c2ff; text-decoration:none;">
           |  LinkedIn
@@ -442,7 +442,7 @@ st.markdown("""
        style="color:#90c2ff; text-decoration:none;">
        Github
     </a> | Personal Obsidian Vault | ccClub.io 💗 Feel free to reach out me on 
-    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
+    <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
        target="_blank" 
        style="color:#90c2ff; text-decoration:none;">
        LinkedIn
