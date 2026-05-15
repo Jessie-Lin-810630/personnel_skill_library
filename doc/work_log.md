@@ -114,3 +114,34 @@
 # 20260513 Work log
 1. Reviewed `README.md` to consolidated the project milestone again. Defining tasks of the feature developments and deployment on cloud services clearly, and exported in the paragraph of [2. `Knowledge Factory`](../README.md).
 2. Based on the revised paragraph mentioned at 1., created the [2nd streamlit page](../dashboard_ui/pages/knowledge_factory.py). Because there were miscellaneous elements on UI of `HOME` and `Knowledge Factory` pages, the UI components were concluded in the new scripts, [ui_elements.py](../dashboard_ui/utils/ui_elements.py) in order to make the codes more readable.
+3. Create contexts to cowork with Claue API in the next stage.
+    ```markdown
+    ---
+    # Phase II 部署工作啟動前提
+    ## 專案背景
+    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）  
+    **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）  
+    **目前狀態**：Phase I 已完成，進入 Phase II 雲端部署階段
+
+    ## 已完成的 Phase I 成果
+    **Branch `feature/etl-pipeline`**：
+    - ETL task01 (Obsidian.md 存 metadata 與 content)
+    - ETL task02 (GitHub REST API 獲取 repository 資料)
+    - ETL task03（LeetCode GraphQL API 獲取取刷題進度 + ccClub 取得刷題進度）
+    - ETL task05 (Google Sheets Skill 盤點表，獲取技能經驗值並清洗後量化)
+    **Branch `feature/dashboard-ui`**：
+    - Streamlit 兩頁式 dashboard
+        - **`dashboard_ui/app.py`**（第一頁主頁Home，描述 KPI / 雷達圖 / GitHub cards / 刷題統計）
+        - **`dashboard_ui/pages/knowledge_factory.py`**（第二頁，此專案架構繪製頁）
+    - functions as utils：
+        - **`dashboard_ui/utils/interact_with_mongodb.py`**
+        - **`dashboard_ui/utils/precomputing.py`**
+        - **`dashboard_ui/utils/ui_elements.py`**
+    **資料庫**：地端 MongoDB localhost
+    **credentials**: 使用 `.env` file
+    --
+    ```
+4. Created the [hand-over](branch_developd_gcp_deploy_hand_over.md) of GCP deployment procedures in phase II.
+
+5. Until 20260514, some questions might be solved or optimized:
+    - 經由 Git Actions push到Artifact registry 進版 image 後，如何確保 cloud run jobs 下次啟動容器時是使用最新版的 image?目前是手動進入 GCP console 更改 job configuration，指定最新版 (latest) 的容器。
