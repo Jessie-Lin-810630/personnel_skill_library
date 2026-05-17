@@ -41,7 +41,7 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
 
             3. 部署ETL task03: 打包 task03 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task03 ETL 容器，利用 secret managers 定義的 cookies 等資訊來抓取個人刷題紀錄，經清洗生成三份文檔集`solved_problems_on_ccClub`、`solved_problems_on_leetcode` 與 `ccClub&leetcode_summary`，存入 `MongoDB Altas`。
 
-            4. 部署ETL task05: 打包 task05 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task05 ETL 容器，利用 .env 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`，存入 `MongoDB Altas`。
+            4. 部署ETL task05: 打包 task05 腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run job 開啟 task05 ETL 容器，利用 secret managers 定義的 key 等資訊來抓取 google sheet 上的技能雷達資訊，經清洗生成三份文檔集`skill_scores_biotech`、`skill_scores_data_eng` 與 `skill_radar_summary`，存入 `MongoDB Altas`。
 
             5. 部署streamlit web service: 打包腳本透過GitActions 打包成 image，推送到 artifact registry，而後使用 cloud run service 開啟無伺服器服務，開放8080端口監聽外部公網，根據進站流量自動水平擴展容器。
         
@@ -78,14 +78,16 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
             └─ st.chat_message + st.chat_input
         ```
 # Planned technique stacks:
-    1. Frontend:  Streamlit
-    2. Backend:   Python
-    3. Database:  MongoDB on-premise -> MongoDB Altas
-    4. Cloud:     cloud run、GCS、artifact registry
-    5. Container: Docker
-    6. AI Layer:  Claude API
-    7. Workflow: Github Actions
-    8. tool management: pyenv + poetry
+| layer           	| tool                                                               	|
+|-----------------	|--------------------------------------------------------------------	|
+| frontend        	| python-streamlet, figma                                            	|
+| backend         	| python, python-pymongo                                             	|
+| database        	| MongoDB Atlas（Phase II 起）                                       	|
+| Container       	| docker                                                             	|
+| cluoud service  	| GCP：Cloud Run Service/Job、GCS、Secret Manager、Artifact Registry 	|
+| CI/CD           	| GitHub Actions                                                     	|
+| Tool Management 	| pyenv + poetry                                                     	|
+| AI layer        	| Chat Agent + NL2SQL: all TBD                                    	|
 
 # Planned branches:
     1. main     # release the branch2`develop` once it pass the tests.
@@ -103,10 +105,11 @@ Customize and demonstrate a personnel skill dashboard with AI-agent serving as l
         - 週期：Phase IV~
 
 # Working Items
-    | Week | Task description                                    |
-    |------|-----------------------------------------------------|
-    | 1-2  | 建 Docker Compose 環境，寫 Obsidian/GitHub ETL 腳本   |
-    | 3-4  | 完成第一層 Streamlit 頁面與圖表                        |
-    | 5    | 完成第二層架構圖與進度看板                              |
-    | 6-8  | 建立向量索引，串接 Claude API，完成第三層                |
-    | 9    | Docker 打包，部署 GCP Cloud Run                      |
+| Week | Task description                                    |
+|------|-----------------------------------------------------|
+| 1-2  | 建 Docker Compose 環境，寫 Obsidian/GitHub ETL 腳本   |
+| 3-4  | 完成第一層 Streamlit 頁面與圖表                        |
+| 5    | 完成第二層架構圖與進度看板                              |
+| 5-6  | Docker 打包，第一次部署 MongoDB Altas 與 GCP Cloud Run |
+| 6-8  | 建立向量索引，串接 Chat Agent + NL2SQL，完成第三層       |
+| 9    | 第二次部署 GCP Cloud Run                             |
