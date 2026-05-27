@@ -46,6 +46,11 @@ feature/etl-pipeline/
 │   ├── l_load_to_mongodb.py     # 寫入 MongoDB collections
 │   └── main.py                  # 串接 Extract / Transform / Load 流程
 │
+├──task06_obsidian_embed_etl
+│   ├── t_chunk_embed.py.        # 沿用task01_obsidian_etl/e_scan_obsidian.py腳本直接做向量化。
+│   ├── l_upsert_vectors.py     # 寫入 MongoDB collections
+│   └── main.py                  # 串接 Extract / Transform / Load 流程
+
 └── tests/
     ├── test_task01_obsidian_etl.py
     ├── test_task02_github_restapi_etl.py
