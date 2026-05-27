@@ -504,12 +504,100 @@ MONGO_DB_NAME=
 
 ---
 
-## 待辦事項（Task 04 以後）
+## Task 06 — Obsidian Vector DB ETL
 
-- [ ] **Task 04**：Udemy 學習歷程 ETL（購買課程數、觀看進度）→ 存入 MySQL
-- [ ] **Task 06**：Docker Compose 容器化（MongoDB + MySQL + 4 支 ETL 腳本），並 export `requirements.txt` + `Dockerfile` + `docker-compose.yml`
-- [ ] **Streamlit Dashboard**：以上述 MongoDB collections 為資料來源，繪製雙雷達圖、KPI 卡片、圓餅圖
+### 資料來源
+Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault_gs()` 掃描 bucket 內三類 Obsidian `.md` 檔案 metadata，再依 `file_path` 重新下載 Markdown 內文做 chunking 與 embedding。
+
+| 資料夾前綴 | note_type |
+|-----------|-----------|
+| `01_` | `daily-log` |
+| `02_` | `knowledge-summary` |
+| `04_` | `project` |
+
+### ETL 設計重點
+- **Extract**：沿用 `task01_obsidian_etl.e_scan_obsidian.scan_vault_gs("personal-vaults")` 取得每份筆記的 `file_path`、`file_name`、`tags`、`note_type`、`date` 等 metadata；再由 task06 新函式 `fetch_gcs_note_content()` 使用 `google.cloud.storage.Client()` 依 `file_path` 從 GCS 下載原始 Markdown，並以 `python-frontmatter` 去除 frontmatter，只保留 body 文字
+- **Transform**：`preprocess_obsidian_content()` 清理 Obsidian block ID、圖片嵌入與 wiki-link 語法；`chunk_markdown()` 先用 `MarkdownHeaderTextSplitter` 依 H1-H4 保留段落上下文，再用 `RecursiveCharacterTextSplitter` 以 `chunk_size=800`、`chunk_overlap=100` 做中文友善切塊；`embed_chunks_a_mardown()` 批次呼叫 OpenAI `text-embedding-3-small` 產生 1536 維向量
+- **Load**：`upsert_vectors()` 將所有 chunk documents 分批寫入 MongoDB Atlas 的 `obsidian_vectors` collection；以 `file_path + chunk_index` 作為唯一鍵 upsert，支援重複執行後更新既有 chunk
+
+### Obsidian 語法清理規則
+
+| 原始語法 | 處理方式 | 說明 |
+|----------|----------|------|
+| `^8e5a21` | 移除 | Obsidian block ID 僅作內部引用，對語意檢索無直接價值 |
+| `![[image.png]]` | 移除 | 目前使用文字 embedding model，尚未向量化圖片內容 |
+| `[[note｜alias]]` | 保留 `alias` | 優先保留 alias，讓 chunk 文字更接近閱讀語意 |
+| `[[note]]` | 保留 `note` | 無 alias 時保留連結名稱 |
+
+### Chunking 策略
+
+| 階段 | 工具 | 設定 | 用途 |
+|------|------|------|------|
+| Header split | `MarkdownHeaderTextSplitter` | `#`、`##`、`###`、`####` | 依 Markdown 標題拆出語意段落，並產生 `section` 路徑 |
+| Character split | `RecursiveCharacterTextSplitter` | `chunk_size=800`、`chunk_overlap=100` | 避免單一段落過長，並用重疊保留上下文 |
+| Separators | Recursive splitter | `\n\n`、`\n`、`。`、`，`、空白、空字串 | 對中文筆記較友善的切分順序 |
+
+### MongoDB Collections
+
+**`obsidian_vectors`**（每筆 = 一份 Obsidian 筆記的一個 chunk）
+```json
+{
+  "file_path": "02_knowledge-base/database/mysql-note.md",
+  "file_name": "mysql-note.md",
+  "chunk_index": 0,
+  "chunk_total": 6,
+  "tags": ["MySQL", "database"],
+  "note_type": "knowledge-summary",
+  "date": "2026-04-13",
+  "section": "MySQL 筆記 > DQL 敘述比較",
+  "content": "SELECT 查詢語句可以搭配 WHERE、GROUP BY 與 ORDER BY...",
+  "embedding": [0.0123, -0.0045, 0.0312]
+}
+```
+
+### Atlas Vector Search Index
+
+`obsidian_vectors` 預期搭配 MongoDB Atlas Vector Search index 使用：
+
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 1536,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "tags"
+    },
+    {
+      "type": "filter",
+      "path": "note_type"
+    }
+  ]
+}
+```
+
+### 套件依賴
+```
+pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage, openai, langchain-text-splitters
+```
+
+### .env 金鑰
+```
+GOOGLE_APPLICATION_CREDENTIALS=
+OPENAI_API_KEY=
+MONGO_ALTAS_URI=
+MONGO_DB_NAME=
+```
 
 ---
 
-*本摘要由 `feature/etl-pipeline` 分支第一層開發完成時，創建 dashboard UI 前匯出。*
+## 此分支待辦事項（Task 04）
+
+- [ ] **Task 04**：Udemy 學習歷程 ETL（購買課程數、觀看進度）→ 存入 MySQL
+---
+
+*本摘要由 `feature/etl-pipeline` 分支 task01 - 04 開發完成且於 `feature/dashboard-ui` 分支創建 dashboard UI 後完成，而後再於新增了 task 06 後擴充摘要。*

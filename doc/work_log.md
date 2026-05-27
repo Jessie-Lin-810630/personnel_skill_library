@@ -1,4 +1,19 @@
-# 20260423 Work log
+# 循環改進處、遇到過的問題彙整
+## ♻️ 改進中
+- README 與專案結構文件仍需隨任務演進持續修訂，包含各 ETL 任務產出的 MongoDB collection schema 與 Phase IV 部署里程碑。
+- Task03 LeetCode GraphQL API 缺少正式文件，且依賴 `LEECODE_SESSION` 與 CSRF token；cookie 過期會導致 403，雲端部署前需評估自動更新或替代認證流程。
+- Task06 RAG/embedding 方案已先選用 `text-embedding-3-small`，但若未來需要處理圖片或多模態資料，仍需重新評估 Gemini Embedding 或 MongoDB Atlas/Voyage 自動 embedding。
+- Task06 vector upsert 目前若筆記重新切塊後 chunk 數量減少，舊 chunk 不會自動刪除；未來資料量增加時可在 upsert 前先依 `file_path` 清除舊 chunks 再重新寫入。
+- Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
+
+## ✅ 已解決
+- Task02 GitHub REST API 需要處理 rate limit，以及 409、429、403 等例外狀態的邏輯；後續維護時仍須留意 API 規格與錯誤處理策略。
+- Task02 曾發生 GitHub commit 統計在多分支中重複計算的邏輯錯誤，已修正，但後續新增統計指標時需避免相同資料被重複聚合。
+- Task03 ccClub 資料抓取依賴 CSRF token、帳號與密碼，需持續注意登入流程、token 取得方式與憑證管理。
+- Task05 Google Sheets ETL 曾遇到 `SettingWithCopyWarning` 與 upsert 設計錯誤，已透過 `dataframe.copy()` 與 upsert 邏輯修正。
+
+# Daily Work Log
+## 20260423 Work log
 1. Initiated the project description in README.md, describing the goal of project and planned developmet items.
 2. Initiated git branch feature/etl-pipeline
 3. Initiated virtual environment by using pyenv + poetry. Used python 3.14.
@@ -22,7 +37,7 @@
     ```
 9. Establish the unit tests for task01.
 
-# 20260428 Work log
+## 20260428 Work log
 1. Read the [official docs](https://docs.github.com/en/rest) about GitHub Rest API as references in task02.  
     In conclusion, there were three major documents guiding how to interact with endpoints of GitHun Rest API:
     - endpoint of listing repo: https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-repositories-for-the-authenticated-user
@@ -41,12 +56,12 @@
         poetry run python task02_github_restapi_etl/main.py.
     ```
 
-# 20260429 Work log
+## 20260429 Work log
 1. According to official documents(https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10&versionId=free-pro-team%40latest&restPage=about-the-rest-api), added function _check_and_wait_rate_limit() for the prevention of exceeding rate-limit.
 2. Consolidate the try-except in the [srcipt](../task02_github_restapi_etl/e_request_github_api.py) to make sure the 409, 429, 403 error can be captured and properly handled case by case.
 3. Establish the unit tests for task02 and all the testing results are pass.
 
-# 20260503 Work log
+## 20260503 Work log
 1. Searched available API endpoints from leetcode.com. The searching results showed that leetcode has been applying graphQL API to request documents and users' features for backend.
 2. However, no official documents about querying practices for the graphQL API of leetcode were provided. Instead, used the [suggestions on Postman](https://documenter.getpostman.com/view/14486486/2s93sZ6tec#intro).
 3. Through the pre-tests on Postman, concluded that two querying statements, `view solved problem for user` and `Question Number` were what we could used in this project. The particular techniques should be in attentions was two COOKIES, `LEECODE_SESSIOM` and `CRSF TOKEN` when HTTP request.
@@ -55,13 +70,13 @@
 6. Created four scripts performing ETL tasks for personal submission records on leetcode. The scripts were stored in [task03_leetcode_ccClub_etl](../task03_leetcode_ccClub_etl/).
 7. Drafted the schema design of collections generated in this task in [doc/project_structure_feature-etl-pipeline.md](project_structure_feature-etl-pipeline.md). `This can be revised in the future if needed`.
 
-# 20260505 Work log
+## 20260505 Work log
 1. Investigate if API endpoints available from ccClub judgement system that was another website for coding practices once registered. The investigating result showed that several endpoints featuring REST API was accessible.
 2. The particular techniques should be in attentions was CRSF TOKEN in cookies when HTTP request. The token was given by server upon visit. To successfully extracting the personal coding practices records (like what users generally did on leetcode.com) in ETL pipeline, `CRSF TOKEN`, `username` and `password` were key points.
 3. After pre-testing, already created four scripts performing ETL tasks for personal submission records on ccClub. The scripts were stored in [task03_leetcode_ccClub_etl](../task03_leetcode_ccClub_etl/).
 4. Drafted the schema design of collections generated in this task in [doc/project_structure_feature-etl-pipeline.md](project_structure_feature-etl-pipeline.md). `This can be revised in the future if needed`.
 
-# 20260508 Work log
+## 20260508 Work log
 1. Created a spreadsheet for scoring personal skills on the online google sheet.
 2. Created a Service Account on GCP console, then generated and downloaded the JSON key of account.
 3. Granted the Service Account "Editor" access to the google sheet.
@@ -71,7 +86,136 @@
 7. Polished the scripts at step 5 via Claude. After that, python-logger was added to improve readability. Also, dataframe.copy() method was implemented to a little lines to prevent from `SettingWithCopyWarning`.
 8. Establish the unit tests for task05 and all the testing results are pass.
 
-# 20260511 Work log
+## 20260511 Work log
 1. To branch `feature/etl-pipeline`, fixed the logistic transformation error about task02 that would repeatedly count the same commits in all branches so that the commit counts were overestimated.
 2. To branch `feature/etl-pipeline`, fixed the design error on the upserting in the function `upsert_skill_scores` about task05.
 3. To branch `feature/etl-pipeline`, correct the typo of label name on radar axis.
+
+## 20260512 Work log
+1. Created app.py as `HOME page` via streamlit. The precomputing functions before render was defined in [dashboard_ui/utils](../dashboard_ui/utils/).
+2. Asked Codex to polish the draft of app.py. Major improvements:
+```
+    1. 面臨問題：`app.py` 有 hard-coding 靜態資料。  
+    我提供的解決方向：改成調用 `dashboard_ui/utils/interact_with_mongodb.py` 內讀取 MongoDB 的函式，並生成 `app2.py`。  
+    Codex最後修改的方向：建立 `app2.py`，用 MongoDB utils 取得雷達圖、KPI、GitHub、刷題題型等資料，並加上必要格式轉換。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    2. 面臨問題：`make_radar()` 的 hover tooltip 因內容太長被切邊。  
+    我提供的解決方向：修正 hover 顯示。  
+    Codex最後修改的方向：新增 hover 文字換行 helper，將任務內容自動插入 `<br>`，並調整雷達圖 margin/domain。  
+    最終是否解決：Yes
+
+    3. 面臨問題：修正 hover 後發生 `update_layout()` 重複傳入 `margin` 的 TypeError。  
+    我提供的解決方向：回報錯誤訊息。  
+    Codex最後修改的方向：建立 `radar_layout = {**plotly_layout_base, "margin": ...}`，避免 `margin` 被重複作為 keyword 傳入。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    4. 面臨問題：MongoDB utils 回傳值新增 `snapshot_date` / `fetched_date`，頁面需要顯示最近更新日期。  
+    我提供的解決方向：在兩個雷達圖與 KPI 四張卡片，共 6 處加上「最近更新日期」。  
+    Codex最後修改的方向：雷達圖使用 `st.caption()` 顯示日期；KPI 初版也先用 caption 顯示。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    5. 面臨問題：`get_obsidian_kpi()` 與 `get_github_kpi()` 已改成 tuple 最後一個元素固定為更新日期，先前相容 dict/tuple 的 helper 變得多餘。  
+    我提供的解決方向：再次修改 `app2.py`，刪掉多餘函式，並把 KPI 更新日期改成 `_format_delta()` 的 `suffix` 傳入。  
+    Codex最後修改的方向：移除 `_date_from_result()`，直接 unpack tuple，將四張 KPI 的更新日期併入 `st.metric()` delta 字串。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+
+    6. 面臨問題：`biotech_labels` 中 `"製程技術 (細胞分注、反應器操作) 操作能力"` 太長，radar 軸標籤被切到。  
+    我提供的解決方向：調整斷行。  
+    Codex最後修改的方向：新增 radar label formatting，將該標籤顯示成三行，並用 label normalization 保持 hover 任務查找正常。  
+    最終是否解決：Yes，app2.py 合併入 app.py
+```
+
+## 20260513 Work log
+1. Reviewed `README.md` to consolidated the project milestone again. Defining tasks of the feature developments and deployment on cloud services clearly, and exported in the paragraph of [2. `Knowledge Factory`](../README.md).
+2. Based on the revised paragraph mentioned at 1., created the [2nd streamlit page](../dashboard_ui/pages/knowledge_factory.py). Because there were miscellaneous elements on UI of `HOME` and `Knowledge Factory` pages, the UI components were concluded in the new scripts, [ui_elements.py](../dashboard_ui/utils/ui_elements.py) in order to make the codes more readable.
+3. Create contexts to cowork with Claue code in the next stage.
+    ```markdown
+    ---
+    # Phase II 部署工作啟動前提
+    ## 專案背景
+    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）  
+    **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）  
+    **目前狀態**：Phase I 已完成，進入 Phase II 雲端部署階段
+
+    ## 已完成的 Phase I 成果
+    **Branch `feature/etl-pipeline`**：
+    - ETL task01 (Obsidian.md 存 metadata 與 content)
+    - ETL task02 (GitHub REST API 獲取 repository 資料)
+    - ETL task03（LeetCode GraphQL API 獲取取刷題進度 + ccClub 取得刷題進度）
+    - ETL task05 (Google Sheets Skill 盤點表，獲取技能經驗值並清洗後量化)
+    **Branch `feature/dashboard-ui`**：
+    - Streamlit 兩頁式 dashboard
+        - **`dashboard_ui/app.py`**（第一頁主頁Home，描述 KPI / 雷達圖 / GitHub cards / 刷題統計）
+        - **`dashboard_ui/pages/knowledge_factory.py`**（第二頁，此專案架構繪製頁）
+    - functions as utils：
+        - **`dashboard_ui/utils/interact_with_mongodb.py`**
+        - **`dashboard_ui/utils/precomputing.py`**
+        - **`dashboard_ui/utils/ui_elements.py`**
+    **資料庫**：地端 MongoDB localhost
+    **credentials**: 使用 `.env` file
+    --
+    ```
+4. Created the [hand-over](branch_developd_gcp_deploy_hand_over.md) of GCP deployment procedures in phase II.
+
+> Until 20260514, the containers for ETL `task01`、`task02`、`task03`、`task05` were stably ran by Cloud run jobs while `dashboard-ui` app service was stably ran by Cloud run services, demonstrating that the docker images generated by branch `develop` worked well so far. However, some questions about workflow might be solved or optimized:
+    - 經由 Git Actions push到Artifact registry 進版 image 後，如何確保 cloud run jobs 下次啟動容器時是使用最新版的 image?目前是手動進入 GCP console 更改 job configuration，指定最新版 (latest) 的容器。
+
+## 20260525 Work log (Task 06 Start)
+### Evaluate which Embedding models were suitable
+1. the types of data to be vectorized. The .md files for a Obsidian vault containing vast `string` and `images(.PNG)`. Sometimes `pdf` was attached to the files and it almost hardly happened.
+2. the characters of each file ranged in 500 - 7,000 in Engilish & Chinese which means that the `tokens from one .md file might be 1,000 - 14,000`.
+3. Considering the service (a chatbot providing note summary, query) will run on cloud. `The embedding models should allow to be called through API` rather than restricting to installation on premise.
+
+    > Thus, `text-embedding-3-small` provided by OpenAI and `Gemini Embedding 2` by Google are two candidates.
+
+4. Cost of calling Embedding API
+    > Cost Calling to `Gemini Embedding 2` was 10x higher than that to `text-embedding-3-small`. Both are affordable so far.
+
+|情境篇數| Tokens | text-embedding-3-small |費用 |
+|------|---------|------------------------|----|
+|初次全量建立 1,000 篇| ~800K tokens | $0.016（約 0.5 台幣）|
+|初次全量建立 5,000 篇| ~4M tokens |$0.08（約 2.5 台幣）|
+|每週增量（50 篇新筆記| 50 篇~40K tokens|$0.0008（幾乎免費）|
+
+### Evaluate the loading on Vector database, MongoDB Altas.
+1. It is better to do data chunking because the content of each .md file are long-text which might occassionally exceeded the limit of context window of the furture LLM model or the limit of tokens of embedding model.
+2. The dimensions of vectors for the model `text-embedding-3-small` are `1536`, while for `Gemini embedding 2` are `3072`. 
+
+|Model |維度 |每個向量大小（float32）|
+|------|----|---------------------|
+|text-embedding-3-small |1536 | 1536 × 4 bytes = 6 KB|
+|Gemini Embedding 2 |3072 | 3072 × 4 bytes = 12 KB|
+
+3. Cost calculation
+    ```plaintext
+    假設你有 300 篇筆記：
+    → 每篇 6 個 chunk = 1,800 個向量
+    → 1,800 × 6 KB（text-embedding-3-small）= 10.8 MB 向量資料
+    → 加上 metadata（source、chunk_index、content text）≈ 再乘 3 倍
+    → 總計約 32.4 MB
+
+    假設你有 1,000 篇筆記，則 108 MB
+    ```
+> `MongoDB Altas M0 Free Tier up to 512 MB, far from 108 MB` 
+
+
+## 20260526 Work log
+1. MVP and RAG practices are the recent major goals in this project, so `text-embedding-3-small` was selected as the primary embedding model. If embedding muiltple files are firmly required in the next step, then the multimodal model `Gemini embedding 2` could be selected.
+- 使用模型：text-embedding-3-small
+    - 引用方式：openai Python SDK，model 參數傳入 "text-embedding-3-small"
+    - API 文件：https://platform.openai.com/docs/guides/embeddings
+    - 維度：1536（EMBEDDING_DIM），建立 MongoDB Atlas Vector Index 時填這個數字
+    - 費用：$0.02 / 1M tokens（2025 年定價）
+2. Went to https://platform.openai.com/api-keys to create an API secret key (and set billing detail which needed credit card). Keep it in .env and secret managers.
+3. Created the scripts `task06/t_chunk_embed.py` and `task06_obsidian_embed_etl/l_upsert_vectors.py`. Successfully practiced chuncking and embedding the long text in three markdown files.
+4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on Altas.
+5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB Altas.
+6. 
+
+> Until 20260527, some questions might be solved or optimized:
+> 1. 若未來一份筆記被重新切塊後 chunk 數量減少 (例如從 6 個縮為 4 個)，
+    舊的 chunk_index 4、5 不會自動被刪除。
+    目前資料量小，影響不大；若未來需要清理孤立 chunk，
+    可在 upsert 前先 delete_many({"file_path": file_path})，再重新 insert。
+> 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 Altas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
