@@ -219,3 +219,6 @@
     目前資料量小，影響不大；若未來需要清理孤立 chunk，
     可在 upsert 前先 delete_many({"file_path": file_path})，再重新 insert。
 > 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 Altas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
+
+## 20260528 Work log
+1. Evaluated which AI agents are suitable for this project. Then exported to [report](./ai-agent-evaluation-report.md).
