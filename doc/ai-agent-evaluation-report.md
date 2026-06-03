@@ -99,12 +99,12 @@
 
 ### 最終決定: 方案 B — 2 個 Agents
 
-**選擇原因: **
+**選擇原因**:
 - 學習地圖需要多輪互動 (step 1 決定的模式 C)，與摘要/查詢的「單輪 retrieve」性質差異明顯，若混在同一個 agent 會導致狀態管理複雜度爆炸
 - 互動頁面是全新的開發 streamlit page (page 3)，沒有舊技術債，適合從架構上做對
 - 不論幾個Agents，均部署在同一個 page，且用 Cloud Run Service 服務部署在phase II 的 container，部署成本不會因此而變。
 
-**實作方式: **
+**實作方式**:
 
 ```
 Streamlit home page (app 入口)
@@ -133,16 +133,16 @@ page 3 UI 介面採用**單一對話框**，而不是在 Page 3 讓使用者自�
 | 方案 | 做法 | 優點 | 缺點 |
 |------|------|------|------|
 | **R1. Keyword/Rule-based** | 偵測關鍵字 (如「學習路徑」、「建議」、「怎麼學」) 判斷 intent | 零成本、無延遲 | 中英文夾雜時容易誤判，使用者措辭多變 |
-| **R2. LLM classifier** | 用輕量 LLM call 先判斷 intent，回傳 rag_agent 或 planning_agent | 準確率高，能理解語意 | 每次多一個 API call，增加延遲與費用 |
-| **R3. Claude tool_use routing** | 把兩個 agent 的能力定義成 tools，讓 LLM 自己決定 call 哪個 | 原生支援、意圖與執行合一 | 對框架依賴較深，初期設計複雜度較高 |
+| **R2. LLM classifier** | 用輕量 LLM call 先判斷 intent，回傳 rag_agent 或 planning_agent | `準確率高`，能理解語意 | 每次多一個 API call，增加延遲與費用 |
+| **R3. Claude tool_use routing** | 把兩個 agent 的能力定義成 tools，讓 LLM 自己決定 call 哪個 tools | 原生支援、`意圖`與`執行`合一 | 為了把 tools 包給LLM認識什麼時候要call哪支 tool，會造成對框架依賴較深，初期設計複雜度較高、若不慎可能會傳錯參數到不對的 tool |
 
 ### 最終決定: R1 + R2 混合
 
-**選擇原因: **
+**選擇原因**:
 - 此專案使用者僅為本人，意圖通常不會太模糊，keyword 快篩可覆蓋大多數情境
-- 只有真正模糊以致R1無法判斷的情況才升級到 R2.LLM 判斷，兼顧準確率與成本
+- 只有真正模糊以致 R1 無法判斷的情況才升級到 R2.LLM 判斷，兼顧準確率與成本
 
-**運作邏輯: **
+**運作邏輯**:
 
 ```
 使用者輸入 (user prompt)
@@ -152,7 +152,7 @@ R1 keyword/Rule-based 快篩
     ├── 明確命中查詢/摘要關鍵字 → Agent 1
     └── 模糊 / 無法判斷 → Call R2 LLM 做最終判斷
 ```
-*R2 LLM 模型選擇 gemini-2.5-flash-lite，原因見: *
+*R2 LLM 模型選擇 gemini-2.5-flash-lite，原因見*: [7. step 6](#7-step-6-gemini-模型版本選型-)
 
 ---
 
@@ -172,9 +172,9 @@ R1 keyword/Rule-based 快篩
 
 ### 最終決定: 選項 B — 帶上最近 N 輪 history 做 routing
 
-**選擇原因: ** 希望系統能自然感知上下文切換，不需要使用者記憶指令或手動切換模式，讓`使用者體驗更流暢`。
+**選擇原因**: 希望系統能自然感知上下文切換，不需要使用者記憶指令或手動切換模式，讓`使用者體驗更流暢`。
 
-**參數設定: **
+**參數設定**:
 - N = 3 (預設值，之後若需要，可透過環境變數調整) 
 - 讀取條件: 同一 session_id，timestamp 降序取前 N*2 筆 (user + model 各一筆) 
 
@@ -190,7 +190,7 @@ R1 keyword/Rule-based 快篩
 
 | 評估維度 | Claude (`claude-sonnet-4-5`) | Gemini on Vertex AI |
 |----------|------------------------------|---------------------|
-| **多語言 (中英夾雜) ** | 強 | 強 |
+| **多語言 (中英夾雜)** | 強 | 強 |
 | **長 context 處理** | 200K token | 1M token (Gemini 2.5 系列)  |
 | **結構化輸出** | 支援 (prompt 引導或 tool_use)  | 支援 (原生 response_schema)  |
 | **GCP 整合度** | 需獨立 Anthropic API，不在 GCP 生態內 | 原生 GCP 服務 |
@@ -205,12 +205,12 @@ R1 keyword/Rule-based 快篩
 
 ### 最終決定: Gemini on Vertex AI
 
-**選擇原因: **
+**選擇原因**:
 - Vertex AI 已在專案中 enabled； 而 Anthropic API key 尚未創立。
 - 現有 Cloud Run Service Account 架構熟悉，新建一支專用 SA 或從 IAM 調整現有 SA 的 role 即可，不需要從 Vertex AI platform 創建與管理額外的 API key。
 - GCP 帳單統一，`成本追蹤簡單，架構說明一致乾淨`。
 
-**SDK 選擇: ** `google-genai` (Gen AI SDK) 
+**SDK 選擇**: `google-genai` (Gen AI SDK) 
 
 > 官方文件: https://googleapis.github.io/python-genai/
 
@@ -251,7 +251,7 @@ R1 keyword/Rule-based 快篩
 | **Agent 1: RAG Agent** | `gemini-2.5-flash-lite` | 單輪 RAG，retrieve 完就生成，不需複雜推理 |
 | **Agent 2: Planning Agent** | `gemini-2.5-flash` | 跨 domain 推理、多輪狀態、結構化學習地圖輸出，需要更強的推理能力 |
 
-**不選 `gemini-2.5-pro` 的原因: ** 個人 side project 成本考量，`gemini-2.5-flash` 的推理能力對學習地圖生成已足夠，後續可視需要升級。
+**不選 `gemini-2.5-pro` 的原因**: 個人 side project 成本考量，`gemini-2.5-flash` 的推理能力對學習地圖生成已足夠，後續可視需要升級。
 
 ---
 
@@ -287,7 +287,7 @@ R1 keyword/Rule-based 快篩
 
 ### 最終決定: 手刻 + `google-genai` SDK，盡可能貼近 GCP 生態
 
-**選擇原因: **
+**選擇原因**:
 - 需求規模單純 (個人使用、三個功能) ，手刻量實際應該可控
 - 不引入第三方框架，減少版本迭代帶來的維護成本 (LangChain API 常變動) 
 - 貼近 GCP 生態優先，`google-genai` SDK 是 Google 官方推薦的現行 SDK
@@ -336,7 +336,7 @@ R1 keyword/Rule-based 快篩
 | B. 以天為單位 | 同天重整不斷，MongoDB 增長較慢 | 🟢 較低 |
 | **C. 手動開新對話** ✅ | 使用者主動控制，MongoDB 增長最可預測 | 🟢 最低 |
 
-**選擇 C 的原因: ** 選 C 讓學習地圖的多輪脈絡不因重整而斷掉，開發期間也方便測試；session 生命週期完全由使用者掌控，MongoDB 增長速度最可預測。
+**選擇 C 的原因**: 選 C 讓學習地圖的多輪脈絡不因重整而斷掉，開發期間也方便測試；session 生命週期完全由使用者掌控，MongoDB 增長速度最可預測。
 
 
 ### 最終決定: Schema 欄位示意
