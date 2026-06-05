@@ -21,6 +21,18 @@ def get_db():
     return client[db_name]
 
 
+def get_db_altas():
+    mongo_uri = os.getenv("MONGO_ALTAS_URI")
+    db_name = os.getenv("MONGO_DB_NAME")
+
+    if not all([mongo_uri, db_name]):
+        logger.error("請確認 .env 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 .env 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+
+    client = MongoClient(mongo_uri)
+    return client[db_name]
+
+
 def get_radar_summary_df(db, collection: str) -> pd.DataFrame:
     """取得每張雷達圖最新的軸向標籤、軸向刻度的資料，並轉成 pandas dataframe。"""
     coll = db[collection]
