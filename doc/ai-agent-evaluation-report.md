@@ -342,6 +342,7 @@ R1 keyword/Rule-based 快篩
 ### 最終決定: Schema 欄位示意
 
 ```json
+// 其中 metadata 可隨 router、agent1、agent2 彈性增減需要的欄位。
 {
   "_id": "ObjectId (自動生成) ",
   "session_id": "uuid4，使用者點擊「開新對話」時生成",
@@ -352,7 +353,23 @@ R1 keyword/Rule-based 快篩
   "metadata": {
     "model": "gemini-2.5-flash-lite | gemini-2.5-flash",
     "intent_score": 0.92,
-    "retrieved_chunks": ["chunk_id_1", "chunk_id_2"],
+    "retrieved_chunks": [
+        {
+            "file_path":   "01_daily_logs/file_name_1.md",
+            "chunk_index": 1,
+            "score": 0.88,
+        },
+        {
+            "file_path":   "01_daily_logs/file_name_1.md",
+            "chunk_index": 2,
+            "score": 0.85,
+        },
+        {
+            "file_path":   "01_daily_logs/file_name_1.md",
+            "chunk_index": 3,
+            "score": 0.80,
+        }
+        ],
     "note_files": ["file_name_1.md"]
   }
 }
@@ -369,7 +386,7 @@ R1 keyword/Rule-based 快篩
 | `timestamp` | datetime | ✅ | 排序用，讀取最近 N 輪依此排序 |
 | `metadata.model` | string | 否 | 記錄生成模型，供日後分析 |
 | `metadata.intent_score` | float | 否 | Router 判斷 intent 的信心分數，debug 用 |
-| `metadata.retrieved_chunks` | array | 否 | Agent 1 檢索到的 chunk_id，可追溯來源 |
+| `metadata.retrieved_chunks` | array | 否 | Agent 1 檢索到的chunk所屬筆記檔路徑、 chunk 所屬 chunk_id、該 chunk 對應本次查詢的信心分數，可追溯來源與 rag agent 的模型能力 |
 | `metadata.note_files` | array | 否 | 本輪涉及的筆記檔名 |
 
 ### 最終決定: Index
