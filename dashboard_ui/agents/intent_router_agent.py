@@ -46,6 +46,15 @@ R1_PLANNING_KEYWORDS = [
     "plan for learning",
 ]
 
+# R1 的排除詞：命中這些詞代表規劃的語意不是學習相關
+R1_PLANNING_EXCLUSIONS = [
+    # 旅遊
+    "旅遊", "旅行", "行程", "景點", "機票", "訂房", "住宿",
+    "餐廳", "美食", "玩", "觀光", "自由行",
+    # 其他非學習規劃
+    "婚禮", "活動", "派對", "購物",
+]
+
 R1_RAG_KEYWORDS = [
     # 中文
     "查詢", "搜尋", "找", "有沒有",  "筆記裡",
@@ -65,6 +74,7 @@ R1_RAG_KEYWORDS = [
     "search for", "look up",
     "extract", "key points",
 ]
+
 
 # Routing 方案 R2：LLM Classifier
 # system prompt - 要求模型只輸出固定字串，方便 parse
@@ -130,6 +140,14 @@ def _r1_keyword_match(query: str) -> tuple[AgentTarget | None, float]:
     rag_hits = [kw for kw in R1_RAG_KEYWORDS if kw.lower() in query_lower]
 
     if planning_hits:  # 先做
+        # 檢查是否同時命中排除詞
+        exclusion_hits = [kw for kw in R1_PLANNING_EXCLUSIONS if kw.lower() in query_lower]
+        if exclusion_hits:
+            # 有排除詞，R1 不敢確定，降級給 R2 判斷
+            logger.info(f"R1 命中 planning keyword {planning_hits}，"
+                        f"但同時命中排除詞 {exclusion_hits}，降級至 R2")
+            return None, 0.0
+
         score = round(len(planning_hits) / len(R1_PLANNING_KEYWORDS), 4)
         logger.info(f"使用 R1 方案，R1 命中 planning keyword: {planning_hits}, score={score}")
         return "planning_agent", score
@@ -165,16 +183,40 @@ def _r2_llm_classify(query: str,
     history_planning_msg = load_chat_history(session_id, agent_type="planning", n=CHAT_HISTORY_N)
 
     # 兩段 history 直接串接，舊的在前，讓模型感知脈絡轉換
-    # 實際順序可能交錯，但對 intent 判斷已足夠
-    combined_history_msg = history_rag_msg + history_planning_msg
+    # 把 history 包成一段說明文字，以 user message 形式帶入
+    # 讓 LLM 理解這是「背景脈絡」，不是它自己說過的話
+    context_parts = []
+    if history_rag_msg:
+        rag_lines = "\n".join(f"  [{m['role']}] {m['parts'][0]['text']}" for m in history_rag_msg
+                              )
+        context_parts.append(f"[RAG Agent 最近對話]\n{rag_lines}")
+
+    if history_planning_msg:
+        planning_lines = "\n".join(f"  [{m['role']}] {m['parts'][0]['text']}" for m in history_planning_msg
+                                   )
+        context_parts.append(f"[Planning Agent 最近對話]\n{planning_lines}")
+
+    contents = []
+    if context_parts:
+        # 以獨立的 user message 帶入，角色是「背景資訊提供者」
+        # 不用 role: model，避免 LLM 誤以為是自己說的
+        contents.append({
+            "role": "user",
+            "parts": [{"text": "以下是這個 session 的對話背景，供你判斷使用者當前意圖時參考：\n\n"
+                               + "\n\n".join(context_parts)}],
+        })
+        contents.append({
+            "role": "model",
+            "parts": [{"text": "好的，我已了解對話背景，請告訴我使用者的最新輸入。"}],
+        })
 
     # ── Step 2: 組裝本輪 contents 餵給 LLM 分類 ─────────────────────
-    current_user_msg = {"role":  "user",
-                        "parts": [{"text": query}],
-                        }
-    contents = combined_history_msg + [current_user_msg]
+    contents.append({
+        "role": "user",
+        "parts": [{"text": query}],
+    })
 
-    logger.info(f"呼叫模型 {ROUTER_AGENT_MODEL}，挾帶 {len(combined_history_msg)} recent history messages.")
+    logger.info(f"呼叫模型 {ROUTER_AGENT_MODEL}，挾帶 {len(history_rag_msg)+len(history_planning_msg)} recent history messages.")
 
     # ── Step 3: LLM 分類 ──────────────────────────────────────────
     response = client.models.generate_content(model=ROUTER_AGENT_MODEL,
