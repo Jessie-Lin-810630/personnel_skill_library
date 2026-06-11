@@ -219,3 +219,129 @@
     目前資料量小，影響不大；若未來需要清理孤立 chunk，
     可在 upsert 前先 delete_many({"file_path": file_path})，再重新 insert。
 > 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 Altas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
+
+## 20260528 Work log
+1. Evaluated which AI agents are suitable for this project. Then exported to [report](./ai-agent-evaluation-report.md).
+
+## 20260610 Work log
+1. The intent agent and rag agent were created and tested in the first round via unit test. There were some logistic defect when judging the intention in the samples of user's queries.
+The testing results were listed as follows. Particulary in the Sample 10 and 11, the context with historical chat messesges with RAG agents confused the LLM of Router agent in R2 plan. The LLM representing R2 considered the responses by RAG its own response.
+```
+    # ============= Sample 1 ================
+    # Model Response: 🆗
+    # 使用 R1 方案，R1 命中 rag keyword: ['查詢'], score=0.0222
+    print(route("幫我查詢Database的索引建立語法，我只要MySQL的", "router_test_run11"))
+    
+    # ============= Sample 2 ================
+    # Model Response: 🆗
+    # 使用 R1 方案，R1 命中 planning keyword: ['規劃'], score=0.0227
+    print(route("幫我規劃初階資料工程師的學習", "router_test_run12"))
+
+    # ============= Sample 3 ================
+    # Model Response: 🆗
+    # R2 輸出格式異常: '這個要求與查詢或摘要筆記內容，或是生成個人化學習路徑都無關。使用者只是想訂機票，這是一個獨立的任務，需要使用專門的訂票服務或網站。因此，我無法將'，預設導向 rag_agent, score=0.5
+    print(route("訂機票", "router_test_run13"))
+
+    # ============= Sample 4 ================
+    # Model Response: 🆗
+    # 使用 R1 方案，R1 命中 rag keyword: ['在哪'], score=0.0222
+    print(route("小波在哪裡", "router_test_run14"))  
+
+    # ============= Sample 5 ================
+    # Model Response: 🆗
+    # R2 輸出格式異常: '我無法判斷你的意圖。你的輸入「好餓」與查詢筆記內容或生成學習路徑沒有關聯。請提供更明確的指示。'，預設導向 rag_agent, score=0.5
+    print(route("好餓", "router_test_run15"))
+    
+    # ============= Sample 6 ================
+    # Model Response: 🆗
+    # R1 命中 planning keyword ['規劃']，但同時命中排除詞 ['旅遊']，降級至 R2
+    # R2 方案判斷結果: planning_agent, score=0.95
+    print(route("幫我規劃神戶三日旅遊方案", "router_test_run16"))
+
+    # ============= Sample 7 ================
+    # Model Response: 🆗
+    # R2 輸出格式異常: '我無法判斷您的意圖。您是想查詢現有的神戶旅遊筆記內容，還是想生成一個個人化的神戶旅遊學習路徑或行程規劃呢？'，預設導向 rag_agent, score=0.5
+    print(route("我想了解神戶旅遊方案", "router_test_run0610-7"))
+    
+    # ============= Sample 8 ================
+    # Model Response: ⚠️ Should not route to 'planning agent' ! ⚠️
+    # R2 方案判斷結果: planning, score=0.95
+    print(route("寶可夢大師成長路徑","router_test_run0610-8"))
+
+    # ============= Sample 9 ================
+    # Model Response: 🆗
+    # R2 輸出格式異常: '我無法判斷您的意圖。您的輸入「好餓唷」並未包含任何關於查詢筆記內容或生成學習路徑的資訊。請提供更明確的指示，例如您想查詢筆記中的特定內容，或是'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷", "router_test_run0610-9"))
+
+    # ============= Sample 10 ================
+    # Model Response: 🆗
+    # "目前的筆記裡沒有相關內容。"
+    print(rag_query("好餓唷!", "test_run0610-10"))
+
+    # Model Response: ⚠️ 回應受到前輪對話污染，R2 LLM 把 RAG agent 的回覆當成自己的答案拋出 ⚠️
+    # R2 輸出格式異常: '目前的筆記裡沒有相關內容。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-10"))
+
+    print(rag_query("好餓唷!", "test_run0610-10"))  # RAG agent回應 "目前的筆記裡沒有相關內容。"
+
+    # Model Response: ⚠️ 仍然污染 ⚠️
+    # R2 輸出格式異常: '目前的筆記裡沒有相關內容。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-10"))
+
+    # Model Response: ⚠️ 污染範圍是 R2的LLM，R1方案採用關鍵字比對所以回覆沒有問題 ⚠️
+    # 使用 R1 方案，R1 命中 rag keyword: ['查詢'], score=0.0222
+    print(route("查詢MySQL索引語法", "test_run0610-10"))
+
+    
+    # ============= Sample 11 ================
+    # Model Response: 🆗
+    # R2 輸出格式異常: '我無法判斷您的意圖。您的輸入「好餓唷~」與查詢或摘要筆記內容（rag_agent）或生成個人化學習路徑（planning_agent）的意圖都不相關。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-11"))
+
+    # Model Response: 🆗
+    # "目前的筆記裡沒有相關內容。"
+    print(rag_query("好餓唷!", "test_run0610-11"))
+
+    # Model Response, ⚠️ 回應受到前輪對話污染，R2 LLM 把 RAG agent 的回覆當成自己的答案拋出 ⚠️:
+    # '目前的筆記裡沒有相關內容。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-11"))
+
+    # Model Response: 🆗
+    # 這次有找到'根據提供的筆記片段，MySQL 索引的創建語法可以在以下幾種情況下進行：\n\n1.  **...'
+    print(rag_query("MySQL索引在哪", "test_run0610-11"))
+
+    # Model Response: ⚠️ 仍然污染 ⚠️
+    # R2 輸出格式異常: '目前的筆記裡沒有相關內容。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-11"))
+```
+3. By inserting the prompt to the paragraph when assembling the historical messages in the function `_r2_llm_classify()` that had been defined in `dashboard_ui/agents/intent_router_agent.py`. The router agent could response more appropriately. The test result is recorded as follows (Sample 12).
+
+```
+    # ============= Sample 12 ================
+
+    # Model Response: 🆗
+    # 'R2 輸出格式異常: '我無法判斷您的意圖。您的輸入「好餓唷~」與查詢或摘要筆記內容（rag_agent）或生成個人化學習路徑（planning_agent）的意圖都不相關。'，預設導向 rag_agent, score=0.5'
+    print(route("好餓唷~", "test_run0610-12"))
+
+    # Model Response: 🆗
+    # "目前的筆記裡沒有相關內容。"
+    print(rag_query("好餓唷!", "test_run0610-12"))
+
+    # Model Response: ✅ 回覆已經矯正
+    # R2 方案判斷結果: rag_agent, score=1.0
+    print(route("好餓唷~", "test_run0610-12"))
+    # 💡 補充: 同時發現若 rag history 裡已有相同輸入的紀錄，
+    #    R2 會給高 intent_score（例如 1.0），即使該輸入意圖不明。
+    #    原因：LLM 把「上一輪 rag 處理過」解讀為「這一輪應該繼續給 rag」。
+    #    真實使用情境下 router 只跑一次，此問題不會在 production 出現。
+
+    # Model Response: 🆗
+    # 使用 R1 方案，R1 命中 rag keyword: ['查詢'], score=0.0222
+    print(route("查詢MySQL索引語法", "test_run0610-12"))
+
+    print(rag_query("MySQL索引在哪", "test_run0610-12"))
+
+    # Model Response: 🆗
+    # R2 輸出格式異常: '你的輸入「好餓唷~」與查詢筆記內容或規劃學習路徑的意圖都不符。我無法判斷你的意圖。'，預設導向 rag_agent, score=0.5
+    print(route("好餓唷~", "test_run0610-12"))
+```

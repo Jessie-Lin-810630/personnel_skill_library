@@ -211,3 +211,6 @@ tmp_test_*.py
 settings.json
 ccClub_judge.json
 googlesheet-user.json
+
+# log stuff generated during testing python scripts
+doc/*.jsonl
