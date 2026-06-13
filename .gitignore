@@ -206,6 +206,12 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Node.js
+node_modules/
+
+# Claude Code symlink directory (actual content lives in .agents/)
+.claude/
+
 # python scripts for testing
 tmp_test_*.py
 settings.json
