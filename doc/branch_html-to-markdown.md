@@ -131,6 +131,7 @@ gcs://onenote-vault
 ### Audit log
 > 遵守人事時地物
 ```jsonl
+// When downloading from OneNote API
 {
   "event_id": "e9c0d4e7",  // primary key
   "timestamp": "2026-06-12T10:30:00Z",  // event datetime, utc+0
@@ -143,7 +144,42 @@ gcs://onenote-vault
   "status_code": 200,  // HTTP Code
   "latency_ms": 1280,  // 耗時
   "error_msg": "Service Unavailable.....xx",  // 伺服器回應的訊息
-  "application": "onenote-to-obsidian-sync", // python script name
-  "created_at": "2026-06-12T10:30:00Z" // log datetime, utc+0
+  "application": "e_audit_logs.py", // python script name
+}
+
+// When calling Gemini LLM (per attempt)
+{
+  "event_id": "a1b2c3d4",                // primary key
+  "timestamp": "2026-06-13T08:00:00Z",  // event datetime, utc+0
+  "session_id": "f3e2a1b0c9d8e7f6",     // 同一次 t_html_to_markdown() 執行追蹤
+  "event_type": "llm_call",
+  "model": "gemini-2.5-flash-lite",     // RESHAPE_MODEL
+  "html": ".../.../notebook/section/SQL 基本資訊",          // html_path
+  "attempt": 0,                        // 第幾次 retry（從 0 起）
+  "status": "successed",               // successed | failed
+  "latency_ms": 3420,                // LLM 回應耗時
+  "input_tokens": 1024,              // prompt_token_count
+  "output_tokens": 512,              // candidates_token_count
+  "thinking_tokens": 128,            // thoughts_token_count
+  "error_msg": null,                  // 例外訊息，成功時為 null
+  "application": "t_html_to_markdown.py", // python script name
+}
+
+// When converting one html page to markdown
+{
+  "event_id": "d4e5f6a7",           // primary key
+  "timestamp": "2026-06-13T08:00:03Z",  // event datetime, utc+0
+  "session_id": "f3e2a1b0c9d8e7f6", // 同一次 t_html_to_markdown() 執行追蹤
+  "event_type": "page_conversion",
+  "notebook": "生技製劑筆記本",      // SELECTED_NOTEBOOK 中的 nb_name
+  "section": "廠區設備",             // html_path.parent.name
+  "page_title": "SQL 基本資訊",      // html_path.stem
+  "html_path": "/path/to/page.html",
+  "md_path": "/path/to/page.md",    // 存檔失敗時為 null
+  "note_type": "knowledge_summary", // knowledge_summary | daily_log
+  "img_count": 3,                   // 原始 HTML 中 <img> tag 數量，與存檔結果無關
+  "status": "success",              // successed | upstream_task_failed | save_failed | skipped
+  "error_msg": null,                 // 例外訊息，成功時為 null
+  "application": "t_html_to_markdown.py", // python script name
 }
 ```

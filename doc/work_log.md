@@ -400,15 +400,17 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 ## 20260613 Work log
 1. Starting to draft the new transformation srcipt using the approach `S1`. This time, the LLM tested was `Gemini flash lite 2.5 lite`.
-> Price comparison between [Gemini flash lite 2.5 lite Model](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing?_gl=1*fk0iq6*_ga*MTEwMzU3Nzc5NS4xNzc2MzA1MzUw*_ga_WH2QY8WWF5*czE3ODEzMDkxMjMkbzExMiRnMSR0MTc4MTMxMDE3NCRqMjgkbDAkaDA.#gemini-models-2.5) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/pricing).
+> Price comparison between [Gemini 2.5 flash lite Model](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing?_gl=1*fk0iq6*_ga*MTEwMzU3Nzc5NS4xNzc2MzA1MzUw*_ga_WH2QY8WWF5*czE3ODEzMDkxMjMkbzExMiRnMSR0MTc4MTMxMDE3NCRqMjgkbDAkaDA.#gemini-models-2.5) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/pricing).
+> Rate limit comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/rate-limits) and []
+> Token calculation comparison between [Gemini 2.5 flash lite Model](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/get-token-count?hl=zh-tw#gemini-get-token-count-samples-python_genai_sdk) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/usage/limits?focus=claude_haiku_4:rpm).
 
-2. While testing the `S1` pipeline on the sampe OneNote page `供應商稽核.html`, **a data loss issue was identified: all `<img>` tags were silently dropped before the content was fed into LLM.** The root cause was `soup.get_text(' ', strip=True)`, which strips every HTML tag (including `<img>`) when converting BeautifulSoup tree to plain text. As a result, the LLM received no image-related information and was unable to place image references in the reshaped content.
+2. While testing the [`S1` pipeline](/task07_onenote_to_markdown/t_html_to_markdown.py) on the sampe OneNote page `供應商稽核.html`, **a data loss issue was identified: all `<img>` tags were silently dropped before the content was fed into LLM.** The root cause was `soup.get_text(' ', strip=True)`, which strips every HTML tag (including `<img>`) when converting BeautifulSoup tree to plain text. As a result, the LLM received no image-related information and was unable to place image references in the reshaped content.
 
     | file | affected step | observation | possible impact |
     |------|--------------|-------------|----------------|
     | `供應商稽核.html` | `plain_text = soup.get_text(...)` | `<img>` tags with `alt` and `src` attributes were discarded entirely before LLM call | 🔴 Image data permanently lost in `new_content`; LLM has no knowledge that images exist in the note |
 
-3. **Fix applied**: Instead of calling `get_text()` directly after parsing, each `<img>` tag is now replaced in-place with its Markdown image syntax `![alt](src)` using BeautifulSoup's `replace_with()` method before `get_text()` is invoked. This way, image markers survive the tag-stripping step as plain text strings and are visible to the LLM.
+    - **Fix applied**: Instead of calling `get_text()` directly after parsing, each `<img>` tag is now replaced in-place with its Markdown image syntax `![alt](src)` using BeautifulSoup's `replace_with()` method before `get_text()` is invoked. This way, image markers survive the tag-stripping step as plain text strings and are visible to the LLM.
 
     ```python
     # before fix
@@ -425,6 +427,10 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     plain_text = soup.get_text(' ', strip=True)     # image markers now survive as plain text
     ```
 
-4. To complement the fix above, an additional instruction `(vi)` was added to the LLM user prompt, explicitly telling the model that any `![]()` pattern in the input is a pre-cleaned, Markdown-compatible image link. The model is instructed to keep the image within its original section (not move it out), allow indentation adjustment, and optionally generate a short 3–5 line AI-generated image description labelled as `「AI生成圖釋」`.
+    - To complement the fix above, an additional instruction `(vi)` was added to the LLM user prompt, explicitly telling the model that any `![]()` pattern in the input is a pre-cleaned, Markdown-compatible image link. The model is instructed to keep the image within its original section (not move it out), allow indentation adjustment, and optionally generate a short 3–5 line AI-generated image description labelled as `「AI生成圖釋」`.
 
-> **Lesson learned**: `BeautifulSoup.get_text()` is destructive — it silently removes all tags including semantic ones like `<img>`, `<table>`, `<a>`. When the downstream consumer is an LLM that needs to reconstruct structure, always pre-convert semantically important tags to their text-equivalent representations (e.g., Markdown syntax) before calling `get_text()`, rather than assuming the LLM can infer their existence from surrounding context.  
+    > **Lesson learned**: `BeautifulSoup.get_text()` is destructive — it silently removes all tags including semantic ones like `<img>`, `<table>`, `<a>`. When the downstream consumer is an LLM that needs to reconstruct structure, always pre-convert semantically important tags to their text-equivalent representations (e.g., Markdown syntax) before calling `get_text()`, rather than assuming the LLM can infer their existence from surrounding context.  
+
+3. The output by LLM was sometimes not perfect. As tested result about the image with embedded table in the notebook `生技製劑筆記本/General technical knowledge/Mycoplasma`. LLM tried to analyze the semantic of the table in a statistic image and created new table via markdown syntax. Although the truth of such table, the original image, did not loss and it was referred by a link in the markdown context, the newly created table by AI need to be fairly and professionally `inspected to judge the reliability of using AI model`. This should be handed over to ML scientist and senior techinicans within biotech domain.
+
+4. 
