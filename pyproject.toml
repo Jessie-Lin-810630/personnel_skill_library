@@ -17,6 +17,8 @@ dependencies = [
     "pygsheet (>=0.1.19b25,<0.2.0)",
     "langchain-text-splitters (>=1.1.2,<2.0.0)",
     "openai (>=2.38.0,<3.0.0)",
+    "anthropic (>=0.109.1,<0.110.0)",
+    "markdownify (>=1.2.2,<2.0.0)",
 ]
 
 
