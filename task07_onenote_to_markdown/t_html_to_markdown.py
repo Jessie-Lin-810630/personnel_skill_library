@@ -138,7 +138,7 @@ def extract_llm_fields(html_path: Path, plain_text: str, session_id: str):
             log_llm_call(session_id=session_id,
                          model=RESHAPE_MODEL,
                          html_path=str(html_path),
-                         attempt=attempt,
+                         attempt=attempt+1,
                          status="successed",
                          latency_ms=int((time.perf_counter() - t0) * 1000),
                          input_tokens=input_tokens,
@@ -152,7 +152,7 @@ def extract_llm_fields(html_path: Path, plain_text: str, session_id: str):
             log_llm_call(session_id=session_id,
                          model=RESHAPE_MODEL,
                          html_path=str(html_path),
-                         attempt=attempt,
+                         attempt=attempt+1,
                          status="failed",
                          latency_ms=int((time.perf_counter() - t0) * 1000),
                          input_tokens=None,
@@ -252,10 +252,10 @@ def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
     return soup
 
 
-def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path):
+def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> list[dict]:
+    """Transform HTML pages to markdown content. Returns a list of page dicts for the Load step."""
     session_id = uuid.uuid4().hex
-    total_pages = 0
-    total_imgs = 0
+    pages = []
 
     for nb_name in SELECTED_NOTEBOOK:
         nb_src = EXPORT_DIR / nb_name if isinstance(EXPORT_DIR, Path) else Path(EXPORT_DIR) / nb_name
@@ -268,18 +268,13 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path):
             md_path = html_path.with_suffix(".md")
             page_status = "successed"
             page_error = None
-            saved_md_path = None
 
             html_content = html_path.read_text(encoding="utf-8")
-
-            # Count <img> tags before conversion (for audit, unaffected by save result)
             img_count = len(BeautifulSoup(html_content, "html.parser").find_all("img"))
 
-            # Transform the image tag to markdown string
             soup = convert_img_tag_to_md_str(html_content)
             plain_text = soup.get_text(' ', strip=True)
 
-            # Calling LLM for content reshaping and metadata extraction
             try:
                 llm = extract_llm_fields(html_path, plain_text, session_id)
                 tags = llm.get('tags', [])
@@ -291,7 +286,6 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path):
                 page_status = "upstream_task_failed"
                 page_error = str(e)
 
-            # Read from metadata csv file
             tags_yaml = '\n'.join(f'  - "{t}"' for t in tags)
             create_date, csv_path, csv_rows = _get_create_date(html_path)
             note_type = _classify_note_type(html_path.stem)
@@ -303,49 +297,25 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path):
                            "---\n\n"
                            )
 
-            # Concatenate and save final content of .md file
-            export_dt = _now_utc()
-            try:
-                md_path.write_text(frontmatter + md_body, encoding="utf-8")
-                saved_md_path = str(md_path)
-                # Update metadata by adding info of .md file
-                if csv_path:
-                    new_csv_rows = _update_csv_row(csv_rows, html_path, md_path, export_dt)
-                    save_csv(csv_path, new_csv_rows)
-            except Exception as e:
-                logger.error(f"⚠️  Failed to save .md [{md_path.name}]: {e}")
-                if page_status == "successed":
-                    page_status = "save_failed"
-                    page_error = str(e)
+            pages.append({"session_id": session_id,
+                          "notebook": nb_name,
+                          "section": html_path.parent.name,
+                          "page_title": html_path.stem,
+                          "html_path": html_path,
+                          "md_path": md_path,
+                          "content": frontmatter + md_body,
+                          "csv_path": csv_path,
+                          "csv_rows": csv_rows,
+                          "note_type": note_type,
+                          "img_count": img_count,
+                          "page_status": page_status,
+                          "page_error": page_error,
+                          "export_dt": _now_utc(),
+                          })
 
-            log_page_conversion(session_id=session_id,
-                                notebook=nb_name,
-                                section=html_path.parent.name,
-                                page_title=html_path.stem,
-                                html_path=str(html_path),
-                                md_path=saved_md_path,
-                                note_type=note_type,
-                                img_count=img_count,
-                                status=page_status,
-                                error_msg=page_error,
-                                application=Path(__file__).resolve().name,
-                                )
-
-            total_imgs += img_count
-            total_pages += 1
             logger.info(
                 f"Notebook Section [{html_path.parent.name}]: {html_path.stem}.md (with {img_count} imgs, {note_type})")
 
-            # Short delay to avoid hitting API rate limits 429
             time.sleep(0.5)
 
-    logger.success(f"✅ Done — {total_pages} pages, {total_imgs} image refs,"
-                   f".md files were output to: {nb_src}"
-                   f"metadata of .html and .md files were output to: {nb_src}")
-
-
-if __name__ == "__main__":
-
-    EXPORT_DIR = Path("/Users/little_po/Desktop/Obsidian/OneNote-Export")
-    SELECTED = ['生技製劑筆記本/General technical knowledge', "/Users/little_po/Desktop/Obsidian/OneNote-Export/生技製劑筆記本/GMP"]
-    t_html_to_markdown(SELECTED, EXPORT_DIR)
+    return pages
