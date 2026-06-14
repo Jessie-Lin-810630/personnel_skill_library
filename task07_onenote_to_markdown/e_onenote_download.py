@@ -248,7 +248,7 @@ def prompt_selection(notebooks: list[dict]) -> list[str]:
     for i, nb in enumerate(notebooks, 1):
         sec_str = ", ".join(nb["sections"]) or "（無 section）"
         print(f"  [{i}] {nb['name']} — {len(nb['sections'])} 個 section（{sec_str}）")
-    print()
+
     raw = input("請輸入要下載的編號（如 1 或 1,3，或輸入「全部」）：").strip()
     if raw.lower() in ("全部", "all"):
         return [nb["id"] for nb in notebooks]
