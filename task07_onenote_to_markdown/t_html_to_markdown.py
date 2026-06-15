@@ -1,8 +1,6 @@
-from .utils.audit_log import log_llm_call, log_page_conversion, _now_utc
-from markdownify import MarkdownConverter
+from .utils.audit_log import log_llm_call, _now_utc, get_page_meta
 import os
 import re
-import csv
 import sys
 import time
 import uuid
@@ -61,21 +59,6 @@ def _get_genai_client() -> genai.Client:
                         credentials=credentials)
 
 
-def _normalize_date(dt_str: str):
-    if not dt_str:
-        return ""
-    if 'T' in dt_str:
-        return dt_str.split('T')[0]
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}', dt_str):
-        return dt_str
-    if re.fullmatch(r'\d{8}', dt_str):
-        return f"{dt_str[:4]}-{dt_str[4:6]}-{dt_str[6:8]}"
-    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', dt_str)
-    if m:
-        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    return dt_str
-
-
 def _classify_note_type(filename: str):
     DATE_IN_FILENAME = re.compile(r'\d{4}-\d{2}-\d{2}|'
                                   r'\d{8}(?!\d)|'
@@ -85,7 +68,8 @@ def _classify_note_type(filename: str):
     return 'daily_log' if DATE_IN_FILENAME.search(filename) else 'knowledge_summary'
 
 
-def extract_llm_fields(html_path: Path, plain_text: str, session_id: str):
+def extract_llm_fields(html_path: Path, plain_text: str, session_id: str,
+                       page_id: str | None = None):
     """Ask Gemini to reshape content and extract tags/alias. Retry on rate limit."""
     max_retries = 3
 
@@ -134,112 +118,34 @@ def extract_llm_fields(html_path: Path, plain_text: str, session_id: str):
             logger.debug(f"input_tokens {input_tokens} + output_tokens {output_tokens} "
                          f"+ thinking_tokens {thinking_tokens} = {total_used} total tokens")
 
-            # Write in log
-            log_llm_call(session_id=session_id,
+            log_llm_call(page_id=page_id,
                          model=RESHAPE_MODEL,
                          html_path=str(html_path),
-                         attempt=attempt+1,
-                         status="successed",
+                         attempt_id=attempt+1,
+                         status="success",
                          latency_ms=int((time.perf_counter() - t0) * 1000),
                          input_tokens=input_tokens,
                          output_tokens=output_tokens,
                          thinking_tokens=thinking_tokens,
+                         total_tokens=total_used,
                          error_msg=None,
-                         application=Path(__file__).resolve().name,
                          )
             return raw
         except Exception as e:
-            log_llm_call(session_id=session_id,
+            log_llm_call(page_id=page_id,
                          model=RESHAPE_MODEL,
                          html_path=str(html_path),
-                         attempt=attempt+1,
-                         status="failed",
+                         attempt_id=attempt+1,
+                         status="failure",
                          latency_ms=int((time.perf_counter() - t0) * 1000),
                          input_tokens=None,
                          output_tokens=None,
                          thinking_tokens=None,
+                         total_tokens=None,
                          error_msg=str(e),
-                         application=Path(__file__).resolve().name,
                          )
             logger.warning(f'error on calling {RESHAPE_MODEL}: {e}, retry for {attempt} attempts.')
             continue
-
-
-def load_csv(csv_path: Path) -> list[dict]:
-    try:
-        with open(csv_path, newline='', encoding='utf-8') as f:
-            return list(csv.DictReader(f))
-    except FileNotFoundError:
-        logger.error(f"File {csv_path} not existed.")
-        raise
-    except PermissionError:
-        logger.error(f"Error: No permission to read '{csv_path}'")
-        raise
-    except Exception as e:
-        logger.error(f"Error: Unexpected error, msg: {e}")
-        raise
-
-
-def save_csv(csv_path: Path, rows: list[dict]) -> None:
-    if not rows:
-        logger.warning(f"No information written to {str(csv_path)}")
-        return
-    try:
-        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(rows)
-    except PermissionError:
-        logger.error(f"Error: No permission to write '{csv_path}'")
-        raise
-    except Exception as e:
-        logger.error(f"Error: Unexpected error, msg: {e}")
-        raise
-
-
-def _get_create_date(target_html_path: Path) -> tuple[str, Path, list]:
-    """Return tuple of (create_date_str, csv_path, rows) from CSV file 
-    containing page's metadata of each section.
-    """
-    csv_candidates = list(target_html_path.parent.glob('*_pages_metadata.csv'))
-    if not csv_candidates:
-        return "", None, []
-    csv_path = csv_candidates[0]
-    rows = load_csv(csv_path)
-    if rows:
-        for row in rows:
-            if Path(row.get('html_path', '')) == target_html_path:
-                create_date_str = _normalize_date(row.get('created_datetime', ''))
-                return create_date_str, csv_path, rows
-    return "", csv_path, rows
-
-
-def _update_csv_row(rows: list[dict],
-                    html_path: Path,
-                    md_path: Path,
-                    export_dt: str) -> list[dict]:
-    for row in rows:
-        if 'markdownExportDateTime' not in row.keys():
-            row.setdefault('markdownExportDateTime', '')
-        if 'markdown_path' not in row.keys():
-            row.setdefault('markdown_path', '')
-
-    html_str = str(html_path)
-    for row in rows:
-        if row.get('html_path') == html_str:
-            row['markdownExportDateTime'] = export_dt
-            row['markdown_path'] = str(md_path)
-            return rows
-
-    # Page not in CSV yet — append a minimal row
-    rows.append({'title': html_path.stem,
-                 'created_datetime': '',
-                 'modified_datetime': '',
-                 'html_path': html_str,
-                 'markdownExportDateTime': export_dt,
-                 'markdown_path': str(md_path),
-                 })
-    return rows
 
 
 def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
@@ -275,8 +181,13 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> 
             soup = convert_img_tag_to_md_str(html_content)
             plain_text = soup.get_text(' ', strip=True)
 
+            meta = get_page_meta(str(html_path.resolve()))
+            page_id = meta.get("page_id")
+            html_created_at = meta.get("html_created_at")
+            create_date = html_created_at.strftime("%Y-%m-%d") if isinstance(html_created_at, datetime) else ""
+
             try:
-                llm = extract_llm_fields(html_path, plain_text, session_id)
+                llm = extract_llm_fields(html_path, plain_text, session_id, page_id=page_id)
                 tags = llm.get('tags', [])
                 alias = llm.get('alias', html_path.stem)
                 md_body = llm.get('new_content', plain_text)
@@ -287,7 +198,6 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> 
                 page_error = str(e)
 
             tags_yaml = '\n'.join(f'  - "{t}"' for t in tags)
-            create_date, csv_path, csv_rows = _get_create_date(html_path)
             note_type = _classify_note_type(html_path.stem)
             frontmatter = ("---\n"
                            f"tags:\n{tags_yaml}\n"
@@ -298,14 +208,13 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> 
                            )
 
             pages.append({"session_id": session_id,
+                          "page_id": page_id,
                           "notebook": nb_name,
                           "section": html_path.parent.name,
                           "page_title": html_path.stem,
                           "html_path": html_path,
                           "md_path": md_path,
                           "content": frontmatter + md_body,
-                          "csv_path": csv_path,
-                          "csv_rows": csv_rows,
                           "note_type": note_type,
                           "img_count": img_count,
                           "page_status": page_status,
