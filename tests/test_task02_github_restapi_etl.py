@@ -121,12 +121,14 @@ class GithubExtractTests(unittest.TestCase):
             e_request_github_api, "_paginate", return_value=[{"sha": "abc123"}]
         ) as paginate:
             commits = e_request_github_api.fetch_a_repo_commits(
-                "octocat", "hello-world", {"Authorization": "Bearer token"}
+                "octocat", "hello-world", {"Authorization": "Bearer token"}, ["main"]
             )
 
         paginate.assert_called_once_with(
             "https://api.github.com/repos/octocat/hello-world/commits",
             {"Authorization": "Bearer token"},
+            {"sha": "main"},
+            timeout=30,
         )
         self.assertEqual(commits, [{"sha": "abc123"}])
 
@@ -188,6 +190,7 @@ class GithubTransformTests(unittest.TestCase):
                 "commit": {
                     "message": "initial commit",
                     "author": {"date": "2026-04-20T12:00:00Z"},
+                    "committer": {"email": "jessie@example.com"},
                 },
             }
         ]
@@ -197,7 +200,7 @@ class GithubTransformTests(unittest.TestCase):
         }
 
         repo_doc = t_transform_github.build_repo_document(
-            raw_repo, "jessie", raw_commits, raw_readme
+            raw_repo, "jessie", "jessie@example.com", raw_commits, raw_readme
         )
 
         self.assertEqual(repo_doc["repo_id"], 10)
@@ -232,7 +235,7 @@ class GithubTransformTests(unittest.TestCase):
             "created_at": "2026-04-01T00:00:00Z",
         }
 
-        repo_doc = t_transform_github.build_repo_document(raw_repo, "jessie", [], {})
+        repo_doc = t_transform_github.build_repo_document(raw_repo, "jessie", "", [], {})
 
         self.assertEqual(repo_doc["role"], "collaborator")
         self.assertEqual(repo_doc["language"], "others")
@@ -390,6 +393,7 @@ class GithubMainTests(unittest.TestCase):
             {
                 "GITHUB_TOKEN": "token-123",
                 "GITHUB_USERNAME": "jessie",
+                "GITHUB_MAIL": "jessie@example.com",
                 "MONGO_URI": "mongodb://localhost:27017",
                 "MONGO_DB_NAME": "skill_library",
             },
@@ -397,6 +401,8 @@ class GithubMainTests(unittest.TestCase):
         ), patch.object(main, "_get_headers", return_value={"Authorization": "Bearer token-123"}) as get_headers, patch.object(
             main, "fetch_repos", return_value=raw_repos
         ) as fetch_repos, patch.object(
+            main, "fetch_all_branches", side_effect=[["main"], ["main"]]
+        ) as fetch_all_branches, patch.object(
             main, "fetch_a_repo_commits", side_effect=[["c1"], ["c2"]]
         ) as fetch_commits, patch.object(
             main, "fetch_a_repo_readme", side_effect=[{"readme_summary": "a"}, {"readme_summary": "b"}]
@@ -415,14 +421,15 @@ class GithubMainTests(unittest.TestCase):
 
         get_headers.assert_called_once_with("token-123", "jessie")
         fetch_repos.assert_called_once_with({"Authorization": "Bearer token-123"})
+        self.assertEqual(fetch_all_branches.call_count, 2)
         self.assertEqual(fetch_commits.call_count, 2)
         self.assertEqual(fetch_readme.call_count, 2)
         self.assertEqual(build_repo_document.call_count, 2)
         build_repo_document.assert_any_call(
-            raw_repos[0], "jessie", ["c1"], {"readme_summary": "a"}
+            raw_repos[0], "jessie", "jessie@example.com", ["c1"], {"readme_summary": "a"}
         )
         build_repo_document.assert_any_call(
-            raw_repos[1], "jessie", ["c2"], {"readme_summary": "b"}
+            raw_repos[1], "jessie", "jessie@example.com", ["c2"], {"readme_summary": "b"}
         )
         build_summary_document.assert_called_once_with(repo_docs)
         get_db.assert_called_once_with("mongodb://localhost:27017", "skill_library")

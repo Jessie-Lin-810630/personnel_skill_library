@@ -204,12 +204,11 @@ class MainRunTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "OBSIDIAN_VAULT_PATH": "/vault",
-                "MONGO_URI": "mongodb://localhost:27017",
+                "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                 "MONGO_DB_NAME": "skill_library",
             },
             clear=False,
-        ), patch.object(main, "scan_vault", return_value=raw_notes) as scan_vault, patch.object(
+        ), patch.object(main, "scan_vault_gs", return_value=raw_notes) as scan_vault_gs, patch.object(
             main, "build_note_documents", return_value=cleaned_notes
         ) as build_notes, patch.object(
             main, "build_summary_document", return_value=summary
@@ -222,7 +221,7 @@ class MainRunTests(unittest.TestCase):
         ) as upsert_summary:
             main.run_task01()
 
-        scan_vault.assert_called_once_with("/vault")
+        scan_vault_gs.assert_called_once_with("personal-vaults")
         build_notes.assert_called_once_with(raw_notes)
         build_summary.assert_called_once_with(raw_notes)
         get_db.assert_called_once_with("mongodb://localhost:27017", "skill_library")

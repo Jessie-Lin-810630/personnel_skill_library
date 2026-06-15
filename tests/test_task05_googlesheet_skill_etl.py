@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
+import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
@@ -158,8 +159,8 @@ class SkillTransformTests(unittest.TestCase):
         self.assertEqual(top_row["雷達軸"], "流程設計能力")
         self.assertEqual(top_row["經手任務個數"], 2)
         self.assertEqual(top_row["各軸向任務最高分"], 12)
-        self.assertEqual(top_row["任務經驗值"], 1.0)
-        self.assertEqual(top_row["單軸總分"], 13.0)
+        self.assertAlmostEqual(top_row["任務經驗值"], np.round(np.log10(2), 6), places=5)
+        self.assertAlmostEqual(top_row["單軸總分"], np.round(12 + np.log10(2), 2), places=5)
         self.assertEqual(top_row["level"], 3)
 
     def test_build_combined_summaries_concatenates_dataframes(self):
@@ -211,8 +212,8 @@ class SkillLoadTests(unittest.TestCase):
         db = FakeDb()
         df = pd.DataFrame(
             [
-                {"雷達軸": "流程設計能力", "單軸總分": 13.0},
-                {"雷達軸": "文件撰寫能力", "單軸總分": 4.0},
+                {"雷達軸": "流程設計能力", "經手任務": "task-a", "單軸總分": 13.0},
+                {"雷達軸": "文件撰寫能力", "經手任務": "task-b", "單軸總分": 4.0},
             ]
         )
 
@@ -221,10 +222,13 @@ class SkillLoadTests(unittest.TestCase):
 
         collection = db.collections["skill_scores_biotech"]
         self.assertEqual(len(collection.bulk_operations), 2)
-        self.assertEqual(collection.bulk_operations[0].filter_doc, {"雷達軸": "流程設計能力"})
+        self.assertEqual(
+            collection.bulk_operations[0].filter_doc,
+            {"雷達軸": "流程設計能力", "經手任務": "task-a"},
+        )
         self.assertEqual(
             collection.bulk_operations[0].update_doc,
-            {"$set": {"雷達軸": "流程設計能力", "單軸總分": 13.0}},
+            {"$set": {"雷達軸": "流程設計能力", "經手任務": "task-a", "單軸總分": 13.0}},
         )
         self.assertTrue(collection.bulk_operations[0].upsert)
 
