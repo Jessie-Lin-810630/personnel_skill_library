@@ -4,9 +4,11 @@
 
 ## 前置條件確認
 **執行環境**：macOS with Web browser / VS Code IDE / pyenv (Python 3.14) / Poetry
-**AI tool**： Claude code + OpenSpec skill (started implementing since the creation of this branch)
-**開發分支**：`new` branch, `feature/html-to-markdown`
-**目的分支**：`develop`
+**AI tool**： Claude code + OpenSpec skill (從這分支開始導入，將陸續併入其他分支)
+**開發分支**：
+  - `new` branch, `feature/html-to-markdown`: 開發「負責從 OneNote graph API 下載筆記，清理轉成 markdown，暫存本地硬碟或 GCS 」的 ETL 任務。並設計任務運行中的 「audit log 與 筆記轉到 mardown 的數據血緣」寫到 MongoDB Altas 中。
+  - existing branch, `feature/dashboard-ui`: 開發「呈現 AI 摘要與結構調整產出 markdown 前與後的筆記內容，人工評測 AI 可靠性頁面，並將人工核可資料做自動化歸檔」的新的互動頁面，需有層級管理。
+**目的整併至分支**：`develop`
 
 
 ## 專案資料夾結構
