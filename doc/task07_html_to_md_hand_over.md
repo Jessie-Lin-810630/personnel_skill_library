@@ -1,12 +1,13 @@
-# Feature Branch: `feature/html-to-markdown` — 新支線開發執行成果摘要
+# # Task07 Hand-over: 新 Task07 開發計畫
 
-> **開發目標**：展示一個從生技領域跨足到資料工程的雙棲求職者所具備的知識庫與資料工程技術。既定計劃從LeetCode、ccClub、GitHub、 Google Sheet、local Obsidian 盤點個人技能範疇，並寫入 MongoDB Altas，local Obsidian vault 作為學習機器人的 RAG 來源。而後自 2026-05-30 起，計畫新增支線將 Microsoft OneNote 筆記萃取、清洗/轉換、存於 MongoDB Altas，此 ETL 數據管道在於為慣用微軟 OneNote 筆記軟體但不習慣/尚未學習 markdown 語法做筆記的使用者/單位，清理出適合用於機器學習、AI 模型閱讀的形式，以長遠更能有效擴展 RAG 外部知識庫的可用性，減少因為過往檔案格式與 現代 AI 工具不全相容而導致知識無法有效管理、保留、被 AI 理解後服務人類的窘境。
+> **開發目標**：展示一個從生技領域跨足到資料工程的雙棲求職者所具備的知識庫與資料工程技術。既定計劃從LeetCode、ccClub、GitHub、 Google Sheet、local Obsidian 盤點個人技能範疇，並寫入 MongoDB Altas，local Obsidian vault 作為學習機器人的 RAG 來源。而後自 2026-05-30 起，計畫新增支線將 Microsoft OneNote 筆記萃取、清洗/轉換、存於 MongoDB Altas，此 ETL 數據管道在於為慣用微軟 OneNote 筆記軟體但不習慣/尚未學習 markdown 語法做筆記的使用者/單位，清理出適合用於機器學習、AI 模型閱讀的形式，以長遠更能有效擴展 RAG 外部知識庫的可用性，減少因為過往檔案格式、筆記軟體與 現代 AI 工具交換資料時，格式解析後不全相容而導致知識無法有效管理、保留、被 AI 理解後服務人類的窘境。
 
-> **完成日期**：2026-06-14
+## 前置條件確認
+**執行環境**：macOS with Web browser / VS Code IDE / pyenv (Python 3.14) / Poetry
+**AI tool**： Claude code + OpenSpec skill (started implementing since the creation of this branch)
+**開發分支**：`new` branch, `feature/html-to-markdown`
+**目的分支**：`develop`
 
-> **執行環境**：macOS with Web browser / VS Code IDE / pyenv (Python 3.14) / Poetry
-
----
 
 ## 專案資料夾結構
 
@@ -26,7 +27,7 @@ feature/html-to-markdown/
 │    ├── openspec-onboard/       # One of 11 Skills for SDD
 │    └── ..../
 │
-├── task07_obsidian_etl/
+├── task07_onenote_to_markdown/
 │   ├── e_onenote_download.py    # Extract and download raw notes 
 │   │                            # from Azure OneNote Graph API.
 │   ├── t_html_to_markdown.py    # Parsing raw .html file to 
@@ -56,9 +57,9 @@ Azure graph API
 - gemini 2.5 flash lite model
 
 ### database, data storage
-- MongoDB Altas (for log storage)
-- local filesytem (for storage of the first fetched html and generated markdown files)
-- GCS (data lake receiving the html and markdown files uploaded from local side)
+- MongoDB Altas (for storage of the api logs, and the metadata of fetched html and generated markdown files during runnning task07)
+- local file system (for temporary storage of the first fetched html and generated markdown files)
+- GCS (data lake receiving all the html files, markdown files and images uploaded from local file system)
 
 
 ### Brown layer - Storage of raw notes
@@ -283,10 +284,10 @@ gcs://personal-vaults
   { archived_at: -1 }
 ```
 
-#### Definition of available values for column Status and Review_result
+##### Definition of available values for column Status and Review_result in "Collection 3"
 | Scenarios                                     | status         |review_result |
 | ---------------------------------------- | -------------- |-------------- |
-| 剛從 OneNote graph API 抓下來，但是寫入 html 失敗     | fetched（卡住，從C1回推 error msg）    | null |
+| 剛從 OneNote graph API 抓下來，但是寫入 html 失敗或     | fetched（卡住，從C1回推 error msg）    | null |
 | Gemini LLM 正在生成     | fetched    | null |
 | Gemini LLM 生成失敗 | summarized failed（卡住，從C2回推 error msg） | null |
 | Gemini LLM 有回但寫 .md 檔失敗 | saved failed（卡住，從C2回推 error msg） | null |
@@ -305,7 +306,7 @@ gcs://personal-vaults
 
 1. 抓取 OneNote — 請求Azure OneNote Graph API ，把 html 與 png 存在地端筆電 (中間需由筆記持有者操作瀏覽器登入允許委派權限(delegated authentication)來讓呼叫端取得 token)，存放路徑 `'~/Desktop/Obsidian/OneNote-Export/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.html'`、`'~/Desktop/Obsidian/OneNote-Export/{帳戶名}/{筆記本名}/{章節名}/_images/{images_id}.png`。帳戶名取 owner email 的 @ 前段。同時在 MongoDB Atlas append 一筆紀錄到 [Collection-1-onenote-graph-api-logs](#collection-1-onenote-graph-api-logs)，upsert 一筆紀錄到 [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage)的欄位`page_id`、`notebook`、`section`、`page_title`、`html_path`、`html_created_at`、`html_modified_at`、`img_count_in_html`、`img_path`、`status`。Collection 3 其他欄位均初始化為 null。
 
-2. Gemini 摘要成 .md — 用 google genai SDK 調用 Gemini 2.5 Flash Lite 把 地端存放的 html `全部` 重新結構化成 markdown，存放路徑架構為 `'~/Desktop/Obsidian/OneNote-Export/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.md'`，確保 .md 中的圖片是相對路徑表示，以利可以渲染 _images/ 下的圖片。同時在 MongoDB Atlas append 一筆紀錄到 [Collection-2-gemini-25-flash-lite-llm-log](#collection-2-gemini-25-flash-lite-llm-log)，upsert 一筆紀錄到 [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage)的欄位`md_path`、`img_path`、`md_exported_at`、`note_type`、`status`、`error_msg`。
+2. Gemini 摘要成 .md — 用 google genai SDK 調用 Gemini 2.5 Flash Lite 把 地端存放的 html `全部` 重新結構化成 markdown，存放路徑架構為 `'~/Desktop/Obsidian/OneNote-Export/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.md'`，確保 .md 中的圖片是相對路徑表示，以利可以渲染 _images/ 下的圖片。同時在 MongoDB Atlas append 一筆紀錄到 [Collection-2-gemini-25-flash-lite-llm-log](#collection-2-gemini-25-flash-lite-llm-log)，upsert 一筆紀錄到 [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage)的欄位`md_path`、`md_exported_at`、`note_type`、`status`、`error_msg`。
 > 全部結構化是希望透過單人測試先全量 eager 產出，順便當壓力測試量單人 token 貢獻。
 > 更好的結構與成本控管應該是讓使用者選擇即時結構化與生成指定筆記，避免浪費資源。
 
@@ -313,11 +314,12 @@ gcs://personal-vaults
   - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.md'`   
   - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.html'`  
   - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/_images/{image_id}.png'`
-  
-  然後，在MongoDB Altas upsert[collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage)的欄位`status`。
-  
+
+> 完成到步驟3，此分支就算工作結束。
+
 4. 切換到 repo branch `feature/dashboard-ui` 開發：
-  - 地端開發且新增 streamlit 對照頁 : 左邊渲染 staging 的 html、右邊渲染轉出的 .md，上方有檢核狀態查核鈕、筆記名稱切換清單，最下方放檢核確認按鈕，用來提供使用者足夠的 AI 工具的資訊透明度。
+  - 地端開發新 streamlit 對照頁 : 左邊渲染 staging 的 html、右邊渲染轉出的 .md，上方有檢核狀態查核鈕、筆記名稱切換清單，最下方放檢核確認按鈕，用來提供使用者足夠的 AI 工具的資訊透明度。
+  - html、md、md 內文的 png 取自 步驟3 上傳的 GCS，files 的 metadata (collection 3) 從 MongoDB Altas 讀取。
   - 這個對照頁也需要頁面加 demo 級登入窗擋陌生人。
   - 使用者會評估Gemini 模型是否生成令人滿意後再檢核確認按鈕按下 `approved`，觸發步驟 5。
   - 同 `feature/dashboard-ui` 開發習慣，Streamlit 網頁在地端檢查。

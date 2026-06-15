@@ -35,10 +35,10 @@ poetry run python -m task06_obsidian_embed_etl.main
 poetry run python -m task07_onenote_to_markdown.main
 
 # 執行所有測試
-poetry run pytest
+poetry run python -m unittest discover -s tests
 
 # 執行單一測試檔
-poetry run pytest tests/test_task03_leetcode_ccClub_etl.py -v
+poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 ```
 
 ## 架構說明
@@ -48,7 +48,7 @@ poetry run pytest tests/test_task03_leetcode_ccClub_etl.py -v
 每個 task 資料夾內的檔名以前綴區分 ETL 階段：
 - `e_*.py` — Extract（資料抓取）
 - `t_*.py` — Transform（清洗、轉換）
-- `l_*.py` — Load（寫入目的地；多數為 MongoDB，task07 例外為本地磁碟）
+- `l_*.py` — Load（寫入目的地；多數為 MongoDB，task07 同時寫本地 `.md` 檔與 MongoDB）
 - `main.py` — 串接 E → T → L 的入口
 
 ### ETL Tasks 與輸出目的地
@@ -60,30 +60,13 @@ poetry run pytest tests/test_task03_leetcode_ccClub_etl.py -v
 | task03 | LeetCode GraphQL API + ccClub REST API | MongoDB：`solved_problems_on_ccClub`, `solved_problems_on_leetcode`, `ccClub&leetcode_summary` |
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
 | task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
-| task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：與 HTML 同目錄寫出 `.md` 檔，同時更新 `*_pages_metadata.csv` |
+| task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
 
-task01–task06 的 Load 步驟以唯一欄位做 `upsert`，支援冪等重複執行。task07 直接覆寫同名 `.md` 檔，同樣可重複執行。
+所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
-### task07 OneNote-to-Markdown ETL
-
-**資料流：** OneNote（Graph API）→ HTML 檔（本地）→ Gemini LLM 重整 → `.md` 檔（本地）
-
-**腳本職責：**
-- `e_onenote_download.py` — 透過 MSAL 取得 token，呼叫 Microsoft Graph API 下載 notebook pages 為 HTML 檔與圖片，輸出 `*_pages_metadata.csv`
-- `t_html_to_markdown.py` — 讀 HTML、呼叫 Gemini（`gemini-2.5-flash-lite`）重整內容並萃取 tags／alias，組合 YAML frontmatter，回傳 `list[dict]`（不直接寫檔）
-- `l_save_markdown.py` — 接收 T 的輸出，將 `.md` 寫至與 HTML 同目錄，更新 metadata CSV，寫入 audit log
-- `main.py` — 入口，E → T → L；若未設定 `ONENOTE_SELECTED_NOTEBOOKS`，自動列出 `ONENOTE_OUTPUT_DIR` 下的子目錄供互動選擇
-
-**執行指令：**
-```bash
-poetry run python -m task07_onenote_to_markdown.main
-```
-
-**task07 專用環境變數：**
-- `ONENOTE_CLIENT_ID` — Azure App Registration Client ID
-- `ONENOTE_OUTPUT_DIR` — HTML 與 `.md` 的輸出根目錄（本地路徑）
-- `ONENOTE_NOTEBOOK_IDS` — （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇
-- `ONENOTE_SELECTED_NOTEBOOKS` — （選填）逗號分隔的 notebook 子路徑（相對於 `ONENOTE_OUTPUT_DIR`）；省略則於終端機互動選擇
+> **需要修改 task01–task06 時**，請先閱讀 [`doc/branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md) 了解各 task 的資料來源、ETL 邏輯與 MongoDB schema。
+>
+> **需要修改 task07 時**，請先閱讀 [`doc/branch_html_to_md_summary.md`](doc/branch_html_to_md_summary.md) 了解 OneNote Graph API 下載、Gemini LLM 轉換、三個 MongoDB collections 的設計與狀態流轉。
 
 ### Dashboard UI（`dashboard_ui/`）
 
@@ -111,6 +94,10 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 - `AGENT_PLATFORM_USER_CREDENTIALS` — Vertex AI Gemini service account（`env/agent-platform-user.json`）
 - `GCP_PROJECT_ID` — GCP 專案 ID
 - LeetCode / ccClub 的 cookies 與 token
+- `ONENOTE_CLIENT_ID` — Azure App Registration Client ID（task07）
+- `ONENOTE_OUTPUT_DIR` — HTML / `.md` 輸出根目錄；實際寫入路徑為 `{ONENOTE_OUTPUT_DIR}/{帳號}/{筆記本}/{章節}/`（task07）
+- `ONENOTE_NOTEBOOK_IDS` — （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇（task07）
+- `ONENOTE_SELECTED_NOTEBOOKS` — （選填）逗號分隔的 notebook 名稱；省略則於終端機互動選擇（task07）
 
 ## 部署架構（Phase II+）
 
