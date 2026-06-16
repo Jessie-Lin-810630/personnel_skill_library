@@ -1,7 +1,7 @@
 from .utils.audit_log import log_llm_call, _now_utc, get_page_meta
+from .l_save_markdown import save_one_page
 import os
 import re
-import sys
 import time
 import uuid
 from dotenv import load_dotenv
@@ -56,7 +56,9 @@ def _get_genai_client() -> genai.Client:
     return genai.Client(vertexai=True,
                         project=project,
                         location=location,
-                        credentials=credentials)
+                        credentials=credentials,
+                        # http_options=types.HttpOptions(timeout=600)
+                        )
 
 
 def _classify_note_type(filename: str):
@@ -68,7 +70,7 @@ def _classify_note_type(filename: str):
     return 'daily_log' if DATE_IN_FILENAME.search(filename) else 'knowledge_summary'
 
 
-def extract_llm_fields(html_path: Path, plain_text: str, session_id: str,
+def extract_llm_fields(client: genai.Client, html_path: Path, plain_text: str, session_id: str,
                        page_id: str | None = None):
     """Ask Gemini to reshape content and extract tags/alias. Retry on rate limit."""
     max_retries = 3
@@ -92,8 +94,8 @@ def extract_llm_fields(html_path: Path, plain_text: str, session_id: str,
     for attempt in range(max_retries):
         t0 = time.perf_counter()
         try:
-            client = _get_genai_client()
-            logger.info(f"Calling Model: {RESHAPE_MODEL}...")
+            logger.info(f"Calling Model: {RESHAPE_MODEL} for No. {attempt+1} attempt: \n"
+                        f"Notebook Section/Page [{html_path.parent.name}/{html_path.stem}]")
             response = client.models.generate_content(model=RESHAPE_MODEL,
                                                       contents=prompts,
                                                       config=types.GenerateContentConfig(
@@ -144,7 +146,7 @@ def extract_llm_fields(html_path: Path, plain_text: str, session_id: str,
                          total_tokens=None,
                          error_msg=str(e),
                          )
-            logger.warning(f'error on calling {RESHAPE_MODEL}: {e}, retry for {attempt} attempts.')
+            logger.warning(f'Error on calling {RESHAPE_MODEL}: {e}. Will retry for {attempt+2} attempts.')
             continue
 
 
@@ -158,10 +160,14 @@ def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
     return soup
 
 
-def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> list[dict]:
-    """Transform HTML pages to markdown content. Returns a list of page dicts for the Load step."""
+def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> None:
+    """Transform HTML pages to markdown and save each page immediately to disk + MongoDB."""
     session_id = uuid.uuid4().hex
-    pages = []
+    total_pages = 0
+    total_imgs = 0
+    fail_pages = 0
+    fail_imgs = 0
+    client = _get_genai_client()
 
     for nb_name in SELECTED_NOTEBOOK:
         nb_src = EXPORT_DIR / nb_name if isinstance(EXPORT_DIR, Path) else Path(EXPORT_DIR) / nb_name
@@ -187,15 +193,19 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> 
             create_date = html_created_at.strftime("%Y-%m-%d") if isinstance(html_created_at, datetime) else ""
 
             try:
-                llm = extract_llm_fields(html_path, plain_text, session_id, page_id=page_id)
+                llm = extract_llm_fields(client, html_path, plain_text, session_id, page_id=page_id)
                 tags = llm.get('tags', [])
                 alias = llm.get('alias', html_path.stem)
                 md_body = llm.get('new_content', plain_text)
             except Exception as e:
-                logger.warning(f"  ⚠️  LLM extraction failed: {e}")
-                tags, alias, md_body = [], html_path.stem, plain_text
-                page_status = "upstream_task_failed"
-                page_error = str(e)
+                logger.warning(f"  ⚠️  LLM extraction failed, skip saving: {e}")
+                fail_pages += 1
+                fail_imgs += img_count
+                continue
+            finally:
+                total_pages += 1
+                total_imgs += img_count
+                time.sleep(0.5)
 
             tags_yaml = '\n'.join(f'  - "{t}"' for t in tags)
             note_type = _classify_note_type(html_path.stem)
@@ -207,24 +217,24 @@ def t_html_to_markdown(SELECTED_NOTEBOOK: list[str], EXPORT_DIR: str | Path) -> 
                            "---\n\n"
                            )
 
-            pages.append({"session_id": session_id,
-                          "page_id": page_id,
-                          "notebook": nb_name,
-                          "section": html_path.parent.name,
-                          "page_title": html_path.stem,
-                          "html_path": html_path,
-                          "md_path": md_path,
-                          "content": frontmatter + md_body,
-                          "note_type": note_type,
-                          "img_count": img_count,
-                          "page_status": page_status,
-                          "page_error": page_error,
-                          "export_dt": _now_utc(),
-                          })
+            page = {"session_id": session_id,
+                    "page_id": page_id,
+                    "notebook": nb_name,
+                    "section": html_path.parent.name,
+                    "page_title": html_path.stem,
+                    "html_path": html_path,
+                    "md_path": md_path,
+                    "content": frontmatter + md_body,
+                    "note_type": note_type,
+                    "img_count": img_count,
+                    "page_status": page_status,
+                    "page_error": page_error,
+                    "export_dt": _now_utc(),
+                    }
 
-            logger.info(
-                f"Notebook Section [{html_path.parent.name}]: {html_path.stem}.md (with {img_count} imgs, {note_type})")
+            save_one_page(page)
 
-            time.sleep(0.5)
-
-    return pages
+    if total_pages:
+        logger.success(f"✅ Done — Failure rate: {fail_pages}/{total_pages} pages, {fail_imgs}/{total_imgs} image.")
+    else:
+        logger.warning("No pages processed.")

@@ -5,7 +5,6 @@ from loguru import logger
 
 from .e_onenote_download import e_onenote_download
 from .t_html_to_markdown import t_html_to_markdown
-from .l_save_markdown import l_save_markdown
 
 load_dotenv()
 
@@ -13,7 +12,6 @@ load_dotenv()
 def run_task07_onenote_etl():
     # Extract: download OneNote pages as HTML files; returns OUTPUT_DIR / user_account
     export_dir = Path(e_onenote_download())
-
     selected_raw = os.getenv("ONENOTE_SELECTED_NOTEBOOKS", "").strip()
     if not selected_raw:
         candidates = [d.name for d in sorted(export_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
@@ -39,11 +37,8 @@ def run_task07_onenote_etl():
 
     logger.info(f"Transform: processing {len(selected_notebooks)} notebook(s) from {export_dir}")
 
-    # Transform: parse HTML → build markdown content + frontmatter
-    pages = t_html_to_markdown(selected_notebooks, export_dir)
-
-    # Load: write .md files and upsert MongoDB Collection 3
-    l_save_markdown(pages)
+    # Transform + Load: parse HTML → call Gemini → save .md + upsert MongoDB per page
+    t_html_to_markdown(selected_notebooks, export_dir)
 
 
 if __name__ == "__main__":
