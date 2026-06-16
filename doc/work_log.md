@@ -347,10 +347,10 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 ```
 
 ## 20260612 Work log
-1. Created new branch for new feature of conversion `.html` output from OneNote graph API to .`.md` files.
+1. Created new branch `html-to-md` for new feature of conversion `.html` output from OneNote graph API to .`.md` files.
 2. Installed Claude Code AI assistant.
 3. Installed `OpecSpec` for practice of Spec-Driven Development along with this project.
-4. Inititated the `task07_onenote_to_markdown` where intended to request the personal notes on Microsoft OneNote through the `Azure graph API`, download the raw notes as individual .html file and summarize the `metadata` of html files in .csv file.
+4. Inititated the testing scripts for pipeline `task07_onenote_to_markdown` where primarily intended to request the personal notes on Microsoft OneNote through the `Azure graph API`, download the raw notes as individual .html file and summarize the `metadata` of html files in .csv file.
 
 - The storage hierarchy of a metadata, .html files and .md files are temporarily operated as follows. Then the granularity of metadata is defined at page-level of a notebook. 
 
@@ -401,8 +401,10 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 ## 20260613 Work log
 1. Starting to draft the new transformation srcipt using the approach `S1`. This time, the LLM tested was `Gemini flash lite 2.5 lite`.
 > Price comparison between [Gemini 2.5 flash lite Model](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing?_gl=1*fk0iq6*_ga*MTEwMzU3Nzc5NS4xNzc2MzA1MzUw*_ga_WH2QY8WWF5*czE3ODEzMDkxMjMkbzExMiRnMSR0MTc4MTMxMDE3NCRqMjgkbDAkaDA.#gemini-models-2.5) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/pricing).
-> Rate limit comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/rate-limits) and []
+> Rate limit comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/rate-limits) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/api/rate-limits)
 > Token calculation comparison between [Gemini 2.5 flash lite Model](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/get-token-count?hl=zh-tw#gemini-get-token-count-samples-python_genai_sdk) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/usage/limits?focus=claude_haiku_4:rpm).
+> Context Window comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/models/overview).
+
 
 2. While testing the [`S1` pipeline](/task07_onenote_to_markdown/t_html_to_markdown.py) on the sampe OneNote page `供應商稽核.html`, **a data loss issue was identified: all `<img>` tags were silently dropped before the content was fed into LLM.** The root cause was `soup.get_text(' ', strip=True)`, which strips every HTML tag (including `<img>`) when converting BeautifulSoup tree to plain text. As a result, the LLM received no image-related information and was unable to place image references in the reshaped content.
 
@@ -433,4 +435,30 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 3. The output by LLM was sometimes not perfect. As tested result about the image with embedded table in the notebook `生技製劑筆記本/General technical knowledge/Mycoplasma`. LLM tried to analyze the semantic of the table in a statistic image and created new table via markdown syntax. Although the truth of such table, the original image, did not loss and it was referred by a link in the markdown context, the newly created table by AI need to be fairly and professionally `inspected to judge the reliability of using AI model`. This should be handed over to ML scientist and senior techinicans within biotech domain.
 
-4. 
+## 20260615 Work log
+1. Determined to use Gemini 2.5 flash lite LLM due to cheaper price.
+
+Feature  |  Gemini 2.5 flash lite   |   Haiki 4.5  |
+---------|--------------------------|--------------|
+Input token  |  1 M   |   200 K  |
+Output token  |  65 K   |   64 K  |
+Price  |  baseline   |   2x-higher than 2.5 flash lite  |
+
+2. Drafted whole development plan of `task07` in the branch`feature/html-to-md` and it future intention in the other branches. See the doc [`hand over`](./task07_html_to_md_hand_over.md).
+
+> All the development since then will follows this hand over to create the other spec. docs(if needed) and scripts.
+
+3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline. 
+
+## 20260616 Work log
+1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
+
+2. Moved `_get_genai_client()` out of the per-attempt retry loop: the `genai.Client` is now initialised **once** per pipeline run and passed into `extract_llm_fields()`, avoiding repeated credential reads and connection setup within a short window — which was the likely cause of Vertex AI throttling.
+
+3. It was observed that passing `http_options=types.HttpOptions(timeout=N)` to `genai.Client()` degraded the quality of LLM output (markdown with no heading hierarchy or line breaks), because the HTTP-layer timeout interrupted the model's thinking phase before generation was complete. This approach was abandoned; LLM hangs are instead handled by the existing retry-on-exception logic.
+
+> Should keep track of any note with `long context` that causes high latency between prompt submission and model response, as this is the most likely trigger for apparent hangs.
+
+4. Extracted `save_one_page()` as a standalone helper in `l_save_markdown.py`; `l_save_markdown()` is kept as a thin wrapper for backward compatibility. Added `continue` in the `except` block (with `finally` for counters) so that LLM failures skip disk write entirely rather than saving low-quality plain-text fallback.
+
+5. 
