@@ -39,7 +39,7 @@ from task07_onenote_to_markdown.t_html_to_markdown import (  # noqa: E402
     convert_img_tag_to_md_str,
     t_html_to_markdown,
 )
-from task07_onenote_to_markdown.l_save_markdown import l_save_markdown  # noqa: E402
+from task07_onenote_to_markdown.l_save_markdown import l_save_markdown, save_one_page  # noqa: E402
 
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
@@ -487,6 +487,8 @@ class ConvertImgTagTests(unittest.TestCase):
 
 
 class THtmlToMarkdownTests(unittest.TestCase):
+    # t_html_to_markdown() now returns None and calls save_one_page() per page.
+    # All assertions inspect save_one_page.call_args instead of a return value.
 
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -495,7 +497,7 @@ class THtmlToMarkdownTests(unittest.TestCase):
     def tearDown(self):
         self._tmpdir.cleanup()
 
-    def _write_html(self, nb: str, section: str, stem: str,
+    def _write_html(self, nb: str, section: str, stem: str = "my-note",
                     content: str = "<p>test content</p>") -> Path:
         sec_dir = self.export_dir / nb / section
         sec_dir.mkdir(parents=True, exist_ok=True)
@@ -503,98 +505,132 @@ class THtmlToMarkdownTests(unittest.TestCase):
         html_path.write_text(content, encoding="utf-8")
         return html_path
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    # decorator order: bottom → top maps to first → last positional arg after self
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_returns_list_of_dicts(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_returns_none(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = {"tags": ["python"], "alias": "Test", "new_content": "# Test"}
-        self._write_html("NB", "Sec", "my-note")
+        self._write_html("NB", "Sec")
         result = t_html_to_markdown(["NB"], self.export_dir)
-        self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 1)
+        self.assertIsNone(result)
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_page_dict_has_all_required_keys(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_save_one_page_called_once_on_success(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
+        mock_meta.return_value = {}
+        mock_llm.return_value = {"tags": ["python"], "alias": "Test", "new_content": "# Test"}
+        self._write_html("NB", "Sec")
+        t_html_to_markdown(["NB"], self.export_dir)
+        mock_save.assert_called_once()
+
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_page_dict_has_all_required_keys(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {"page_id": "pid-1"}
         mock_llm.return_value = {"tags": ["k1"], "alias": "Alias", "new_content": "body"}
         self._write_html("NB", "Sec", "page1")
-        result = t_html_to_markdown(["NB"], self.export_dir)
+        t_html_to_markdown(["NB"], self.export_dir)
+        page = mock_save.call_args[0][0]
         required = {"session_id", "page_id", "notebook", "section", "page_title",
                     "html_path", "md_path", "content", "note_type", "img_count",
                     "page_status", "page_error", "export_dt"}
-        self.assertTrue(required.issubset(result[0].keys()))
+        self.assertTrue(required.issubset(page.keys()))
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_content_starts_with_yaml_frontmatter(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_content_starts_with_yaml_frontmatter(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = {"tags": [], "alias": "T", "new_content": "# Hello"}
         self._write_html("NB", "S", "note")
-        content = t_html_to_markdown(["NB"], self.export_dir)[0]["content"]
+        t_html_to_markdown(["NB"], self.export_dir)
+        content = mock_save.call_args[0][0]["content"]
         self.assertIsInstance(content, str)
         self.assertTrue(content.startswith("---\n"))
         self.assertIn("---\n\n", content)
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_html_path_and_md_path_are_path_objects(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_html_path_and_md_path_are_path_objects(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = {"tags": [], "alias": "X", "new_content": "y"}
         self._write_html("NB", "S", "page")
-        page = t_html_to_markdown(["NB"], self.export_dir)[0]
+        t_html_to_markdown(["NB"], self.export_dir)
+        page = mock_save.call_args[0][0]
         self.assertIsInstance(page["html_path"], Path)
         self.assertIsInstance(page["md_path"], Path)
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_img_count_is_int_and_correct(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_img_count_is_int_and_correct(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = {"tags": [], "alias": "X", "new_content": "y"}
         self._write_html("NB", "S", "page",
                          content='<img src="_images/a.png"/><img src="_images/b.png"/>')
-        page = t_html_to_markdown(["NB"], self.export_dir)[0]
+        t_html_to_markdown(["NB"], self.export_dir)
+        page = mock_save.call_args[0][0]
         self.assertIsInstance(page["img_count"], int)
         self.assertEqual(page["img_count"], 2)
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_llm_exception_sets_upstream_task_failed(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_llm_exception_skips_save(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.side_effect = Exception("Gemini unavailable")
         self._write_html("NB", "S", "note", content="<p>fallback</p>")
-        page = t_html_to_markdown(["NB"], self.export_dir)[0]
-        self.assertEqual(page["page_status"], "upstream_task_failed")
-        self.assertIsNotNone(page["page_error"])
+        t_html_to_markdown(["NB"], self.export_dir)
+        mock_save.assert_not_called()
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_llm_returns_none_sets_upstream_task_failed(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_llm_returns_none_skips_save(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = None  # None.get() → AttributeError → caught as exception
         self._write_html("NB", "S", "note")
-        page = t_html_to_markdown(["NB"], self.export_dir)[0]
-        self.assertEqual(page["page_status"], "upstream_task_failed")
+        t_html_to_markdown(["NB"], self.export_dir)
+        mock_save.assert_not_called()
 
-    def test_missing_notebook_dir_skips_and_returns_empty(self):
-        result = t_html_to_markdown(["NonExistentNotebook"], self.export_dir)
-        self.assertEqual(result, [])
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
+    def test_missing_notebook_dir_does_not_call_save(self, mock_client, mock_save):
+        t_html_to_markdown(["NonExistentNotebook"], self.export_dir)
+        mock_save.assert_not_called()
 
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
-    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.save_one_page")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown._get_genai_client")
     @patch("task07_onenote_to_markdown.t_html_to_markdown.extract_llm_fields")
-    def test_export_dt_is_utc_datetime(self, mock_llm, mock_meta, mock_sleep):
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.get_page_meta")
+    @patch("task07_onenote_to_markdown.t_html_to_markdown.time.sleep")
+    def test_export_dt_is_utc_datetime(self, mock_sleep, mock_meta, mock_llm, mock_client, mock_save):
         mock_meta.return_value = {}
         mock_llm.return_value = {"tags": [], "alias": "T", "new_content": "body"}
         self._write_html("NB", "S", "note")
-        page = t_html_to_markdown(["NB"], self.export_dir)[0]
+        t_html_to_markdown(["NB"], self.export_dir)
+        page = mock_save.call_args[0][0]
         self.assertIsInstance(page["export_dt"], datetime)
         self.assertEqual(page["export_dt"].tzinfo, timezone.utc)
 
