@@ -345,3 +345,120 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     # R2 輸出格式異常: '你的輸入「好餓唷~」與查詢筆記內容或規劃學習路徑的意圖都不符。我無法判斷你的意圖。'，預設導向 rag_agent, score=0.5
     print(route("好餓唷~", "test_run0610-12"))
 ```
+
+## 20260612 Work log
+1. Created new branch `html-to-md` for new feature of conversion `.html` output from OneNote graph API to .`.md` files.
+2. Installed Claude Code AI assistant.
+3. Installed `OpecSpec` for practice of Spec-Driven Development along with this project.
+4. Inititated the testing scripts for pipeline `task07_onenote_to_markdown` where primarily intended to request the personal notes on Microsoft OneNote through the `Azure graph API`, download the raw notes as individual .html file and summarize the `metadata` of html files in .csv file.
+
+- The storage hierarchy of a metadata, .html files and .md files are temporarily operated as follows. Then the granularity of metadata is defined at page-level of a notebook. 
+
+5. Until 20260612, the downloaded few files are firstly saved disk on premises. Some observations were observed and fixed:
+
+    - **Rate Limit**：使用滑動視窗 rate limiter，同時遵守 Graph API 的兩個限制：每分鐘 120 次（上限設 115）與每小時 400 次（上限設 380）。遇到 429 時在 `Retry-Af
+    ter` 基礎上加指數退避，retry 最多 10 次。
+    - **Token 過期（壓力測試發現）**：下載大型筆記本（17 sections、數百頁）時，每小時 rate limit 會觸發長達 46 分鐘的等待，導致 access token 在等待期間過期，下一次
+    API 呼叫收到 401 而崩潰。修復方式：`api_get()` 遇到 401 時會自動呼叫 `refresh_token()` 刷新 token 並重試一次（`token_refreshed` flag 防止無限重試）。
+    
+> However, audit log was missing, so new function recording the **audit log should be established**.
+
+6. Used python package `markdowndify` to roughly transform the file format from `.html` file to `.md` in order to remove the markup so that the user prompt wrapped with the md content asking LLM for key extraction could be shorter, and the file size could be smaller. When converting to .md, inserted `frontmatter` so that users could be able to manage the .md file on Obsidian better in the future. 
+
+7. After utilizing mardowndify package, LLM were introduced to polish the overall content structure. *Two LLM candidates were proposed, Anthropic Haiki 4.5 or Google Gemini flash 2.5 lite.* So far, The performance by the model 'Haiki 4.5' has been tested first on 20260612. Some observation was concluded as follows.
+
+    |  notebook  |  section  |  page  |  observation  | possible impact |
+    |------------|-----------|--------|---------------|---------------|
+    |  Data Engineering  |  Summarize_Airflow_Kafka  |  (經典到爆) LocalExecutor 失敗 | Repeatedly showed the page title at the first line of content body | 🟢 Might not interfere reading experiences of humans and AI |
+    |  Data Engineering  |  Summarize_Airflow_Kafka  |  (經典到爆) LocalExecutor 失敗 |  unexpected heading level conversion, some should not be promoted from \<li> to \<h2> (## in markdown)  | 🔴 Wrong hierarchy of header/subheader/caption/... would impact the reading experiences of humans and might misleading AI. |
+    |  Data Engineering |  YT_彭彭  |  MySQL  |  Some paragraph in original text of html did not end with at least 2 whitespace, causing that after transformation the following newline could not lose indentation and unaligned position of head. | 🟡 Might interfere reading experiences of humans |
+    |  Data Engineering |  YT_彭彭  |  MySQL  |  Some Engilish letters in original text of html were typed in `full-width` (e.g. `ＴＡＢＬＥ`) but did not transformed to `half-width` (e.g., `TABLE`).   | 🟢 Might not interfere reading experiences of humans and AI |
+    |  Data Engineering |  YT_彭彭  |  MySQL  | Several sentenses started with `bullets` lacked of line break. Instead, they sticked the last letter/symbol of the previous line where they should not belong. (e.g:  `(1234.PNG)- 補充：`, should be `(1234.PNG)   \- 補充：`)  |  🟢 Might not interfere reading experiences of humans and AI |
+    |  Data Engineering |  YT_彭彭  |  SQL基本資訊  |  The tags \<ul> and the inner tags \<li> were all transformed to `-`. However, it is better to promote the outermost \<ul> to `#` or `##` in .md file rather than `-`. |  🔴 Ambiguous hierarchy might lead to the loss of semantics after chunking. |
+
+> HTML 的 \<ul>\<li> 階層本身對 AI 來說，仍能理解父子關係；但如果這些 \<li> 實際上是在扮演「章節標題」的角色，那仍然不如 \<h1>~\<h6> 或對應的 Markdown # ## ### 結構來得清晰。 尤其是從 OneNote 匯出的 HTML，通常建議先轉換成語意化的 Markdown 再餵給 RAG 或訓練流程。
+
+> 就語意強度 h1 > h2 > h3 > ul/li > 單純段落，大部分 RAG 系統都會給標題更高權重。如果一份 html 筆記都用清單來標記，再轉成 markdown 語法時可能只剩 `-` 這樣的階層，這未來可能會讓語意強度減弱。
+
+> **Experience rule of data Transformation to markdown for better data chunking, RAG, AI understanding.**  
+    想讓 Markdown 同時對 人類、Markdown 解析器、RAG 系統、LLM 都穩定可讀，建議：  \
+    1. 標題用 # / ## / ###  \
+    2. 清單用 -  \
+    3. 圖片、標題、清單之間留空行  \
+    4. 不要把新元素黏在上一行尾巴
+
+8. Due to the observation mentioned above, the other transformation approaches were evaluated again.
+
+| 方案編號 | 方案                                                                   | 成本 | 準確度 | 前測過? |
+| ------- | --------------------------------------------------------------------- | --- | ----- | ----- |
+| S1 | HTML → Reshape structure by LLM → Markdowndify tool                   | 低  | 最高  | YES (samples owned by user) |
+| S2 | HTML → Markdowndify tool → Reshape structure by LLM                   | 低  | 高 (tool 可能破壞原始階層)  | YES (samples owned by user), as summarized in 6~7. |
+| S3 | HTML → PDF → OCR by Goole Document AI API  → Markdowndify tool        | 中高 | 中   | YES (official tutorial) |
+| S4 | HTML → PDF → OCR by Goole Document AI API → Reshape structure by LLM  | 最高 | 中   | No |
+
+> According to the pre-test result, **the approach in this task07 was alterd from `S2` to `S1` to aviod data loss.**
+
+## 20260613 Work log
+1. Starting to draft the new transformation srcipt using the approach `S1`. This time, the LLM tested was `Gemini flash lite 2.5 lite`.
+> Price comparison between [Gemini 2.5 flash lite Model](https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing?_gl=1*fk0iq6*_ga*MTEwMzU3Nzc5NS4xNzc2MzA1MzUw*_ga_WH2QY8WWF5*czE3ODEzMDkxMjMkbzExMiRnMSR0MTc4MTMxMDE3NCRqMjgkbDAkaDA.#gemini-models-2.5) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/pricing).
+> Rate limit comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/rate-limits) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/api/rate-limits)
+> Token calculation comparison between [Gemini 2.5 flash lite Model](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/capabilities/get-token-count?hl=zh-tw#gemini-get-token-count-samples-python_genai_sdk) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/usage/limits?focus=claude_haiku_4:rpm).
+> Context Window comparison between [Gemini 2.5 flash lite Model](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite) and [Anthropic Haiku 4.5 Model](https://platform.claude.com/docs/en/about-claude/models/overview).
+
+
+2. While testing the [`S1` pipeline](/task07_onenote_to_markdown/t_html_to_markdown.py) on the sampe OneNote page `供應商稽核.html`, **a data loss issue was identified: all `<img>` tags were silently dropped before the content was fed into LLM.** The root cause was `soup.get_text(' ', strip=True)`, which strips every HTML tag (including `<img>`) when converting BeautifulSoup tree to plain text. As a result, the LLM received no image-related information and was unable to place image references in the reshaped content.
+
+    | file | affected step | observation | possible impact |
+    |------|--------------|-------------|----------------|
+    | `供應商稽核.html` | `plain_text = soup.get_text(...)` | `<img>` tags with `alt` and `src` attributes were discarded entirely before LLM call | 🔴 Image data permanently lost in `new_content`; LLM has no knowledge that images exist in the note |
+
+    - **Fix applied**: Instead of calling `get_text()` directly after parsing, each `<img>` tag is now replaced in-place with its Markdown image syntax `![alt](src)` using BeautifulSoup's `replace_with()` method before `get_text()` is invoked. This way, image markers survive the tag-stripping step as plain text strings and are visible to the LLM.
+
+    ```python
+    # before fix
+    for img in soup.find_all("img"):
+        if img.get("alt"):
+            img["alt"] = " ".join(img["alt"].split())
+    plain_text = soup.get_text(' ', strip=True)  # <img> silently discarded here
+
+    # after fix
+    for img in soup.find_all("img"):
+        alt = " ".join(img.get("alt", "").split()) or "image"
+        src = img.get("src", "")
+        img.replace_with(f"\n![{alt}]({src})\n")   # convert tag → markdown string in-place
+    plain_text = soup.get_text(' ', strip=True)     # image markers now survive as plain text
+    ```
+
+    - To complement the fix above, an additional instruction `(vi)` was added to the LLM user prompt, explicitly telling the model that any `![]()` pattern in the input is a pre-cleaned, Markdown-compatible image link. The model is instructed to keep the image within its original section (not move it out), allow indentation adjustment, and optionally generate a short 3–5 line AI-generated image description labelled as `「AI生成圖釋」`.
+
+    > **Lesson learned**: `BeautifulSoup.get_text()` is destructive — it silently removes all tags including semantic ones like `<img>`, `<table>`, `<a>`. When the downstream consumer is an LLM that needs to reconstruct structure, always pre-convert semantically important tags to their text-equivalent representations (e.g., Markdown syntax) before calling `get_text()`, rather than assuming the LLM can infer their existence from surrounding context.  
+
+3. The output by LLM was sometimes not perfect. As tested result about the image with embedded table in the notebook `生技製劑筆記本/General technical knowledge/Mycoplasma`. LLM tried to analyze the semantic of the table in a statistic image and created new table via markdown syntax. Although the truth of such table, the original image, did not loss and it was referred by a link in the markdown context, the newly created table by AI need to be fairly and professionally `inspected to judge the reliability of using AI model`. This should be handed over to ML scientist and senior techinicans within biotech domain.
+
+## 20260615 Work log
+1. Determined to use Gemini 2.5 flash lite LLM due to cheaper price.
+
+Feature  |  Gemini 2.5 flash lite   |   Haiki 4.5  |
+---------|--------------------------|--------------|
+Input token  |  1 M   |   200 K  |
+Output token  |  65 K   |   64 K  |
+Price  |  baseline   |   2x-higher than 2.5 flash lite  |
+
+2. Drafted whole development plan of `task07` in the branch`feature/html-to-md` and it future intention in the other branches. See the doc [`hand over`](./task07_html_to_md_hand_over.md).
+
+> All the development since then will follows this hand over to create the other spec. docs(if needed) and scripts.
+
+3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline. 
+
+## 20260616 Work log
+1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
+
+2. Moved `_get_genai_client()` out of the per-attempt retry loop: the `genai.Client` is now initialised **once** per pipeline run and passed into `extract_llm_fields()`, avoiding repeated credential reads and connection setup within a short window — which was the likely cause of Vertex AI throttling.
+
+3. It was observed that passing `http_options=types.HttpOptions(timeout=N)` to `genai.Client()` degraded the quality of LLM output (markdown with no heading hierarchy or line breaks), because the HTTP-layer timeout interrupted the model's thinking phase before generation was complete. This approach was abandoned; LLM hangs are instead handled by the existing retry-on-exception logic.
+
+> Should keep track of any note with `long context` that causes high latency between prompt submission and model response, as this is the most likely trigger for apparent hangs.
+
+4. Extracted `save_one_page()` as a standalone helper in `l_save_markdown.py`; `l_save_markdown()` is kept as a thin wrapper for backward compatibility. Added `continue` in the `except` block (with `finally` for counters) so that LLM failures skip disk write entirely rather than saving low-quality plain-text fallback.
+
+5. 

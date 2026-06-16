@@ -1,0 +1,57 @@
+schema: spec-driven
+
+context: |
+  Project: 個人技能看板（Personnel Skill Dashboard）
+  A Streamlit dashboard with three pages: HOME（personal skill overview）,
+  Knowledge Factory（ETL pipeline history）, and AI Knowledge Agent（Phase III）.
+  All data flows through ETL pipelines and is persisted to MongoDB Atlas.
+
+  Tech stack:
+  - Language: Python >= 3.14
+  - Environment: pyenv + Poetry
+  - Web framework: Streamlit
+  - Database: MongoDB Atlas（upsert-idempotent writes）
+  - Vector search: MongoDB Atlas Vector Search（cosine similarity, dim=1536）
+  - Embedding model: OpenAI text-embedding-3-small
+  - Cloud storage: GCP Cloud Storage（bucket: personal-vaults）
+  - AI Agent: Google Vertex AI Gemini（Phase III）
+  - Visualization: Plotly
+  - Deployment: Docker → GCP Artifact Registry → Cloud Run（Jobs for ETL, Service for dashboard）
+  - CI/CD: GitHub Actions
+  - Secrets: GCP Secret Manager（prod） / .env file（local dev）
+
+  ETL naming convention inside each task folder:
+  - e_*.py — Extract
+  - t_*.py — Transform
+  - l_*.py — Load
+  - main.py — orchestrates E → T → L
+
+  ETL tasks and their MongoDB collections:
+  - task01: Obsidian .md from GCS → obsidian_notes, obsidian_summary
+  - task02: GitHub REST API → github_repos, github_summary
+  - task03: LeetCode GraphQL + ccClub REST API → solved_problems_on_ccClub, solved_problems_on_leetcode, ccClub&leetcode_summary
+  - task05: Google Sheets API → skill_scores_biotech, skill_scores_data_eng, skill_radar_summary
+  - task06: Obsidian .md → chunking → embedding → obsidian_vectors
+  - task07: OneNote HTML → Markdown（in progress）
+
+  Product language:
+  - Write proposals and specs describing observable user-facing behavior and data contracts
+  - Avoid exposing internal ETL mechanics unless they are part of the user-facing contract
+  - Put implementation details in design.md or tasks.md
+
+rules:
+  specs:
+    - Describe what data enters and exits each ETL stage, not how it is processed internally
+    - All Load steps must be upsert-idempotent; specs must state the unique key used for upsert
+    - MongoDB collection names are fixed constants; specs must reference them by their exact name
+    - Secrets must never be hardcoded; specs must specify which env var or Secret Manager key is used
+    - If a new ETL task is introduced, specify its task folder name, MongoDB collections, and upsert key
+  tasks:
+    - Each task that touches MongoDB must include a test for idempotent re-runs
+    - Each task that reads from GCS must include credential/auth setup steps
+    - New ETL tasks must add a corresponding entry to the ETL table in CLAUDE.md
+  design:
+    - Prefer MongoDB upsert over insert-or-update logic
+    - Use service account JSON files under env/ for GCP auth; never embed credentials in code
+    - Dashboard pages read from MongoDB only — no direct ETL calls from UI code
+    - Vector search uses $vectorSearch aggregation stage with the obsidian_vectors_index index
