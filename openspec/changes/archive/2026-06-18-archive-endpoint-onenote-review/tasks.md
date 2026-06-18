@@ -38,7 +38,7 @@
 
 ## 4. 本地驗證
 
-- [ ] 4.1 確認 `.env.example` 新增 `ARCHIVE_PERSONAL_BUCKET=personal-vaults` 佔位符
-- [ ] 4.2 執行 `poetry run flask --app archive_service.app run --port 8001` 確認啟動無錯誤
-- [ ] 4.3 在另一個 terminal 啟動 Streamlit，選一個 `pending_review` 頁面，按下 Approve，確認 MongoDB `onenote_page_metadata` 的 `status` 更新為 `archived`
-- [ ] 4.4 確認 staging `onenote-vaults` 的 html/md/png 物件未被刪除
+- [x] 4.1 確認 `.env.example` 新增 `DESTINATION_BUCKET=personal-vaults` 佔位符（環境變數名稱為 `DESTINATION_BUCKET`）
+- [x] 4.2 執行 `poetry run flask --app archive_service.app run --port 8001` 確認啟動無錯誤
+- [x] 4.3 在另一個 terminal 啟動 Streamlit，選一個 `pending_review` 頁面，按下 Approve，確認 MongoDB `onenote_page_metadata` 的 `status` 即時更新為 `archived`（前端即時渲染，無後端寫入與前端顯示延遲差）
+- [x] 4.4 確認 staging `onenote-vaults` 的 html/md/png 物件未被刪除
