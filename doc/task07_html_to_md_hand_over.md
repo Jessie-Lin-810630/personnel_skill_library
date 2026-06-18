@@ -147,34 +147,42 @@ gcs://onenote-vaults
 
 ```
 
-### Gold layer - Storage of verified notes by human review
+### Gold layer - Storage of verified/archived notes after human review
 
 ```plaintext
 gcs://personal-vaults
-├── 01_daily_logs/
-│       ├── <Notebook1_name>/
-│       │       ├── <Section1_name_of_NB1>/  
-│       │       │       ├── Page1_name_of_sec1.md      ⬅️ Copied  
-│       │       │       │                                 from 'onenote-vaults'
-│       │       │       ├── Page2_name_of_sec1.md      ⬅️ Copied 
-│       │       │       │                                 from 'onenote-vaults'
-│       │       │       ├── ....
-│       │       │       ├── PageN_name_of_sec1.md      ⬅️ Copied
-│       │       │       │                                 from 'onenote-vaults'
-│       │       │       └── _images/                   ⬅️ Copied 
-│       │       │             ├── image01.PNG             from 'onenote-vaults'
-│       │       │             ├── image02.PNG
-│       │       │             └── image0x.PNG
-├── 02_knowledge_bases/
-│       ├── <Notebook1_name>/
-│       │       ├── <Section1_name_of_NB1>/
-│       │       │       ├── Page1_name_of_sec1.html  
-│       │       │       ├── Page1_name_of_sec1.md      ⬅️ Copied 
-│       │       │       │                                 from 'onenote-vaults'
-│       │       │       ├── ....
-│       │       │       └── _images/
-│       │       │
-....    ....    ....
+├── <employee_note_account_name>/      # without '@ and domain'
+│       ├── from-obsidian/             # notes in native markdown and generated 
+│       │     │                        # through obsidian (what we performed in ETL task01)
+│       │     ├── 01_daily_logs/
+│       │     │       ├── <Notebook1_name>/
+│       │     │       │       ├── <Section1_name_of_NB1>/
+│       │     │       │       │       ├── Page1_name_of_sec1.html  
+│       │     │       │       │       ├── Page1_name_of_sec1.md      ⬅️ Copied 
+│       │     │       │       │       │                                 from 'onenote-vaults'
+│       │     │       │       │       ├── ....
+│       │     │       │       │       └── _images/
+│       │     │       │       └── <Section2_name_of_NB1>/
+│       │     │       └── <Notebook2_name>/
+│       │     └── 02_knowledge_bases/
+│       │
+│       └── from-onenote/
+│             ├── <Notebook1_name>/
+│             ├── <Section1_name_of_NB1>/  
+│             │       ├── Page1_name_of_sec1.md      ⬅️ Copied  
+│             │       │                                 from 'onenote-vaults'
+│             │       ├── Page2_name_of_sec1.md      ⬅️ Copied 
+│             │       │                                 from 'onenote-vaults'
+│             │       ├── ....
+│             │       ├── PageN_name_of_sec1.md      ⬅️ Copied
+│             │       │                                 from 'onenote-vaults'
+│             │       └── _images/                   ⬅️ Copied 
+│             │             ├── image01.PNG             from 'onenote-vaults'
+│             │             ├── image02.PNG
+│             │             └── image0x.PNG
+│             ....
+│
+├── <employee_note_account_name>/      
 ...     ...     ...
 
 ```
@@ -320,27 +328,35 @@ gcs://personal-vaults
 > 完成到步驟3，此分支就算工作結束。
 
 4. 切換到 repo branch `feature/dashboard-ui` 開發：
-  - 地端開發新 streamlit 對照頁 : 左邊渲染 staging 的 html、右邊渲染轉出的 .md，上方有檢核狀態查核鈕、筆記名稱切換清單，最下方放檢核確認按鈕，用來提供使用者足夠的 AI 工具的資訊透明度。
-  - html、md、md 內文的 png 取自 步驟3 上傳的 GCS，files 的 metadata (collection 3) 從 MongoDB Altas 讀取。
-  - 這個對照頁也需要頁面加 demo 級登入窗擋陌生人。
-  - 使用者會評估Gemini 模型是否生成令人滿意後再檢核確認按鈕按下 `approved`，觸發步驟 5。
-  - 同 `feature/dashboard-ui` 開發習慣，Streamlit 網頁在地端檢查。
+    - 地端開發新 streamlit 對照頁 : 左邊渲染 staging 的 html、右邊渲染轉出的 .md，上方有檢核狀態查核鈕、筆記名稱切換清單，最下方放檢核確認按鈕，用來提供使用者足夠的 AI 工具的資訊透明度。
+    - html、md、md 內文的 png 取自 步驟3 上傳的 GCS，files 的 metadata (collection 3) 從 MongoDB Altas 讀取。
+    - 這個對照頁也需要頁面加 demo 級登入窗擋陌生人。
+    - 使用者會評估Gemini 模型是否生成令人滿意後再檢核確認按鈕按下 `approved`，觸發步驟 5。
+    - 同 `feature/dashboard-ui` 開發習慣，Streamlit 網頁在地端檢查。
     
 5. 步驟 4 如果有按下`approved`，則呼叫 Archive 端點，端點是另一獨立的腳本，它跟 streamlit 關係為
-  - Streamlit 不自己寫入 staging vaults 或 personal vaults，按鈕帶上 note_id 與登入者角色（伺服器端從 session 推導，三選一：ML/DL Engineer｜Note Owner｜Dept. Senior Specialist）去呼叫另一支 Archive service。
-  - Archive 持有「讀 staging ＋ 寫 personal vault」兩權限，負責：把 png 複製到 `personal-vaults/{note_type}/{筆記本名}/images/`、讀 staging 的 .md 把圖片連結改寫成相對路徑 `./images/foo.png` 後，把 .md 寫入 `personal-vaults/{note_type}/{頁面名}.md`。其中，`{note_type}`在MongoDB Altas [Collection 3元數據](#collection-3-page-metadata-linkage)可查到。
-  - html 留在 staging vault不刪，也就是說以下三個路徑的檔案不自動刪除，改由人工評估持久期。
+    - Streamlit 不自己寫入 staging vaults 或 personal vaults，按鈕帶上 note_id 與登入者角色（伺服器端從 session 推導，三選一：ML/DL Engineer｜Note Owner｜Dept. Senior Specialist）去呼叫另一支 Archive service。
+    - Archive 持有「讀 staging ＋ 寫 personal vault」兩權限，負責：
+      - 把 staging 的 png 複製到 `personal-vaults/{帳戶名}/from-onenote/{note_type}/{筆記本名}/{章節名}/_attachment/`。
+      - 讀 staging 的 .md 把內文的圖片連結改寫成相對路徑 `./_attachment/foo.png` 後，把 .md 寫入 `personal-vaults/{帳戶名}/{from-onenote}/{note_type}/{筆記本名}/{章節名}/{頁面名}.md`。
+      - 其中，`{note_type}` 在MongoDB Altas [Collection 3元數據](#collection-3-page-metadata-linkage)可查到。
+
+    - 以下是範例，說明 Archive 端點本身在做的事情：  
+
+  | object path in staging vault | object path after archive | action during archving  | 
+  |------------------------------|--------------------------|---------------------------|
+  | `onenote-vaults/iamaccountname1234/Data Engineering/yt_GCP/_images/image01.png` | `personal-vaults/iamaccountname1234/from-onenote/01_daily_log/Data Engineering/yt_GCP/_attachment/image01.png` (call "path-X)" | 1. Search MongoDB Alas [Collection 3元數據](#collection-3-page-metadata-linkage) for "note_type". <br> 2. Search MongoDB Altas [Collection 3元數據](#collection-3-page-metadata-linkage) for "img_path" to get the list of image paths which linked with a selected md file (=one document in collection).  <br> 3. Iterate the image path list, and write the image object (usually `.png`) to new path that includes "note_type". <br> 3. Upsert the collection3 column `img_archive_path`. | 
+  | `onenote-vaults/iamaccountname1234/Data Engineering/yt_GCP/document01.md`| `personal-vaults/iamaccountname1234/from-onenote/01_daily_log/Data Engineering/yt_GCP/document01.md` (call "path-Y") |  1. Read the .md file staying the staging vault. <br> 2. Based on the values of column `img_archive_path`, replace all the image path in the .md content with `imge_archive_path`. Must present the image path as the relative path to the new .md file which is expected "path-Y" at that moment. DO NOT present them as full path of path-X. <br> 3. Write as new .md to "path-Y". <br> 4. Upsert the collection3 column `md_archive_path`. 
+
+6. Archive 端點服務也需為 MongoDB Altas [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage) upsert 更新：
+    - `status`、`review_result`、`reviewed_by_role`、`reviewed_at`、`md_archive_path`、`img_archive_path`、`archived_at`。`md_archive_path`、`img_archive_path` 這兩欄應該在新 img、md 物件各別寫入完成時就各自更新，當兩個欄位值都更新完成，才一起更新其他欄位。
+    
+7. 為防重複檢核，Streamlit 渲染時讀回 MongoDB Altas [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage) 的 status，status 若已經改成 `archived` ，則 streamlit 頁面顯示「已歸檔」橫幅並停用按鈕。
+    
+8. 遺留 html 的保留 — 歸檔端點執行不論成功與否，staging 的 html 都不自動刪，保留多久人工評估、在 GCP console 操作，不過度開發。也就是說以下幾個類型的物件不可以自動刪除：
     - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.md'`   
     - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/{頁面名}.html'`  
     - `gs://onenote-vaults/{帳戶名}/{筆記本名}/{章節名}/_images/{image_id}.png'`
-    
-6. Archive 端點服務也需為 MongoDB Altas [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage) upsert 更新：
-- `status`、`review_result`、`reviewed_by_role`、`reviewed_at`、`md_archive_path`、`img_archive_path`、`archived_at`。
-    
-7. 為防重複檢核，Streamlit 渲染時讀回 MongoDB Altas [collection-3-page-metadata-linkage](#collection-3-page-metadata-linkage) 狀態；已歸檔的頁面顯示「已歸檔」橫幅並停用按鈕。
-    
-8. 遺留 html 的保留 — 歸檔後 staging 的 html 不自動刪，保留多久人工評估、在 GCP console 操作，不過度開發。
-    
 
 **雲端部署階段（同部門跨帳號，GCP 為平台）**
 
