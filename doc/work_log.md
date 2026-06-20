@@ -5,12 +5,26 @@
 - Task06 RAG/embedding 方案已先選用 `text-embedding-3-small`，但若未來需要處理圖片或多模態資料，仍需重新評估 Gemini Embedding 或 MongoDB Atlas/Voyage 自動 embedding。
 - Task06 vector upsert 目前若筆記重新切塊後 chunk 數量減少，舊 chunk 不會自動刪除；未來資料量增加時可在 upsert 前先依 `file_path` 清除舊 chunks 再重新寫入。
 - Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
+- Task07 長 context 筆記（如大型筆記本頁面）會造成 LLM 回應高延遲，需追蹤並建立監控機制以識別潛在卡頓點。（20260616）
 
 ## ✅ 已解決
 - Task02 GitHub REST API 需要處理 rate limit，以及 409、429、403 等例外狀態的邏輯；後續維護時仍須留意 API 規格與錯誤處理策略。
 - Task02 曾發生 GitHub commit 統計在多分支中重複計算的邏輯錯誤，已修正，但後續新增統計指標時需避免相同資料被重複聚合。
 - Task03 ccClub 資料抓取依賴 CSRF token、帳號與密碼，需持續注意登入流程、token 取得方式與憑證管理。
 - Task05 Google Sheets ETL 曾遇到 `SettingWithCopyWarning` 與 upsert 設計錯誤，已透過 `dataframe.copy()` 與 upsert 邏輯修正。
+- Task07 Intent Router：R2 LLM 受前輪 RAG agent 對話污染，誤將 RAG 回覆視為自身判斷依據；已在 `_r2_llm_classify()` 組裝 historical messages 時插入隔離提示修正。（20260610）
+- Task07 OneNote download：實作滑動視窗 rate limiter 遵守 Graph API 每分鐘 115 次、每小時 380 次上限，並對 429 加指數退避（最多 retry 10 次）。（20260612）
+- Task07 OneNote download：壓力測試發現大型筆記本下載時 hourly rate limit 觸發長達 46 分鐘等待導致 access token 過期；已在 `api_get()` 遇 401 時自動呼叫 `refresh_token()` 並以 `token_refreshed` flag 防止無限重試。（20260612）
+- Task07 HTML→MD 轉換：`soup.get_text()` 會靜默丟棄所有 HTML tag（含 `<img>`），LLM 無法感知圖片存在；已改為先用 `replace_with()` 將 `<img>` 轉為 Markdown 圖片語法再呼叫 `get_text()`。（20260613）
+- Task07 LLM 選型：比較 Gemini 2.5 flash lite 與 Haiku 4.5 的價格、rate limit、context window 後，確定採用 Gemini 2.5 flash lite（價格更低、context window 更大）。（20260615）
+- Task07 Pipeline 穩定性：`t_html_to_markdown()` 改為每頁 LLM 轉換完成後立即寫入磁碟，避免後續頁面失敗導致已完成頁面資料丟失。（20260616）
+- Task07 效能：`_get_genai_client()` 移出 retry loop，改為每次 pipeline run 初始化一次，避免短時間內重複讀取憑證觸發 Vertex AI throttling。（20260616）
+- Task07 LLM 品質：發現傳入 `http_options=types.HttpOptions(timeout=N)` 至 `genai.Client()` 會中斷模型 thinking phase 導致輸出品質劣化；已放棄此方法，改以 retry-on-exception 處理 LLM hang。（20260616）
+- Task07 GCS 路徑設計：將 Obsidian 與 OneNote 筆記分至 `from-obsidian/` 與 `from-onenote/` 子資料夾，解決 `gcloud storage rsync -d` 可能誤刪跨來源同名檔案的問題。（20260617）
+- Task07 Archive endpoint：`archive()` 存在 TOCTOU race condition（`find_one` 後資料被刪，upsert 建出殘缺資料）；已改為 `upsert=False` 並檢查 `matched_count`，為 0 時返回 404。（20260617）
+- Task07 Archive endpoint：初版將 DB 連線、`copy_images()`、`archive_md()` 包在同一 try-except，不易除錯；已拆分為獨立 try-except，分別對應 504/503/502/500 各狀態碼。（20260617）
+- Task07 audit log 缺失：OneNote 下載、LLM 萃取、GCS 上傳三個流程的 audit log 均已補齊，並載入 MongoDB Atlas 三個 collection（`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata`）。（20260615）
+- Task07 LLM 生成表格審核：`Note Reviewer` Streamlit 頁面（`dashboard_ui/pages/onenote_review.py`）已實作，提供人工逐頁審核介面，使 ML scientist 與生技領域人員可在頁面上直接審閱 LLM 自動生成內容並決定是否封存。（20260617）
 
 # Daily Work Log
 ## 20260423 Work log
@@ -444,11 +458,12 @@ Input token  |  1 M   |   200 K  |
 Output token  |  65 K   |   64 K  |
 Price  |  baseline   |   2x-higher than 2.5 flash lite  |
 
-2. Drafted whole development plan of `task07` in the branch`feature/html-to-md` and it future intention in the other branches. See the doc [`hand over`](./task07_html_to_md_hand_over.md).
+2. Drafted whole development plan of `task07` in the branch`feature/html-to-md` and it future intention in the other branches. See the doc [`hand-over`](./task07_html_to_md_hand_over.md).
 
-> All the development since then will follows this hand over to create the other spec. docs(if needed) and scripts.
+> All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
 
 3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline. 
+> The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
 
 ## 20260616 Work log
 1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
@@ -518,12 +533,15 @@ Price  |  baseline   |   2x-higher than 2.5 flash lite  |
 
 5. Running the streamlit page and flask app.py
     ```bash
-    # streamlit
-    poetry run streamlit run dashboard_ui/app.py
+        # streamlit
+        poetry run streamlit run dashboard_ui/app.py
     ```
     ```bash
-    # flask
-    poetry run python -m "archive_service.app"
+        # flask (alter one to run)
+        poetry run python -m "archive_service.app"
+
+        # or
+        poetry run flask --app archive_service.app run --port 8001
     ```
 
 6. 
