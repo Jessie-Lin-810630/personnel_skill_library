@@ -15,7 +15,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 from loguru import logger
-from ..utils.interact_with_mongodb import get_db_altas
+from utils.interact_with_mongodb import get_db_altas
 
 # ── 資料庫連線函式與環境變數呼叫 ──────────────────────────────────────────────────────────
 _get_db = get_db_altas
@@ -25,7 +25,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 def _get_openai_client() -> OpenAI:
-    """ 
+    """
         初始化 OpenAI client。
         OpenAI() 不傳 api_key 參數時，SDK 會自動讀取環境變數 OPENAI_API_KEY。
     """
@@ -53,7 +53,8 @@ def _embed_query(query: str, openai_client: OpenAI) -> list[float]:
 
 def vector_search(query: str,
                   top_k: int = 5,
-                  filter_tags: str | None = None,
+                  filter_tags: list[str] | None = None,
+                  filter_file_path: str | None = None,
                   filter_note_type: str | None = None,
                   ) -> list[dict]:
     """
@@ -62,8 +63,9 @@ def vector_search(query: str,
     Args:
         query:            使用者輸入的自然語言問題或主題描述
         top_k:            回傳幾筆最相關的 chunk（Agent 1 預設 5，Agent 2 預設 10）
-        filter_tags:      可選，限定搜尋範圍，例如 "MySQL"（對應 Atlas pre-filter: tags）
-        filter_note_type: 可選，限定筆記類型，例如 "knowledge_summary"
+        filter_tags:      可選，限定搜尋範圍，例如 ["MySQL"]（對應 Atlas pre-filter: tags）
+        filter_file_path: 可選，限定筆記路徑，例如 "MySQL Window Function.md"
+        filter_note_type: 可選，限定筆記種類，例如 "Knowledge_summary"
 
     Returns:
         list[dict]，每筆包含:
@@ -99,10 +101,14 @@ def vector_search(query: str,
     # 若有 pre-filter 條件，加入 filter 欄位（Atlas Vector Search 支援的 pre-filter）
     # 對應 task06 建立 index 時定義的 filter: tags、filter: note_type
     vector_search_filter = {}
-    if filter_tags:
-        vector_search_filter["tags"] = filter_tags
+    if filter_file_path:
+        vector_search_filter["file_path"] = {"$in": filter_file_path}
+    elif filter_tags:
+        vector_search_filter["tags"] = {"$in": filter_tags}
+
     if filter_note_type:
         vector_search_filter["note_type"] = filter_note_type
+
     if vector_search_filter:
         vector_search_stage["$vectorSearch"]["filter"] = vector_search_filter
 
