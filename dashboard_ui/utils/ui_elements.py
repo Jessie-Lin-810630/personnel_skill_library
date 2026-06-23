@@ -37,6 +37,7 @@ def _render_side_bar():
     st.sidebar.page_link("app.py", label="HOME", icon="🏠")
     st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
     st.sidebar.page_link("pages/onenote_review.py", label="OneNote Review", icon="🔍")
+    st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI Knowledge Agent", icon="🤖")
     return None
 
 

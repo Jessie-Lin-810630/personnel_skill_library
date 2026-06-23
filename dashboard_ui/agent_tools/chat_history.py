@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from pymongo import MongoClient, DESCENDING, ASCENDING
 from loguru import logger
-from ..utils.interact_with_mongodb import get_db_altas
+from utils.interact_with_mongodb import get_db_altas
 
 
 # ── 常數 ──────────────────────────────────────────────────────────
