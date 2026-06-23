@@ -238,8 +238,8 @@
 1. Evaluated which AI agents are suitable for this project. Then exported to [report](./ai-agent-evaluation-report.md).
 
 ## 20260610 Work log
-1. The intent agent and rag agent were created and tested in the first round via unit test. There were some logistic defect when judging the intention in the samples of user's queries.
-The testing results were listed as follows. Particulary in the Sample 10 and 11, the context with historical chat messesges with RAG agents confused the LLM of Router agent in R2 plan. The LLM representing R2 considered the responses by RAG its own response.
+1. The intent router agent and rag agent were created and tested in the first round via unit test. There were some logistic defect when judging the intention in the samples of user's queries.
+The testing results were listed as follows. Particulary in the Sample 10 and 11, the context with historical chat messesges with RAG agents confused the LLM of router agent in R2 plan. The LLM representing R2 considered the responses by RAG its own response.
 ```
     # ============= Sample 1 ================
     # Model Response: 🆗
@@ -452,18 +452,18 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 ## 20260615 Work log
 1. Determined to use Gemini 2.5 flash lite LLM due to cheaper price.
 
-Feature  |  Gemini 2.5 flash lite   |   Haiki 4.5  |
----------|--------------------------|--------------|
-Input token  |  1 M   |   200 K  |
-Output token  |  65 K   |   64 K  |
-Price  |  baseline   |   2x-higher than 2.5 flash lite  |
+    Feature  |  Gemini 2.5 flash lite   |   Haiki 4.5  |
+    ---------|--------------------------|--------------|
+    Input token  |  1 M   |   200 K  |
+    Output token  |  65 K   |   64 K  |
+    Price  |  baseline   |   2x-higher than 2.5 flash lite  |
 
 2. Drafted whole development plan of `task07` in the branch`feature/html-to-md` and it future intention in the other branches. See the doc [`hand-over`](./task07_html_to_md_hand_over.md).
 
-> All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
+    > All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
 
 3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline. 
-> The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
+    > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
 
 ## 20260616 Work log
 1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
@@ -472,7 +472,7 @@ Price  |  baseline   |   2x-higher than 2.5 flash lite  |
 
 3. It was observed that passing `http_options=types.HttpOptions(timeout=N)` to `genai.Client()` degraded the quality of LLM output (markdown with no heading hierarchy or line breaks), because the HTTP-layer timeout interrupted the model's thinking phase before generation was complete. This approach was abandoned; LLM hangs are instead handled by the existing retry-on-exception logic.
 
-> Should keep track of any note with `long context` that causes high latency between prompt submission and model response, as this is the most likely trigger for apparent hangs.
+    > Should keep track of any note with `long context` that causes high latency between prompt submission and model response, as this is the most likely trigger for apparent hangs.
 
 4. Extracted `save_one_page()` as a standalone helper in `l_save_markdown.py`; `l_save_markdown()` is kept as a thin wrapper for backward compatibility. Added `continue` in the `except` block (with `finally` for counters) so that LLM failures skip disk write entirely rather than saving low-quality plain-text fallback.
 
@@ -544,4 +544,428 @@ Price  |  baseline   |   2x-higher than 2.5 flash lite  |
         poetry run flask --app archive_service.app run --port 8001
     ```
 
-6. 
+## 20260621 Work log
+1. Established the [feature of planning agent](../dashboard_ui/agents/planning_agent.py) and the [chat box in streamlit page](../dashboard_ui/pages/ai_knowledge_agent.py) as planned in the [evaluation-report](ai-agent-evaluation-report.md).
+
+2. Performed the querying tests. Some unexpected answers from the agents are observed and listed as follows.
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | 目前的筆記裡沒有相關內容。 | Shall reply `20260421 CAP 理論.md` which is exactly existing. Also this note did not presented in the source list, showning that no correct response in the chunks.  |
+    | 2 | 找尋CAP  | rag | 目前的筆記裡沒有相關內容。| Same explanation as above  |
+    | 3 | CAP理論 | rag | AP理論探討分散式架構下的三項權衡議題， |  3 of 4 notes in the source list hitted the targeted note, `20260421 CAP 理論.md` |
+    | After `revised the system prompt` from <br>"如果完全沒有足夠資訊，請明確告知使用者「目前的筆記裡沒有相關內容」，不要自行推測或捏造答案。"<br> to <br>"若筆記片段中找不到足夠資訊，請提供使用者你找到的片段資訊，跟對方確認你找到的關鍵字中是否有切中使用者真正想詢問的。如果完全沒有足夠資訊，請明確告知使用者「目前的筆記裡沒有相關內容」，不要自行推測或捏造答案。". <br> Then continue the session: |
+    | 4 | 找尋 cap | rag | "根據您提供的筆記片段，找到與「CAP理論」相關的內容如下：<br>來源 4 檔案: 20260120 Kafka - 基本介紹.md｜章節: 來源筆記<br>提到「20260421 CAP 理論」以及「分散式架構」。<br>筆記片段中僅提及「CAP理論」與「分散式架構」的關聯，並未詳細解釋 CAP 理論的內容。<br>您想詢問的「CAP」是否與這個「CAP理論」有關呢？" | `20260421 CAP 理論.md` missed in the source list again. |
+    | 5 | 是的 | rag | "您提供的筆記片段中，只有來源 1 提到了 $eleMatch 這個運算子，並說明它在針對「多份文檔組合而成的陣列」做查詢時非常常見。<br>...(中略)..您想詢問的「是的」是指您想進一步了解 $eleMatch 的用法，還是您想詢問其他與 CAP 理論相關的內容呢？"  | `20260421 CAP 理論.md` missed in the source list again and inaccurate semantic explanation by agent. |
+
+- Testing case 2 for note planning:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我目前熟悉 Linux 基本指令和 Python，完全沒用過 Kubernetes，想學會在資料工程的場景下用 Kubernetes，例如把資料處理腳本容器化部署。 | planning | "好的，根據您提供的筆記片段，我對您目前的程度理解如下：您對 Linux 指令與 Python 程式設計有基礎，並對 Docker 容器化技術有深入理解，包括 Dockerfile 編寫、多容器啟動（如 Kafka）、以及儲存機制（Bind Mount 與 Volume Mount）...<br>基於您的目標（在資料工程場景下用 Kubernetes 部署資料處理腳本），以下是為您規劃的學習路徑：---<br>### 學習路徑建議<br>#### 第一階段：Kubernetes 核心概念與基礎操作<br>#### 第二階段：資料處理腳本容器化與部署<br>#### 第三階段：資料工程儲存與狀態管理<br>*"    | Met the rule in system prompt |
+    | 2 | 可以把 Kubernetes 核心概念與本地環境建置 那個階段展開講細一點嗎？ | planning agent | "好的，我已了解您希望針對「第一階段：Kubernetes 核心概念與基礎操作」進行更詳細的展開。<br>根據您提供的筆記片段，我對您目前的程度理解如下：<br>您對 Linux 指令與 Python 程式設計有基礎，並對 Docker 容器化技術有深入理解，包括 Dockerfile 編寫、多容器啟動（如 Kafka）、以及儲存機制（Bind Mount 與 Volume Mount）。對於資料工程的自動化流程、排程任務（如 Cron Job/Airflow）與大量數據處理也有經驗。此外，您對 Dev Containers 有豐富的使用經驗，並能利用 `docker-compose` 整合多服務開發環境。<br>### 學習路徑建議 (針對第一階段詳細展開)<br>#### 第一階段：Kubernetes 核心概念與基礎操作與本地環境建置<br>*   **目標：** 建立對 Kubernetes 運作原理與基本元件的全面理解，能夠操作 `kubectl` 部署簡單應用，並在本地環境成功搭建與互動。<br>*   **具體技能/主題：**<br>.  **Kubernetes 簡介與核心概念：從單機到分散式容器編排**<br>"| Some preface already showned in the last run of same session answered by agent again. |
+    | 3 | (由於上輪對話agent有把回應是依據哪個筆記片段標示為註解，所以這輪使用者特地針對筆記註解來細部詢問)有點不懂，你的筆記片段7、8、9是什麼意思呢 | rag agent | "目前的筆記裡沒有相關內容。" | routing result did not went wrong but not meet user's real intention |
+    | 4 | 我要規劃學習路徑，但是我是先針對剛剛的對話做詢問，上一輪對話中你提到的筆記片段7、8、9是指我哪一份筆記 | planning agent | "您好！非常抱歉，上一輪對話中我引用的筆記片段編號可能造成了混淆。這表示我在處理多輪對話時，對筆記片段的編號參考出現了錯誤。我會立即修正這個問題。<br>根據您這次提供的筆記片段列表，我來為您釐清上一輪對話中提到的編號所對應的筆記內容：<br>*   **筆記片段 7：** 在上一輪對話中，我提到「尤其當您使用 GKE 這類託管服務時 ([筆記片段 7])，了解其底層架構能幫助您更好地利用服務並進行故障排除。」    *   **實際對應的筆記：** `20260503 Python 爬蟲 POST() 相關參數.md`。<br>*   **澄清：** 這裡的引用是錯誤的。我對您「GKE 服務有初步認識」的判斷，應該是來自您在第一輪對話中提及的「對 Google Kubernetes Engine (GKE) 服務有初步認識」，而非這個特定的筆記片段。這個筆記片段本身是關於 Python 爬蟲的。<br>*   **筆記片段 8：** 在上一輪對話中，我並沒有明確引用筆記片段 8。<br>*   **實際對應的筆記：** `20260427 透過 leetcode 刷題學習 MySQL 語法.md`。<br>*   **筆記片段 9：** 在上一輪對話中，我提到「您已熟悉 Docker 容器化與 `docker-compose` 進行多容器服務整合 ([筆記片段 5], [筆記片段 9])。」<br>    *   **實際對應的筆記：** `MySQL Window Function.md`。<br>    *   **澄清：** 這裡的引用也是錯誤的。我對您「能利用 `docker-compose` 整合多服務開發環境」的判斷，應該是來自您在第一輪對話中提及的「多容器啟動（如 Kafka）」以及對 Docker 容器化的深入理解，而非這個特定的筆記片段。這個筆記片段本身是關於 MySQL Window Function 的。<br>**總結來說：**<br>*   我對您「GKE 服務有初步認識」的判斷，是基於您在初始需求中直接提及的資訊。<br>*   我對您「能利用 `docker-compose` 整合多服務開發環境」的判斷，是基於您對 Docker 容器化、多容器啟動（如 Kafka，對應 `[筆記片段 5]`）的熟悉程度。<br>*   筆記片段 3 (資料模型設計 - SQL.md) 在上一輪被錯誤地引用為「Cloud Run 的單一容器限制」。<br>我會確保在接下來的對話中，對筆記片段的引用更加精確，避免再次出現類似的錯誤。感謝您的指正！<br>請問您是否需要我根據這些澄清，重新評估或調整學習路徑建議？或者我們繼續針對「第一階段：Kubernetes 核心概念與基礎操作與本地環境建置」的展開內容進行討論？" | Bad user experiences |
+    | 5 | 重新評估 | planning agent | "請提供您想重新評估的筆記片段編號或內容。" | Bad user experiences |
+    | 6 | 重新評估kubernetes的學習路徑，確保回覆中有對應正確的學習筆記 | planning agent | "好的，我已了解您的需求，將重新評估 Kubernetes 的學習路徑，並確保所有「你已有基礎」的標註都能精確對應到您提供的筆記片段。<br>---### 學習路徑建議 (重新評估與筆記對應)<br>#### 第一階段：Kubernetes 核心概念與基礎操作<br>*   **目標：** 建立對 Kubernetes 運作原理與基本元件的全面理解，能夠操作 `kubectl` 部署簡單應用。<br>*   **具體技能/主題：**<br>*   **Kubernetes 簡介與核心概念：從單機到分散式容器編排**<br>| Correct note reference but the previous runs were the waste. |
+
+3. After implementing additional three layers inside the [routing agent](../dashboard_ui/agents/intent_router_agent.py):  \
+    (1) _extract_filter_tags() inside the function `route()`.  \
+    (2) _extract_tags_via_alias() inside the function `route()`. \
+    (3) _r_hyde_rewrite() inside the function `route()`: rewrite in the function `route()` for query transformation.
+    
+    > The performance was somewhat improved. Described as follows:
+
+- Flowchart in route() of router agent:
+    ```plaintext
+    query
+    │
+    ├─ Step 3A: extract_filter_tags(原始 query, known_tags)  ← 全庫 tag 字典字串比對
+    │           │
+    │           ├─ 命中 → filter_tags 確定 → 跳到 rag_query()
+    │           │
+    │           └─ 沒命中 → Step 3B
+    │
+    ├─ Step 3B: alias 模糊比對
+    │           1. distinct alias list (從 obsidian_notes)
+    │           2. 模糊比對原始 query，定位到相關筆記（可能多篇）
+    │           3. 萃取這些筆記的 tags，做「頻率收緊」而非全部聯集
+    │           │
+    │           ├─ 有抓到 tags → filter_tags 確定 → 跳到 rag_query()
+    │           │
+    │           └─ 沒抓到 → Step 3C
+    │
+    ├─ Step 3C: HyDE rewrite (原始 query + 全庫 known_tags) → 推薦一個 tag + 假設性問句
+    │           │
+    │           ├─ 推薦 tag 存在於 known_tags → filter_tags 確定
+    │           │
+    │           └─ 不存在 / NONE → Step 3D
+    │
+    └─ Step 3D: filter_tags = None，退化成無 filter 全庫搜尋
+    ```
+
+- key codes
+    ```python
+        # 如果導向 rag agent，則對使用者的查詢語句萃取出與現存筆記有關聯的標籤 (tag)
+        filter_tags = None
+        search_query = query
+        search_optimize_method = None
+
+        if agent_target == "rag_agent":
+            db = get_db_altas()
+            known_tags = _load_known_tags(db, "obsidian_vectors")
+
+            # Step 3A: 全庫 tag 字典字串比對
+            tag_hit = _extract_filter_tags(query, known_tags)
+            if tag_hit:
+                filter_tags = [tag_hit]
+                search_optimize_method = "extract_filter_tags"
+
+            # Step 3B: alias 模糊比對，用來反查 tags，專治 tags 沒有正確標示、但是筆記名稱本身有符合查詢語意的時候
+            if not filter_tags:
+                logger.info(f"先模糊比對筆記本身alias...")
+                alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
+                tags_from_alias = _extract_tags_via_alias(query, alias_tag_pairs, known_tags)
+                if tags_from_alias:
+                    filter_tags = tags_from_alias
+                    search_optimize_method = "extract_tags_via_alias"
+
+            # Step 3C: HyDE rewrite，根據筆記庫真實存在的 tags 來重寫使用者的查詢，讓下一關的 rag agent 更能理解使用者意圖
+            if not filter_tags:
+                logger.info(f"模糊比對筆記本身 alias 查無結果，使用 HyDE 重寫查詢")
+                client = _get_genai_client()
+                hyde_result = _r_hyde_rewrite(query, known_tags, client)
+                if hyde_result["tag"]:
+                    filter_tags = [hyde_result["tag"]]
+                search_query = hyde_result["hypothetical"]
+                search_optimize_method = "HyDE_rewrite"
+
+            # Step 3D: 都沒找到 → filter_tags 保持 None，退階成全庫搜索
+            if not filter_tags:
+                logger.info(f"使用 HyDE 重寫查詢也無效，退回全庫搜索")
+
+        return {"agent_target": agent_target,
+                "filter_tags": filter_tags,
+                "search_query": search_query,
+                "search_optimize_method": search_optimize_method}
+    ```
+
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | 目前的筆記裡沒有相關內容。筆記中提到 NoSQL 的時機，其中一點是「著重在快速讀取資料與可用性，而非ACID」。<br>您想詢問的關鍵字「CAP」是否與「ACID」有關聯？ | ❌ router agent 執行 `_extract_filter_tags()` 找到 NoSQL 筆記 tag，沒有去找CAP，誤導 rag agent 的 `vector search` |
+    | 1 | 找尋CAP  | rag | CAP理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance (分區容忍)。這三者不可能兼顧，最多只能滿足其中兩種。... | ✅ router agent 執行 `_extract_tags_via_alias()` 找到'CAP-theorem' 與 'distribution-architecture' 筆記 tag，成功引導 rag agent 的 `vector search` 用這兩個 tag 檢索筆記 |
+    | 1 | CAP理論 | rag | AP理論探討分散式架構下的三項權衡議題， | ❓ 來源筆記都準確指向實體筆記名稱。值得紀錄的是，這裡使用者的查詢是"理論"而非"theorem"，導致 router agent 得執行 `_extract_tags_via_alias()` 找到'CAP-theorem'與'distribution-architecture'、而不是乾脆的`_extract_filter_tags()`，或許可以思考的是`_extract_filter_tags()`的匹配精準度過於嚴苛? |
+    | 1 | 摘要cap理論 | rag | CAP 理論探討分散式架構下的三項權衡議題... | 評語同上 |
+    | 1 | 將cap理論摘要成3句 | rag | CAP 理論指出，在分散式架構中，一致性 (Consistency)、可用性 (Availability) 和分區容忍 (Partition Tolerance) 這三者無法同時兼顧，只能選擇其中兩項。... | 評語同上 |
+    | 1 | 找尋cap理論筆記然後摘要理論的主張。 | rag | CAP 理論主張，在分散式架構中，一致性 (Consistency)、可用性 (Availability) 和分區容忍 (Partition Tolerance) 這三者無法同時兼顧，只能滿足其中兩項。  | router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+    | 1 | find the note about 'cap-theorem' | rag | CAP 理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning tolerance (分區容忍)。這三者不可能兼顧，之間只能滿足其中二種。 | ✅ router agent 執行 `_extract_filter_tags()` 直接命中 tag |
+
+- Testing case 2 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `_extract_filter_tags()` 找到 MySQL 筆記 tag，引導 rag agent 的 `vector search()` |
+    | 2 | partition_clause 能否再講多一點  | rag | 您好，根據您提供的筆記片段，partition_clause 在 MySQL Window Function 中是用來定義資料的分區方式。<br>這意味著，當您使用 PARTITION BY 子句時，MySQL 會將整個資料集分成不同的區塊（partitions），然後 Window Function 會獨立地在每個區塊內進行計算。....筆記片段中雖然沒有直接解釋 MySQL Window Function 的 `partition_clause`，但您提供的 Kafka 相關筆記中多次提到 "Partition"，其概念與 Window Function 的 `partition_clause` 有異曲同工之妙，都是將資料進行「分區」或「分組」的概念。<br>請問這樣的解釋對您有幫助嗎？您想進一步了解 `partition_clause` 在 MySQL 中的具體應用，或是其他方面的資訊呢?| ❌ router agent 執行 `_extract_tags_via_alias()` 找到"partition" 筆記 tag，混入雜訊引導 rag agent 的 `vector search()`用這tag 檢索到 kakfa |
+    | 3 | 我不想知道 kafka，而是想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 您好，非常抱歉，我之前的回答誤解了您的意思，並提供了與 Kafka 相關的筆記內容。<br>根據您提供的筆記片段，這些內容都與 Kafka 的 Partition、Replication、Segment 和 Cleanup 相關，而沒有任何關於 MySQL Window Function 的資訊。 | ❌ router agent 執行 `_extract_tags_via_alias()` 找到"partition" 筆記 tag，混入雜訊引導 rag agent，此外，Window Function 是第一輪找到的筆記，但在這輪發生`上下文丟失`。 |
+
+- Testing case 3 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | 根據您提供的筆記片段，以下是關於容器化技術的資訊：<br>Dev Container 是一種由微軟提供的 VS Code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境。這讓開發團隊成員能夠使： | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'docker' tag |
+    | 2 | 找dev container  | rag | 目前的筆記裡沒有關於「dev container」的內容。 | ❌ router agent 執行 `_extract_filter_tags()` 找到"AI" 筆記 tag，混入雜訊引導 rag agent 的 `vector search()`用這tag 檢索到 AI |
+    | 1 | 找dev-container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊：<br>什麼是 Dev Container？ Dev Container 是由微軟提供的 VS Code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境，讓 VS Code IDE 可以直接在該環境中工作。 | ✅ router agent 執行 `_extract_filter_tags()` 找到"dev-container" 筆記 tag，引導 rag agent 的 `vector search()` 用這 tag 檢索到 dev container |
+
+4. After removed the first layer, `_extract_filter_tags()` from the function `route()`:  
+> The performance was even better and many issues on the 3. could be solved. New flow chart is described as follows:
+    
+- Flowchart in route() of router agent:
+    ```plaintext
+        query
+        │
+        ├─ Step 3A: alias 模糊比對（rapidfuzz）
+        │    ├─ 命中一篇或多篇 alias → 反查這些筆記的 tags list
+        │    │    └─ 用 known_tags 做校驗（過濾掉不存在的 tag）→ 傳給 rag_query()
+        │    │
+        │    └─ 沒命中 → Step 3B
+        │
+        ├─ Step 3B: HyDE rewrite（query + known_tags → LLM）
+        │    ├─ LLM 推薦的 tag 存在於 known_tags → 傳給 rag_query()
+        │    └─ 不存在 / NONE → Step 3C
+        │
+        └─ Step 3C: filter_tags=None，退化成無 filter 全庫搜索
+    ```
+- Now the searching chains before hand over to the rag agent in the function `route()` of router agent was changed to:
+    ```python
+    def route():
+        # 中間省略.....
+        # 如果導向 rag agent，則對使用者的查詢語句萃取出與現存筆記有關聯的標籤 (tag)
+        filter_tags = None
+        search_query = query
+        search_optimize_method = None
+
+        if agent_target == "rag_agent":
+            db = get_db_altas()
+            known_tags = _load_known_tags(db, "obsidian_vectors")
+
+            # Step 3A: alias 模糊比對，用來反查 tags，專治 tags 沒有正確標示、但是筆記名稱本身有符合查詢語意的時候
+            if not filter_tags:
+                logger.info(f"先模糊比對筆記本身alias...")
+                alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
+                tags_from_alias = _extract_tags_via_alias(query, alias_tag_pairs, known_tags)
+                if tags_from_alias:
+                    filter_tags = tags_from_alias
+                    search_optimize_method = "extract_tags_via_alias"
+
+            # Step 3B: HyDE rewrite，根據筆記庫真實存在的 tags 來重寫使用者的查詢，讓下一關的 rag agent 更能理解使用者意圖
+            if not filter_tags:
+                logger.info(f"模糊比對筆記本身 alias 查無結果，使用 HyDE 重寫查詢")
+                client = _get_genai_client()
+                hyde_result = _r_hyde_rewrite(query, known_tags, client)
+                if hyde_result["tag"]:
+                    filter_tags = [hyde_result["tag"]]
+                search_query = hyde_result["hypothetical"]
+                search_optimize_method = "HyDE_rewrite"
+
+            # Step 3C: 都沒找到 → filter_tags 保持 None，退階成全庫搜索
+            if not filter_tags:
+                logger.info(f"使用 HyDE 重寫查詢也無效，退回全庫搜索")
+
+        return {"agent_target": agent_target,
+                "filter_tags": filter_tags,
+                "search_query": search_query,
+                "search_optimize_method": search_optimize_method}
+    ```
+
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | 根據筆記內容，CAP理論探討的是分散式架構下的三個權衡議題：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance .... | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+    | 1 | 找尋CAP  | rag | 前的筆記裡有關於 CAP 理論的內容，主要探討分散式架構下的三項權衡議題：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance (分區容忍)。... | ✅ router agent 執行 `_extract_tags_via_alias()` 找到'CAP-theorem' 與 'distribution-architecture' 筆記 tag，成功引導 rag agent 的 `vector search` 用這兩個 tag 檢索筆記 |
+    | 1 | CAP理論 | rag | AP理論探討分散式架構下的三項權衡議題， | ✅ router agent 執行 `_extract_tags_via_alias()` 找到'CAP-theorem' 與 'distribution-architecture' 筆記 tag，成功引導 rag agent 的 `vector search` 用這兩個 tag 檢索筆記 |
+    | 1 | 摘要cap理論 | rag | CAP理論探討分散式架構下的三項權衡議題：... | 評語同上 |
+    | 1 | 將cap理論摘要成3句 | rag | CAP理論探討分散式架構下的三個權衡議題：一致性... | 評語同上 |
+    | 1 | 找尋cap理論筆記然後摘要理論的主張。 | rag | CAP 理論主張，在分散式架構中，一致性 (Consistency)、可用性 (Availability) 和分區容忍 (Partition Tolerance) 這三者無法同時兼顧，只能滿足其中兩項。  | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+    | 1 | find the note about 'cap-theorem' | rag | CAP 理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning tolerance (分區容忍)。這三者不可能兼顧，之間只能滿足其中二種。 | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+
+- Testing case 2 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `_extract_filter_tags()` 找到 MySQL 筆記 tag，引導 rag agent 的 `vector search()` |
+    | 2 | partition_clause 能否再講多一點  | rag | 您好，您提供的筆記片段主要圍繞著 Kafka 的 Partition 概念，而非 MySQL 的 Window Function 中的 partition_clause。<br>根據您提供的筆記片段，我找到以下關於 Kafka Partition 的資訊.... | ❌ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'partition' tag，導致最後 Window function parition clause 沒有出現在 LLM 的回覆參考 |
+    | 3 | 我不想知道 kafka，而是想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ✅ router agent 執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者，只有第 2 層一度被污染 |
+
+- Testing case 3 for note querying and summarizing:  
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | 根據您提供的筆記片段，以下是關於容器化技術的資訊：<br>Dev Container 是一種由微軟提供的 VS Code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境。這讓開發團隊成員能夠使： | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'docker' tag |
+    | 2 | 找dev container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊...<br>定義與目的：... | ✅ router agent 執行 `_extract_filter_tags()` 找到 'docker', 'dev-container', 'development-environment', 'virtual-environment', 'collaboration' tag，引導 rag agent 的 `vector search()` |
+    | 1 | 找dev-container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊：<br>什麼是 Dev Container： | ✅ router agent 執行 `_extract_filter_tags()` 找到 'docker', 'dev-container', 'development-environment', 'virtual-environment', 'collaboration' tag，引導 rag agent 的 `vector search()` |
+
+    > 整體推論：
+    _extract_filter_tags() 的核心問題不只是「只回傳一個 tag」，而是它的比對邏輯本身有漏洞，它拿 tag 字串去跟 query 做比對，但 tag 通常是短詞（MySQL、NoSQL、AI），query 是完整句子，fuzz.partial_ratio("AI", "找dev container") 很容易因為部分字符巧合命中而拿到高分，這解釋了 "找dev container" 命中 AI tag 這個令人費解的失誤。
+    _extract_tags_via_alias() 效果較好的是，它走的是另一個方向，先找「哪篇筆記跟 query 有關」，再從那篇筆記「繼承整個 tags list」。這個間接定位的方式，等於用人類寫筆記時賦予的語意結構 (alias 是摘要性標題，比 tag 短詞資訊量帶來的語意更為豐滿) 來導航。
+
+5. By following the previous testing result mentioned at 4., there was still a pending issue about the context contamination. As illustrated, the root cause after analysis pointed out the wrong filter tagas was generated by the router agent within the inner function `_extract_tags_via_alias()` of the function `route()`, and passed to the downstream rag agent. This led to the context contamination, the rag agent model with improper background information answered irrelevant output.
+
+    ```
+    使用者: "partition_clause 能否再講多一點"
+            │
+            ▼
+        [Router Agent]  ← 問題出在這裡
+        看到 "partition" → 抽出 kafka tag → 傳錯 filter_tags 給 rag_query()
+            │
+            ▼
+        vector_search(filter_tags=["kafka"])  ← 撈回來的 chunks 就已經錯了
+            │
+            ▼
+        [RAG Agent LLM]
+        拿到一堆 kafka chunks + chat history ← 即使 prompt 再強，巧婦難為無米之炊
+    ```
+
+- This was fixed by implementing the new functions to judge if the current query was followup query. The flow chart was
+    ```plaintext
+    使用者: "partition_clause 能否再講多一點"
+                │
+                ▼
+        [Router Agent] (比對 query 是否出現追問詞或是岔題排他性的詞)
+                │
+                ├─────────────────────────[ 是追問 ]─────────────────────────┐
+                │                                                           │
+                ▼                                                           ▼
+    (從 chat history 查詢上一輪 filter_tags)                             [ 不是追問 ]
+                │                                                           │
+        ┌─────┴────────────────────────┐                                    │
+        ▼                              ▼                                    │
+    [ 查詢結果為 None ]            [ 查詢到 filter_tags ]                      │
+        │                              │                                    │
+        ▼                              ▼                                    ▼
+    (代表上一層判斷有誤、           (繼承並跳過抽取 filter_tags 工作)     (根據 query 抽取新的 filter_tags)
+    不是追問，回去重新執行                 │                                    │
+    filter_tags 抽取)                   │                                    │
+        │                              │                                    │
+        ▼                              ▼                                    ▼
+    vector_search(                 vector_search(                      vector_search(
+    filter_tags=["kafka"]          filter_tags=(<上一輪的tags>)        filter_tags=["kafka"]
+    )                              )                                   )
+        │                               │                                    │
+        └───────────────────────────────┼────────────────────────────────────┘
+                                        │
+                                        ▼
+                                [RAG Agent LLM]
+                            新 chunks + chat history
+    ```
+- Now the searching chains before hand over to the rag agent in the function `route()` of router agent was changed to:
+    ```python
+    def _looks_like_followup(query: str) -> bool:
+    """
+    判斷 query 是否屬於繼續追問，而非一個新的、岔題的獨立查詢。
+    當字數少（<= 100 字）、包含追問訊號詞、不包含排他詞均滿足時，回傳 True 代表追問。
+    透過判定是否為追問，來控制是否要在當前查詢中搜尋向量資料庫。
+
+    這是輕量啟發式規則，不走 LLM，避免增加延遲。
+    """
+
+    FOLLOWUP_SIGNALS = ["再", "更多", "繼續", "詳細", "追問",
+                        "能否", "可以", "那", "然後",
+                        "剛才", "上面", "前面", "這個", "那個",
+                        "它", "他", "她",
+                        "more", "further", "continue",
+                        "elaborate", "expand", "go on", "discuss"
+                        ]
+    EXCLUDE_SIGNALS = ["新", "改", "改成", "岔題", "另外",
+                       "new", "another", "change", "other"]
+    query_stripped = query.strip()
+    is_short = len(query_stripped) <= 100
+    has_signal = any(s in query_stripped for s in FOLLOWUP_SIGNALS)
+    no_exc_signal = any(es not in query_stripped for es in EXCLUDE_SIGNALS)
+    return is_short and has_signal and no_exc_signal
+
+
+    def _get_last_filter_tags(db: Database, session_id: str) -> list[str] | None:
+        """
+        從 chat_history 讀取這個 session 最近一筆 router 紀錄的 filter_tags。
+        回傳 list[str] (可能是空 list) 或 None (沒有歷史紀錄 / 上輪是 no_filter_fallback)。
+        """
+        doc = db["chat_history"].find_one({"session_id": session_id,
+                                        "agent_type": "router",
+                                        "role": "model",
+                                        "content": {"$nin": ["rag_agent", "planning_agent"]},
+                                        },
+                                        sort=[("timestamp", -1)],  # 取最新一筆
+                                        projection={"content": 1,
+                                                    "_id": 0
+                                                    },
+                                        )
+        if not doc:
+            return None
+        try:
+            # 注意 find_one 回傳的是 dict，但是 doc 的值是 json-like string，值的部分需轉回 python object
+            parsed = json.loads(doc["content"])
+            return parsed if isinstance(parsed, list) else None
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("_get_last_filter_tags: content 反序列化失敗")
+            return None
+
+    def route():
+        # ── Step 3: 如果導向 rag agent，則對使用者的查詢語句萃取出與現存筆記有關聯的標籤 (tag) ─────────────────
+        filter_tags = None
+        search_query = query
+        search_optimize_method = None
+
+        if agent_target == "rag_agent":
+            db = get_db_altas()
+            known_tags = _load_known_tags(db, "obsidian_vectors")
+            alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
+
+            # Step 3A: 先確認是否屬於使用者追問：短句且上輪有 filter_tags，直接沿用，不再重新找 tags ──────
+            if _looks_like_followup(query):  # 
+                inherited = _get_last_filter_tags(db, session_id)
+                logger.info(f"此波追問，無繼承 filter_tags，需重新抽取 tag")
+                if inherited:
+                    filter_tags = inherited
+                    search_optimize_method = "inherited_tags_from_last_turn"
+                    logger.info(f"追問繼承 filter_tags: {filter_tags}，跳過重新抽取")
+
+            # Step 3B: 執行 _extract_tags_via_alias(query, alias_tag_pairs, known_tags)
+            # Step 3C: 執行 HyDE rewrite
+            # Step 3D: 判斷 是否要退階為請 rag agent 做全庫搜索
+            # Step 3E: 執行 存入 chat_history
+
+        return {"agent_target": agent_target,
+            "filter_tags": filter_tags,
+            "search_query": search_query,
+            "search_optimize_method": search_optimize_method}
+    ```
+- The testing result was briefly summarized:
+
+
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | 根據筆記內容，CAP理論探討的是分散式架構下的三個權衡議題：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance .... | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+    | 1 | 找尋CAP  | rag | 前的筆記裡有關於 CAP 理論的內容，主要探討分散式架構下的三項權衡議題：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance (分區容忍)。... | ✅ router agent 執行 `_extract_tags_via_alias()` 找到'CAP-theorem' 與 'distribution-architecture' 筆記 tag，成功引導 rag agent 的 `vector search` 用這兩個 tag 檢索筆記 |
+    | 1 | CAP理論 | rag | AP理論探討分散式架構下的三項權衡議題， | ✅ router agent 執行 `_extract_tags_via_alias()` 找到'CAP-theorem' 與 'distribution-architecture' 筆記 tag，成功引導 rag agent 的 `vector search` 用這兩個 tag 檢索筆記 |
+    | 1 | 摘要cap理論 | rag | CAP理論探討分散式架構下的三項權衡議題：... | 評語同上 |
+    | 1 | 將cap理論摘要成3句 | rag | CAP理論探討分散式架構下的三個權衡議題：一致性... | 評語同上 |
+    | 1 | 找尋cap理論筆記然後摘要理論的主張。 | rag | CAP 理論主張，在分散式架構中，一致性 (Consistency)、可用性 (Availability) 和分區容忍 (Partition Tolerance) 這三者無法同時兼顧，只能滿足其中兩項。  | ✅ router agent `認為有追問行為`，但因為數首輪對話，所以重新執行`_extract_tags_via_alias()`後無果，再進入 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+    | 1 | find the note about 'cap-theorem' | rag | CAP 理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning tolerance (分區容忍)。這三者不可能兼顧，之間只能滿足其中二種。 | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'CAP-theorem' tag |
+
+- Testing case 2 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `_extract_filter_tags()` 找到 MySQL 筆記 tag，包含： {'alias': 'MySQL資料型態', 'tags': ['MongoDB', 'MySQL', 'data-type', 'BSON'], 'score': 62.5} 與 {'alias': 'MySQL Window Function', 'tags': ['MySQL', 'SQL', 'window-function'], 'score': 95.23809523809523} 這兩份筆記，引導 rag agent 的 `vector search()` |
+    | 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，關於 partition_clause 的說明如下：<br>partition_clause 是資料表中的分區方式。在套用 Window Function 時，MySQL 會針對 partition_clause 分區後的每一個區塊，分別......您提供的其他筆記片段（來源 1、3、5）主要在討論資料庫的分片 (Sharding) 和分割 (Partitioning) 機制，以及 SQL 與 NoSQL 的比較，這些內容與 MySQL Window Function 中的 partition_clause 的具體用法關聯性較小。 | ⚠️ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次 filter tags ('MongoDB', 'MySQL', 'data-type', 'BSON', 'SQL')，最後 Window function parition clause 留在 LLM 的回覆參考中，但因為 vector search 是由 rag agent 繼承 tags 與追問 query 後重新計算相似度，造成此時混入新的筆記來源與追問語意較相似但是跟上一輪語意較遠，最後造成 rag agent 仍有部分上下文污染。在這輪測試中發現來源筆記變成了 |
+    | 3 | 追問 partition_clause 就好，不想知道分片機制。 | ⚠️ 回覆結果幾乎同上一輪，只是把分片機制刪掉而已。 |
+    | 4 | 我只想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ⚠️ router agent 不知道這屬於追問，但靠著 user query 中不刻意提及非主題相關性的詞彙，router 會執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者 |
+
+- Testing case 3 for note querying and summarizing:  
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | 根據您提供的筆記片段，以下是關於容器化技術的資訊：<br>Dev Container 是一種由微軟提供的 VS Code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境。這讓開發團隊成員能夠使： | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'docker' tag |
+    | 2 | 找dev container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊...<br>定義與目的：... | ⚠️ router agent 不知道這屬於追問，直接執行 `_extract_filter_tags()` 找到 'docker', 'dev-container', 'development-environment', 'virtual-environment', 'collaboration' tag，引導 rag agent 的 `vector search()` |
+    | 1 | 找dev-container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊：<br>什麼是 Dev Container： | ✅ router agent 執行 `_extract_filter_tags()` 找到 'docker', 'dev-container', 'development-environment', 'virtual-environment', 'collaboration' tag，引導 rag agent 的 `vector search()` |
+
+6. Others learned during coding:
+    - Two iteration approaches to search the text in the LLM's response.
+
+        ```python
+            text = response.text.strip()
+            # approach 1 ( next() + generator expression )
+            note_line = next((l for l in text.splitlines() if l.startswith("ALIAS:")), "ALIAS: NONE")
+            tag_line = next((l for l in text.splitlines() if l.startswith("TAG:")), "TAG: NONE")
+            hyde_line = next((l for l in text.splitlines() if l.startswith("HYPOTHETICAL:")), "")
+
+            raw_note = note_line.replace("ALIAS:", "").strip()
+            raw_tag = tag_line.replace("TAG:", "").strip()
+            hypothetical = hyde_line.replace("HYPOTHETICAL:", "").strip() or query
+
+            # approach 2 ( for-loop )
+            raw_note = "NONE"
+            raw_tag = "NONE"
+            hypothetical = query
+            for line in text.splitlines():
+                if line.startswith("ALIAS:"):
+                    raw_note = line.replace("ALIAS:", "").strip()
+                if line.startswith("TAG:"):
+                    raw_tag = line.replace("TAG:", "").strip()
+                if line.startswith("HYPOTHETICAL:"):
+                    hypothetical = line.replace("HYPOTHETICAL:", "").strip() or query
+        ```
+
+    | approach |   explanation   |effectiveness  | edge condition  |
+    | -------- |  -------------  | -------------- | -------------- |
+    |    1     |  呼叫了三次 `text.splitlines()` 並`個別`走訪。<br> | `next()` + generator 可控制每次走訪 `text.splitlines()` 期間是否要即時StopIteration， 如 `text.splitlines()` 內存有目標行，generator 就會傳遞找到的結果給 `next()`， `next()` 這行就算執行完畢、generator 不會工作、不會繼續往後走訪。若目標行坐落於文本前半段，代表不需要看完整個文本，較有效率。<br>但如果都沒有目標行，最壞結果就是三次走訪都獨立完整地執行了三次。  |  `next(...)` 只要遇到第一個符合條件的行就會回傳並結束。  |
+    |    2     |  只切分一次 `text.splitlines()`，並用一個迴圈走訪所有行。<br> |  不論文長多長，都只會走訪一次。但即使在第一行就找到了所有要的資訊，依然會硬生生把整個文本全部跑完，無法提早結束。  |  由於迴圈不會一找到就停下，所以每跑完每一行，後面的 `if line.startswith(...)` 可能會直接覆蓋掉前面已經存進 raw_note 、raw_tag 或是 hypothetical 的值。 |
+    > **Conclusion:**  \
+    > **Approach 1 比較 pythonic，但是 Approach 2 比較彈性可擴展其他運算需求。**  \
+    > **適用場景: 如果很確定文本輸出必定會有一筆 ALIAS: / TAG: / HYPOTHETICAL:，且只想拿一筆， Approach 1 是比較簡潔的寫法。**

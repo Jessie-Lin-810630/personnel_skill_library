@@ -266,4 +266,4 @@ poetry run python -m unittest tests.test_task07_onenote_to_markdown -v
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 的所有腳本與測試，於 2026-06-15 完成記錄。*
+*本摘要涵蓋 `feature/html-to-markdown`與 `feature/dashboard-ui` 分支中 task07 的所有腳本與測試，於 2026-06-20 完成記錄。*
