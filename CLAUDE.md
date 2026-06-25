@@ -39,6 +39,9 @@ poetry run python -m unittest discover -s tests
 
 # 執行單一測試檔
 poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
+
+# Lint / format（pre-commit + ruff，設定見 .pre-commit-config.yaml）
+poetry run pre-commit run --all-files
 ```
 
 ## 架構說明
@@ -59,10 +62,10 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 | task02 | GitHub REST API | MongoDB：`github_repos`, `github_summary` |
 | task03 | LeetCode GraphQL API + ccClub REST API | MongoDB：`solved_problems_on_ccClub`, `solved_problems_on_leetcode`, `ccClub&leetcode_summary` |
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
-| task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
+| task06 | GCS Obsidian `.md`（文字 + `![[ ]]` 圖片）→ chunking → 多模態 embedding | MongoDB：`obsidian_vectors_multimodal`（Atlas Vector Search）；並回寫 `obsidian_notes.embedding_done` |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
 
-所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
+多數 task 的 Load 步驟以唯一欄位做 `upsert`，支援冪等重複執行。**例外：task06** 改為「先刪後插」（依 `file_path` `delete_many` 再 `insert_many`，避免重新切塊後殘留舊 chunk），並以 CDC gate（GCS 檔案 md5 變更且 `obsidian_notes.embedding_done=False` 才呼叫 embedding）+ CAS（帶 md5 守衛翻 `embedding_done`）控制增量重跑。
 
 > **需要修改 task01–task06 時**，請先閱讀 [`doc/branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md) 了解各 task 的資料來源、ETL 邏輯與 MongoDB schema。
 >
@@ -77,9 +80,11 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 
 ### task06 向量搜尋
 
-- Embedding model：`text-embedding-3-small`（OpenAI，維度 1536）
-- Vector index name：`obsidian_vectors_index`，在 MongoDB Atlas Console 手動建立
-- 查詢方式：`$vectorSearch` stage，similarity = cosine
+- Embedding model：`gemini-embedding-2`（Vertex AI，多模態，GA）。早期試用的 OpenAI `text-embedding-3-small` 已棄用。
+  - 維度：自訂 `output_dimensionality=1536`（MRL 截斷；預設 3072 超過 Atlas M0 上限 2048），截斷後需自行做 L2 normalize。
+  - 不支援 `task_type` 參數，需把任務型式（document / query）當成 instruction 寫進 prompt 文字。
+- Collection：`obsidian_vectors_multimodal`；Vector index 在 MongoDB Atlas Console 手動建立，`numDimensions` 須為 1536。index 詳細設定見 [`doc/task06_vctr_srch_idx_hand_over.md`](doc/task06_vctr_srch_idx_hand_over.md)。
+- 查詢方式：`$vectorSearch` stage，similarity = cosine，支援 `filter: tags` 做 pre-filter。
 
 ### GCS 整合
 
