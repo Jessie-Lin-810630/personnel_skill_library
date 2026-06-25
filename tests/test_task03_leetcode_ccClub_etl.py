@@ -1,17 +1,17 @@
 import os
 import unittest
-from datetime import timezone
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from task03_leetcode_ccClub_etl import e_crawler_ccClub
-from task03_leetcode_ccClub_etl import e_query_leetcode_graphql
-from task03_leetcode_ccClub_etl import l_load_ccClub_doc_to_mongodb
-from task03_leetcode_ccClub_etl import l_load_leetcode_doc_to_mongodb
-from task03_leetcode_ccClub_etl import main
-from task03_leetcode_ccClub_etl import t_transform_ccClub
-from task03_leetcode_ccClub_etl import t_transform_leetcode
+from task03_leetcode_ccClub_etl import (
+    e_crawler_ccClub,
+    e_query_leetcode_graphql,
+    l_load_ccClub_doc_to_mongodb,
+    l_load_leetcode_doc_to_mongodb,
+    main,
+    t_transform_ccClub,
+    t_transform_leetcode,
+)
 
 
 class FakeResponse:
@@ -33,9 +33,7 @@ class LeetCodeExtractTests(unittest.TestCase):
         headers = e_query_leetcode_graphql._get_headers("csrf-token", "session-token", "jessie")
 
         self.assertEqual(headers["Content-Type"], "application/json")
-        self.assertEqual(
-            headers["Cookie"], "LEETCODE_SESSION=session-token; csrftoken=csrf-token"
-        )
+        self.assertEqual(headers["Cookie"], "LEETCODE_SESSION=session-token; csrftoken=csrf-token")
         self.assertEqual(headers["x-csrftoken"], "csrf-token")
         self.assertEqual(headers["Referer"], "https://leetcode.com")
         self.assertEqual(headers["User-Agent"], "jessie")
@@ -43,9 +41,7 @@ class LeetCodeExtractTests(unittest.TestCase):
     def test_post_graphql_returns_json_on_success(self):
         response = FakeResponse(status_code=200, payload={"data": {"ok": True}})
 
-        with patch.object(
-            e_query_leetcode_graphql.requests, "post", return_value=response
-        ) as request_post:
+        with patch.object(e_query_leetcode_graphql.requests, "post", return_value=response) as request_post:
             data = e_query_leetcode_graphql._post_graphql({"h": "1"}, {"query": "q"})
 
         request_post.assert_called_once_with(
@@ -62,9 +58,10 @@ class LeetCodeExtractTests(unittest.TestCase):
             FakeResponse(status_code=200, payload={"data": {"ok": True}}),
         ]
 
-        with patch.object(
-            e_query_leetcode_graphql.requests, "post", side_effect=responses
-        ) as request_post, patch.object(e_query_leetcode_graphql.time, "sleep") as sleep:
+        with (
+            patch.object(e_query_leetcode_graphql.requests, "post", side_effect=responses) as request_post,
+            patch.object(e_query_leetcode_graphql.time, "sleep") as sleep,
+        ):
             data = e_query_leetcode_graphql._post_graphql({"h": "1"}, {"query": "q"})
 
         self.assertEqual(data, {"data": {"ok": True}})
@@ -155,9 +152,7 @@ class LeetCodeExtractTests(unittest.TestCase):
                 return FakeResponse(status_code=200)
 
         with patch.object(e_query_leetcode_graphql.requests, "Session", return_value=FakeSession()):
-            old_csrf, new_csrf, new_session = e_query_leetcode_graphql._login_and_get_csrf(
-                "jessie", "pw"
-            )
+            old_csrf, new_csrf, new_session = e_query_leetcode_graphql._login_and_get_csrf("jessie", "pw")
 
         self.assertEqual(old_csrf, "initial-csrf")
         self.assertEqual(new_csrf, "new-csrf")
@@ -189,11 +184,14 @@ class CcClubExtractTests(unittest.TestCase):
                 self.cookies.values["csrftoken"] = "rotated-token"
                 return FakeResponse(status_code=200)
 
-        with patch.dict(
-            os.environ,
-            {"CCCLUB_USERNAME": "jessie", "CCCLUB_PASSWORD": "pw"},
-            clear=False,
-        ), patch.object(e_crawler_ccClub.requests, "Session", return_value=FakeSession()):
+        with (
+            patch.dict(
+                os.environ,
+                {"CCCLUB_USERNAME": "jessie", "CCCLUB_PASSWORD": "pw"},
+                clear=False,
+            ),
+            patch.object(e_crawler_ccClub.requests, "Session", return_value=FakeSession()),
+        ):
             session, headers = e_crawler_ccClub._get_session_and_headers()
 
         self.assertIsNotNone(session)
@@ -257,16 +255,18 @@ class CcClubExtractTests(unittest.TestCase):
             {"problem_id": "p2", "problem_type": "OI", "score": 80},
         ]
 
-        with patch.object(
-            e_crawler_ccClub, "_fetch_solved_problem_ids", return_value=raw_problems
-        ), patch.object(
-            e_crawler_ccClub,
-            "_fetch_problem_detail",
-            side_effect=[
-                {"topic": ["array"], "difficulty": "Easy"},
-                {},
-            ],
-        ), patch.object(e_crawler_ccClub.time, "sleep") as sleep:
+        with (
+            patch.object(e_crawler_ccClub, "_fetch_solved_problem_ids", return_value=raw_problems),
+            patch.object(
+                e_crawler_ccClub,
+                "_fetch_problem_detail",
+                side_effect=[
+                    {"topic": ["array"], "difficulty": "Easy"},
+                    {},
+                ],
+            ),
+            patch.object(e_crawler_ccClub.time, "sleep") as sleep,
+        ):
             problems = e_crawler_ccClub.fetch_all_solved_problems(
                 session=object(),
                 headers={"h": "1"},
@@ -327,9 +327,7 @@ class LeetCodeTransformTests(unittest.TestCase):
         ]
         solved_problem_stats = [{"difficulty": "Easy", "count": 1}]
 
-        summary = t_transform_leetcode.build_leetcode_summary_partial(
-            feature_docs, solved_problem_stats
-        )
+        summary = t_transform_leetcode.build_leetcode_summary_partial(feature_docs, solved_problem_stats)
 
         self.assertRegex(summary["snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
         self.assertEqual(summary["totalSolvedProblemsOnLeetcode"], 2)
@@ -433,12 +431,8 @@ class LeetCodeLoadTests(unittest.TestCase):
     def test_get_db_returns_named_database_from_client(self):
         fake_client = {"skill_library": object()}
 
-        with patch.object(
-            l_load_leetcode_doc_to_mongodb, "MongoClient", return_value=fake_client
-        ) as mongo:
-            db = l_load_leetcode_doc_to_mongodb.get_db(
-                "mongodb://localhost:27017", "skill_library"
-            )
+        with patch.object(l_load_leetcode_doc_to_mongodb, "MongoClient", return_value=fake_client) as mongo:
+            db = l_load_leetcode_doc_to_mongodb.get_db("mongodb://localhost:27017", "skill_library")
 
         mongo.assert_called_once_with("mongodb://localhost:27017")
         self.assertIs(db, fake_client["skill_library"])
@@ -475,9 +469,7 @@ class CcClubLoadTests(unittest.TestCase):
     def test_get_db_returns_named_database_from_client(self):
         fake_client = {"skill_library": object()}
 
-        with patch.object(
-            l_load_ccClub_doc_to_mongodb, "MongoClient", return_value=fake_client
-        ) as mongo:
+        with patch.object(l_load_ccClub_doc_to_mongodb, "MongoClient", return_value=fake_client) as mongo:
             db = l_load_ccClub_doc_to_mongodb.get_db("mongodb://localhost:27017", "skill_library")
 
         mongo.assert_called_once_with("mongodb://localhost:27017")
@@ -519,31 +511,27 @@ class Task03MainTests(unittest.TestCase):
         summary = {"snapshot_date": "2026-05-05", "totalSolvedProblemsOnLeetcode": 1}
         db = object()
 
-        with patch.dict(
-            os.environ,
-            {
-                "LEETCODE_USERNAME": "jessie",
-                "LEETCODE_SESSION": "session-token",
-                "CSRF_TOKEN": "csrf-token",
-                "MONGO_URI": "mongodb://localhost:27017",
-                "MONGO_DB_NAME": "skill_library",
-            },
-            clear=False,
-        ), patch.object(main, "_get_headers", return_value={"h": "1"}) as get_headers, patch.object(
-            main, "fetch_solved_problems_features", return_value=raw_features
-        ) as fetch_features, patch.object(
-            main, "fetch_solved_problem_stats", return_value=raw_stats
-        ) as fetch_stats, patch.object(
-            main, "build_problem_feat_documents", return_value=feature_docs
-        ) as build_docs, patch.object(
-            main, "build_leetcode_summary_partial", return_value=summary
-        ) as build_summary, patch.object(
-            main, "get_db", return_value=db
-        ) as get_db, patch.object(
-            main, "upsert_leetcode_problems"
-        ) as upsert_problems, patch.object(
-            main, "upsert_leetcode_summary_partial"
-        ) as upsert_summary:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "LEETCODE_USERNAME": "jessie",
+                    "LEETCODE_SESSION": "session-token",
+                    "CSRF_TOKEN": "csrf-token",
+                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_DB_NAME": "skill_library",
+                },
+                clear=False,
+            ),
+            patch.object(main, "_get_headers", return_value={"h": "1"}) as get_headers,
+            patch.object(main, "fetch_solved_problems_features", return_value=raw_features) as fetch_features,
+            patch.object(main, "fetch_solved_problem_stats", return_value=raw_stats) as fetch_stats,
+            patch.object(main, "build_problem_feat_documents", return_value=feature_docs) as build_docs,
+            patch.object(main, "build_leetcode_summary_partial", return_value=summary) as build_summary,
+            patch.object(main, "get_db", return_value=db) as get_db,
+            patch.object(main, "upsert_leetcode_problems") as upsert_problems,
+            patch.object(main, "upsert_leetcode_summary_partial") as upsert_summary,
+        ):
             main.run_task03_leetcode()
 
         get_headers.assert_called_once_with("csrf-token", "session-token", "jessie")
@@ -566,26 +554,23 @@ class Task03MainTests(unittest.TestCase):
         summary = {"snapshot_date": "2026-05-05", "totalSolvedProblemsOnCCclub": 1}
         db = object()
 
-        with patch.dict(
-            os.environ,
-            {
-                "MONGO_URI": "mongodb://localhost:27017",
-                "MONGO_DB_NAME": "skill_library",
-            },
-            clear=False,
-        ), patch.object(main, "_get_session_and_headers", return_value=(object(), {"h": "1"})) as get_session, patch.object(
-            main, "fetch_all_solved_problems", return_value=raw_problems
-        ) as fetch_all, patch.object(
-            main, "build_ccclub_problem_documents", return_value=problem_docs
-        ) as build_docs, patch.object(
-            main, "build_ccclub_summary_partial", return_value=summary
-        ) as build_summary, patch.object(
-            main, "get_db", return_value=db
-        ) as get_db, patch.object(
-            main, "upsert_ccclub_problems"
-        ) as upsert_problems, patch.object(
-            main, "upsert_ccclub_summary_partial"
-        ) as upsert_summary:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_DB_NAME": "skill_library",
+                },
+                clear=False,
+            ),
+            patch.object(main, "_get_session_and_headers", return_value=(object(), {"h": "1"})) as get_session,
+            patch.object(main, "fetch_all_solved_problems", return_value=raw_problems) as fetch_all,
+            patch.object(main, "build_ccclub_problem_documents", return_value=problem_docs) as build_docs,
+            patch.object(main, "build_ccclub_summary_partial", return_value=summary) as build_summary,
+            patch.object(main, "get_db", return_value=db) as get_db,
+            patch.object(main, "upsert_ccclub_problems") as upsert_problems,
+            patch.object(main, "upsert_ccclub_summary_partial") as upsert_summary,
+        ):
             main.run_task03_ccclub()
 
         session_obj = get_session.return_value[0]
