@@ -6,19 +6,17 @@ from unittest.mock import mock_open, patch
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
-from task05_googlesheet_skill_etl import e_fetch_google_sheet
-from task05_googlesheet_skill_etl import l_load_to_mongodb
-from task05_googlesheet_skill_etl import main
-from task05_googlesheet_skill_etl import t_transform_skills
+from task05_googlesheet_skill_etl import e_fetch_google_sheet, l_load_to_mongodb, main, t_transform_skills
 
 
 class GoogleSheetExtractTests(unittest.TestCase):
     def test_get_google_sheet_client_reads_service_account_file_and_authorizes(self):
         fake_client = object()
 
-        with patch("builtins.open", mock_open(read_data='{"type":"service_account"}')) as mocked_open, patch.object(
-            e_fetch_google_sheet.pygsheets, "authorize", return_value=fake_client
-        ) as authorize:
+        with (
+            patch("builtins.open", mock_open(read_data='{"type":"service_account"}')) as mocked_open,
+            patch.object(e_fetch_google_sheet.pygsheets, "authorize", return_value=fake_client) as authorize,
+        ):
             client = e_fetch_google_sheet.get_google_sheet_client("/tmp/creds.json")
 
         mocked_open.assert_called_once_with("/tmp/creds.json", "r")
@@ -46,23 +44,17 @@ class GoogleSheetExtractTests(unittest.TestCase):
         )
 
         with self.assertRaises(e_fetch_google_sheet.pygsheets.SpreadsheetNotFound):
-            e_fetch_google_sheet.open_spreadsheet_get_worksheet(
-                client, "Personal Skill Radar Calculation", "生技"
-            )
+            e_fetch_google_sheet.open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "生技")
 
     def test_open_spreadsheet_get_worksheet_raises_when_worksheet_missing(self):
         spreadsheet = SimpleNamespace(
             title="Personal Skill Radar Calculation",
-            worksheet=lambda mode, title: (_ for _ in ()).throw(
-                e_fetch_google_sheet.pygsheets.WorksheetNotFound()
-            ),
+            worksheet=lambda mode, title: (_ for _ in ()).throw(e_fetch_google_sheet.pygsheets.WorksheetNotFound()),
         )
         client = SimpleNamespace(open=lambda title: spreadsheet)
 
         with self.assertRaises(e_fetch_google_sheet.pygsheets.WorksheetNotFound):
-            e_fetch_google_sheet.open_spreadsheet_get_worksheet(
-                client, "Personal Skill Radar Calculation", "生技"
-            )
+            e_fetch_google_sheet.open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "生技")
 
 
 class SkillTransformTests(unittest.TestCase):
@@ -158,8 +150,10 @@ class SkillTransformTests(unittest.TestCase):
         self.assertEqual(top_row["雷達軸"], "流程設計能力")
         self.assertEqual(top_row["經手任務個數"], 2)
         self.assertEqual(top_row["各軸向任務最高分"], 12)
-        self.assertEqual(top_row["任務經驗值"], 1.0)
-        self.assertEqual(top_row["單軸總分"], 13.0)
+        # 任務經驗值 = round(log10(經手任務個數), 6)，log10(2) ≈ 0.30103
+        self.assertEqual(top_row["任務經驗值"], 0.30103)
+        # 單軸總分 = round(最高分 + 任務經驗值, 2) = round(12 + 0.30103, 2)
+        self.assertEqual(top_row["單軸總分"], 12.3)
         self.assertEqual(top_row["level"], 3)
 
     def test_build_combined_summaries_concatenates_dataframes(self):
@@ -209,10 +203,12 @@ class SkillLoadTests(unittest.TestCase):
 
     def test_upsert_skill_scores_builds_operations_by_radar_axis(self):
         db = FakeDb()
+        # upsert_skill_scores 收到的是 per-task docs (含「經手任務」)，
+        # 唯一鍵為 雷達軸 + 經手任務
         df = pd.DataFrame(
             [
-                {"雷達軸": "流程設計能力", "單軸總分": 13.0},
-                {"雷達軸": "文件撰寫能力", "單軸總分": 4.0},
+                {"雷達軸": "流程設計能力", "經手任務": "task-a", "單項任務總分": 13},
+                {"雷達軸": "文件撰寫能力", "經手任務": "task-c", "單項任務總分": 4},
             ]
         )
 
@@ -221,10 +217,13 @@ class SkillLoadTests(unittest.TestCase):
 
         collection = db.collections["skill_scores_biotech"]
         self.assertEqual(len(collection.bulk_operations), 2)
-        self.assertEqual(collection.bulk_operations[0].filter_doc, {"雷達軸": "流程設計能力"})
+        self.assertEqual(
+            collection.bulk_operations[0].filter_doc,
+            {"雷達軸": "流程設計能力", "經手任務": "task-a"},
+        )
         self.assertEqual(
             collection.bulk_operations[0].update_doc,
-            {"$set": {"雷達軸": "流程設計能力", "單軸總分": 13.0}},
+            {"$set": {"雷達軸": "流程設計能力", "經手任務": "task-a", "單項任務總分": 13}},
         )
         self.assertTrue(collection.bulk_operations[0].upsert)
 
@@ -269,33 +268,30 @@ class Task05MainTests(unittest.TestCase):
         df_both_summary = pd.DataFrame([{"雷達軸": "流程設計能力"}, {"雷達軸": "Orchestration"}])
         db = object()
 
-        with patch.dict(
-            os.environ,
-            {
-                "GS_CREDENTIAL_FILE_PATH": "/tmp/creds.json",
-                "MONGO_URI": "mongodb://localhost:27017",
-                "MONGO_DB_NAME": "skill_library",
-            },
-            clear=False,
-        ), patch.object(main, "get_google_sheet_client", return_value=fake_client) as get_client, patch.object(
-            main,
-            "open_spreadsheet_get_worksheet",
-            side_effect=[df_biotech, df_de],
-        ) as open_worksheet, patch.object(
-            main, "build_biotech_task_docs", return_value=df_biotech_stats
-        ) as build_biotech, patch.object(
-            main, "build_de_task_docs", return_value=df_de_stats
-        ) as build_de, patch.object(
-            main, "build_summary_for_radar", side_effect=[df_summary_1, df_summary_2]
-        ) as build_summary, patch.object(
-            main, "build_combined_summaries", return_value=df_both_summary
-        ) as combine_summaries, patch.object(
-            main, "get_db", return_value=db
-        ) as get_db, patch.object(
-            main, "upsert_skill_scores"
-        ) as upsert_scores, patch.object(
-            main, "upsert_skill_radar_summary"
-        ) as upsert_summary:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GS_CREDENTIAL_FILE_PATH": "/tmp/creds.json",
+                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_DB_NAME": "skill_library",
+                },
+                clear=False,
+            ),
+            patch.object(main, "get_google_sheet_client", return_value=fake_client) as get_client,
+            patch.object(
+                main,
+                "open_spreadsheet_get_worksheet",
+                side_effect=[df_biotech, df_de],
+            ) as open_worksheet,
+            patch.object(main, "build_biotech_task_docs", return_value=df_biotech_stats) as build_biotech,
+            patch.object(main, "build_de_task_docs", return_value=df_de_stats) as build_de,
+            patch.object(main, "build_summary_for_radar", side_effect=[df_summary_1, df_summary_2]) as build_summary,
+            patch.object(main, "build_combined_summaries", return_value=df_both_summary) as combine_summaries,
+            patch.object(main, "get_db", return_value=db) as get_db,
+            patch.object(main, "upsert_skill_scores") as upsert_scores,
+            patch.object(main, "upsert_skill_radar_summary") as upsert_summary,
+        ):
             main.run_task05()
 
         get_client.assert_called_once_with("/tmp/creds.json")
