@@ -1,24 +1,27 @@
 import streamlit as st
-from utils.ui_elements import color_map, _render_side_bar
+from utils.ui_elements import _render_side_bar, color_map
 
 # ─────────────────────────────────────────
 # 頁面設定
 # ─────────────────────────────────────────
-st.set_page_config(page_title="Knowledge factory",
-                   page_icon="⚡️",
-                   layout="wide",
-                   initial_sidebar_state="expanded",
-                   )
+st.set_page_config(
+    page_title="Knowledge factory",
+    page_icon="⚡️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 _render_side_bar()
 
 # ── 最小化 CSS：只設定背景色、字體、少量卡片樣式 ──
-st.markdown("""
+st.markdown(
+    """
             <style>
             /* 移除 Streamlit 預設上方留白 */
             .block-container { padding-top: 2rem; padding-bottom: 2rem; }
             </style>
             """,
-            unsafe_allow_html=True)
+    unsafe_allow_html=True,
+)
 
 plotly_layout_base = dict(
     paper_bgcolor="rgba(0,0,0,0)",  # 代表完全透明 (Alpha = 0)
@@ -31,7 +34,8 @@ plotly_layout_base = dict(
 # ─────────────────────────────────────────
 # 標題
 # ─────────────────────────────────────────
-st.markdown(f"""
+st.markdown(
+    f"""
 <div style="
     background: linear-gradient(135deg, #0d1526 0%, #1a2a4a 100%);
     border-radius: 16px;
@@ -58,7 +62,9 @@ st.markdown(f"""
           |  LinkedIn
     </p>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ─────────────────────────────────────────
@@ -67,15 +73,13 @@ st.markdown(f"""
 st.header("🛠 Tech. Stack 技術堆疊")
 
 stacks = [
-    ("Frontend",        "Python-Streamlit"),
-    ("Backend",         "Python, Python-Pymongo"),
-    ("Database",        "MongoDB Atlas"),
-    ("Container",       "Docker"),
-    ("Cloud",           "Google Cloud: <br>Cloud Run Services, "
-                        "<br>Cloud Run Jobs, GCS, "
-                        "<br>Pub/Sub, Artifact Registry"),
-    ("CI/CD",           "GitHub Actions"),
-    ("AI Layer",        "TBD"),
+    ("Frontend", "Python-Streamlit"),
+    ("Backend", "Python, Python-Pymongo"),
+    ("Database", "MongoDB Atlas"),
+    ("Container", "Docker"),
+    ("Cloud", "Google Cloud: <br>Cloud Run Services, <br>Cloud Run Jobs, GCS, <br>Pub/Sub, Artifact Registry"),
+    ("CI/CD", "GitHub Actions"),
+    ("AI Layer", "TBD"),
     ("Tool Management", "pyenv, poetry"),
 ]
 
@@ -112,7 +116,7 @@ for i, (cat, val) in enumerate(stacks):
                     </strong>
                 </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
 # ─────────────────────────────────────────
@@ -122,27 +126,37 @@ st.header("⚙️ ETL Pipeline 數據管道 x 5")
 
 ETL_TASKS = [
     {
-        "icon": "📝", "title": "Obsidian ETL", "badge": "task01",
+        "icon": "📝",
+        "title": "Obsidian ETL",
+        "badge": "task01",
         "flow": "Obsidian Vault (.md) 遞迴掃描  →  frontmatter 解析  →  清洗  →  🗄 MongoDB",
         "tags": ["obsidian_notes", "obsidian_summary"],
     },
     {
-        "icon": "🔀", "title": "GitHub ETL", "badge": "task02",
+        "icon": "🔀",
+        "title": "GitHub ETL",
+        "badge": "task02",
         "flow": "GitHub REST API  →  repo / commit metadata  →  README 摘要  →  🗄 MongoDB",
         "tags": ["github_repos", "github_summary"],
     },
     {
-        "icon": "💻", "title": "LeetCode & ccClub ETL", "badge": "task03",
+        "icon": "💻",
+        "title": "LeetCode & ccClub ETL",
+        "badge": "task03",
         "flow": "LeetCode GraphQL API & ccClub REST API →  刷題紀錄 → 清洗  →  🗄 MongoDB",
         "tags": ["solved_problems_on_ccClub", "solved_problems_on_leetcode", "ccClub&leetcode_summary"],
     },
     {
-        "icon": "📊", "title": "Skill Radar ETL", "badge": "task05",
+        "icon": "📊",
+        "title": "Skill Radar ETL",
+        "badge": "task05",
         "flow": "Google Sheets  →  Sheets API  →  技能分數  →  雷達圖數據  →  🗄 MongoDB",
         "tags": ["skill_scores_biotech", "skill_scores_data_eng", "skill_radar_summary"],
     },
     {
-        "icon": "🧠", "title": "Vector Embedding ETL", "badge": "task06",
+        "icon": "🧠",
+        "title": "Vector Embedding ETL",
+        "badge": "task06",
         "flow": "Obsidian Vault (content)  →  文檔切塊  →  text-embedding-004  →  向量化  →  🗄 MongoDB Atlas",
         "tags": ["obsidian_vectors", "obsidian_metadata", "chat_history"],
     },
@@ -152,14 +166,13 @@ for task in ETL_TASKS:
     with st.container(border=True):
         col_icon, col_body = st.columns([0.05, 0.95])
         with col_icon:
-            st.markdown(f"<div style='font-size:1.8rem;margin-top:4px'>{task['icon']}</div>",
-                        unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:1.8rem;margin-top:4px'>{task['icon']}</div>", unsafe_allow_html=True)
         with col_body:
             st.markdown(
                 f"**{task['title']}** &nbsp;"
                 f"<span class='mono' style='background:#1c2333;border:1px solid #30363d;"
                 f"border-radius:4px;padding:1px 7px;color:#8b949e'>{task['badge']}</span>",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
             st.caption(task["flow"])
 
@@ -201,7 +214,7 @@ PHASES = {
             ("Cloud Run Job（ETL）", "task01~03, 05 各自打包成 image，由 Cloud Scheduler 定時觸發"),
             ("Secret Manager", "API tokens、LeetCode cookies、Atlas URI 統一管理"),
             ("Cloud Run Service（Streamlit）", "無伺服器部署"),
-            ("GitHub Actions CI/CD", "push → 測試 → build image → push Artifact Registry → deploy")
+            ("GitHub Actions CI/CD", "push → 測試 → build image → push Artifact Registry → deploy"),
         ],
     },
     "Phase III": {
@@ -219,14 +232,16 @@ PHASES = {
         ],
     },
     "Phase IV": {
-        "icon": "🔔", "status": "📋 待開發",
+        "icon": "🔔",
+        "status": "📋 待開發",
         "name": "告警與監控",
         "desc": "ETL 失敗通知 + Cookie 過期管理",
         "items": [
             ("ETL 失敗捕捉", "Cloud Run Job 回傳非 200 / 403 時捕捉例外"),
             ("Pub/Sub + Email 通知", "觸發 Pub/Sub topic，為資料工程師寄送告警 Email"),
             ("Secret Manager 更新流程", "cookie 過期時手動更新 Secrets，Job 標記失敗易於追蹤"),
-            ("GCP Console 監控", "Cloud Run Job 執行狀態紅色標記，配合 Log Explorer 除錯"),],
+            ("GCP Console 監控", "Cloud Run Job 執行狀態紅色標記，配合 Log Explorer 除錯"),
+        ],
     },
 }
 
@@ -245,7 +260,7 @@ with st.container(border=True):
         f"##### {info['icon']} {info['name']} &nbsp;"
         f"<span style='font-size:0.8rem;background:#1c2333;border:1px solid #30363d;"
         f"border-radius:20px;padding:3px 12px;color:#8b949e'>{info['status']}</span>",
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
     st.caption(info["desc"])
     st.write("")
@@ -253,8 +268,7 @@ with st.container(border=True):
     for title, detail in info["items"]:
         col_dot, col_text = st.columns([0.02, 0.98])
         with col_dot:
-            st.markdown("<span style='color:#58a6ff;font-size:1.1rem'>•</span>",
-                        unsafe_allow_html=True)
+            st.markdown("<span style='color:#58a6ff;font-size:1.1rem'>•</span>", unsafe_allow_html=True)
         with col_text:
             st.markdown(f"**{title}** — {detail}")
 
@@ -307,7 +321,7 @@ with col_web:
             "自動水平擴展Autoscaling if needed",
             "Allow ingress HTTPS",
             "Flexible on cold-start optimization",
-            ""
+            "",
         ]:
             st.markdown(f"&nbsp;&nbsp;• {item}")
 
@@ -332,13 +346,16 @@ with col_atlas:
 # Footer
 # ─────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
-st.markdown(f"""
+st.markdown(
+    f"""
 <div style="text-align:center; color:{color_map["FONT_CLR"]} font-size:1.1rem; padding:1rem 0;">
-    💗 Feel free to reach out me on 
-    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130" 
-       target="_blank" 
+    💗 Feel free to reach out me on
+    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+       target="_blank"
        style="color:#90c2ff; text-decoration:none;">
        LinkedIn
     </a>.
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)

@@ -2,9 +2,9 @@
 ## ♻️ 改進中
 - README 與專案結構文件仍需隨任務演進持續修訂，包含各 ETL 任務產出的 MongoDB collection schema 與 Phase IV 部署里程碑。
 - Task03 LeetCode GraphQL API 缺少正式文件，且依賴 `LEECODE_SESSION` 與 CSRF token；cookie 過期會導致 403，雲端部署前需評估自動更新或替代認證流程。
-- Task06 RAG/embedding 方案已先選用 `text-embedding-3-small`，但若未來需要處理圖片或多模態資料，仍需重新評估 Gemini Embedding 或 MongoDB Atlas/Voyage 自動 embedding。
-- Task06 vector upsert 目前若筆記重新切塊後 chunk 數量減少，舊 chunk 不會自動刪除；未來資料量增加時可在 upsert 前先依 `file_path` 清除舊 chunks 再重新寫入。
 - Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
+- Phase III 的 Router Agent 追問繼承仍有殘留上下文污染：`_looks_like_followup()` 判定為追問並繼承上輪 `filter_tags` 後，rag agent 仍會以「追問 query」重算向量相似度，導致混入與追問語意相近、但與上一輪主題較遠的筆記來源（如 partition_clause 追問仍混入 Sharding/NoSQL 來源）。後續需評估追問時是否應沿用上一輪 `search_query` 或限制相似度重算範圍。（20260621）
+- Phase III 的 Router Agent 追問判定為啟發式規則（`_looks_like_followup()` 比對追問詞／排他詞），會誤判：同主題的新查詢（如「找 dev container」）未被視為追問而重抽 tag，雖結果正確但邏輯非預期；需評估更穩健的追問判定機制。（20260621）
 - Task07 長 context 筆記（如大型筆記本頁面）會造成 LLM 回應高延遲，需追蹤並建立監控機制以識別潛在卡頓點。（20260616）
 
 ## ✅ 已解決
@@ -25,6 +25,11 @@
 - Task07 Archive endpoint：初版將 DB 連線、`copy_images()`、`archive_md()` 包在同一 try-except，不易除錯；已拆分為獨立 try-except，分別對應 504/503/502/500 各狀態碼。（20260617）
 - Task07 audit log 缺失：OneNote 下載、LLM 萃取、GCS 上傳三個流程的 audit log 均已補齊，並載入 MongoDB Atlas 三個 collection（`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata`）。（20260615）
 - Task07 LLM 生成表格審核：`Note Reviewer` Streamlit 頁面（`dashboard_ui/pages/onenote_review.py`）已實作，提供人工逐頁審核介面，使 ML scientist 與生技領域人員可在頁面上直接審閱 LLM 自動生成內容並決定是否封存。（20260617）
+- Phase III 的 Router Agent 檢索品質：`_extract_filter_tags()` 直接拿短詞 tag（如 AI、MySQL）對整句 query 做 `fuzz.partial_ratio` 比對，易因部分字符巧合命中錯誤 tag（如「找 dev container」誤中 AI tag）污染下游 rag agent；已移除該層，改以「alias 模糊比對反查筆記 tags（`_extract_tags_via_alias()`）→ HyDE 重寫（`_r_hyde_rewrite()`）→ 全庫退階」的鏈路，藉筆記 alias 的語意結構導航，檢索準確度明顯提升。（20260621）
+- Phase III 的 Router Agent 跨輪上下文污染：追問（如「partition_clause 能否再講多一點」）被 router 重新抽出錯誤 `filter_tags`（如 kafka）傳給 rag agent，導致撈回無關 chunks；已新增 `_looks_like_followup()` 與 `_get_last_filter_tags()`，追問時直接繼承上一輪 `filter_tags`、跳過重新抽取，緩解主要污染（殘留問題見改進中）。（20260621）
+- Task06 embedding 選型：已從純文字模型 `text-embedding-3-small` 改為多模態 `Gemini-embedding-2`，並重構 task06 pipeline 以符合其 prompt 格式（多模態與未來圖片需求的疑慮已解除）。（20260624）
+- Task06 vector upsert 殘留 chunk：筆記重新切塊後 chunk 數變少時，舊 chunk 不會被 upsert 覆蓋而成為殘缺孤兒資料；已改為先依 `file_path` `deleteMany` 同筆記所有 chunk 再 insert 新 chunk，避免多輪 embedding 後殘留破碎 chunk。（20260624）
+- Task06 API 用量：導入 CDC（data capture change）機制，僅當 GCS 檔案變更且 `obsidian_notes` 中 `embedding_done=false` 時才呼叫 Vertex AI 進行 embedding，否則略過，節省 API 請求。（20260624）
 
 # Daily Work Log
 ## 20260423 Work log
@@ -52,7 +57,7 @@
 9. Establish the unit tests for task01.
 
 ## 20260428 Work log
-1. Read the [official docs](https://docs.github.com/en/rest) about GitHub Rest API as references in task02.  
+1. Read the [official docs](https://docs.github.com/en/rest) about GitHub Rest API as references in task02.
     In conclusion, there were three major documents guiding how to interact with endpoints of GitHun Rest API:
     - endpoint of listing repo: https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#list-repositories-for-the-authenticated-user
     - endpoint of listing commits:  https://docs.github.com/en/rest/commits/commits?apiVersion=2026-03-10#list-commits
@@ -109,34 +114,34 @@
 1. Created app.py as `HOME page` via streamlit. The precomputing functions before render was defined in [dashboard_ui/utils](../dashboard_ui/utils/).
 2. Asked Codex to polish the draft of app.py. Major improvements:
 ```
-    1. 面臨問題：`app.py` 有 hard-coding 靜態資料。  
-    我提供的解決方向：改成調用 `dashboard_ui/utils/interact_with_mongodb.py` 內讀取 MongoDB 的函式，並生成 `app2.py`。  
-    Codex最後修改的方向：建立 `app2.py`，用 MongoDB utils 取得雷達圖、KPI、GitHub、刷題題型等資料，並加上必要格式轉換。  
+    1. 面臨問題：`app.py` 有 hard-coding 靜態資料。
+    我提供的解決方向：改成調用 `dashboard_ui/utils/interact_with_mongodb.py` 內讀取 MongoDB 的函式，並生成 `app2.py`。
+    Codex最後修改的方向：建立 `app2.py`，用 MongoDB utils 取得雷達圖、KPI、GitHub、刷題題型等資料，並加上必要格式轉換。
     最終是否解決：Yes，app2.py 合併入 app.py
 
-    2. 面臨問題：`make_radar()` 的 hover tooltip 因內容太長被切邊。  
-    我提供的解決方向：修正 hover 顯示。  
-    Codex最後修改的方向：新增 hover 文字換行 helper，將任務內容自動插入 `<br>`，並調整雷達圖 margin/domain。  
+    2. 面臨問題：`make_radar()` 的 hover tooltip 因內容太長被切邊。
+    我提供的解決方向：修正 hover 顯示。
+    Codex最後修改的方向：新增 hover 文字換行 helper，將任務內容自動插入 `<br>`，並調整雷達圖 margin/domain。
     最終是否解決：Yes
 
-    3. 面臨問題：修正 hover 後發生 `update_layout()` 重複傳入 `margin` 的 TypeError。  
-    我提供的解決方向：回報錯誤訊息。  
-    Codex最後修改的方向：建立 `radar_layout = {**plotly_layout_base, "margin": ...}`，避免 `margin` 被重複作為 keyword 傳入。  
+    3. 面臨問題：修正 hover 後發生 `update_layout()` 重複傳入 `margin` 的 TypeError。
+    我提供的解決方向：回報錯誤訊息。
+    Codex最後修改的方向：建立 `radar_layout = {**plotly_layout_base, "margin": ...}`，避免 `margin` 被重複作為 keyword 傳入。
     最終是否解決：Yes，app2.py 合併入 app.py
 
-    4. 面臨問題：MongoDB utils 回傳值新增 `snapshot_date` / `fetched_date`，頁面需要顯示最近更新日期。  
-    我提供的解決方向：在兩個雷達圖與 KPI 四張卡片，共 6 處加上「最近更新日期」。  
-    Codex最後修改的方向：雷達圖使用 `st.caption()` 顯示日期；KPI 初版也先用 caption 顯示。  
+    4. 面臨問題：MongoDB utils 回傳值新增 `snapshot_date` / `fetched_date`，頁面需要顯示最近更新日期。
+    我提供的解決方向：在兩個雷達圖與 KPI 四張卡片，共 6 處加上「最近更新日期」。
+    Codex最後修改的方向：雷達圖使用 `st.caption()` 顯示日期；KPI 初版也先用 caption 顯示。
     最終是否解決：Yes，app2.py 合併入 app.py
 
-    5. 面臨問題：`get_obsidian_kpi()` 與 `get_github_kpi()` 已改成 tuple 最後一個元素固定為更新日期，先前相容 dict/tuple 的 helper 變得多餘。  
-    我提供的解決方向：再次修改 `app2.py`，刪掉多餘函式，並把 KPI 更新日期改成 `_format_delta()` 的 `suffix` 傳入。  
-    Codex最後修改的方向：移除 `_date_from_result()`，直接 unpack tuple，將四張 KPI 的更新日期併入 `st.metric()` delta 字串。  
+    5. 面臨問題：`get_obsidian_kpi()` 與 `get_github_kpi()` 已改成 tuple 最後一個元素固定為更新日期，先前相容 dict/tuple 的 helper 變得多餘。
+    我提供的解決方向：再次修改 `app2.py`，刪掉多餘函式，並把 KPI 更新日期改成 `_format_delta()` 的 `suffix` 傳入。
+    Codex最後修改的方向：移除 `_date_from_result()`，直接 unpack tuple，將四張 KPI 的更新日期併入 `st.metric()` delta 字串。
     最終是否解決：Yes，app2.py 合併入 app.py
 
-    6. 面臨問題：`biotech_labels` 中 `"製程技術 (細胞分注、反應器操作) 操作能力"` 太長，radar 軸標籤被切到。  
-    我提供的解決方向：調整斷行。  
-    Codex最後修改的方向：新增 radar label formatting，將該標籤顯示成三行，並用 label normalization 保持 hover 任務查找正常。  
+    6. 面臨問題：`biotech_labels` 中 `"製程技術 (細胞分注、反應器操作) 操作能力"` 太長，radar 軸標籤被切到。
+    我提供的解決方向：調整斷行。
+    Codex最後修改的方向：新增 radar label formatting，將該標籤顯示成三行，並用 label normalization 保持 hover 任務查找正常。
     最終是否解決：Yes，app2.py 合併入 app.py
 ```
 
@@ -148,8 +153,8 @@
     ---
     # Phase II 部署工作啟動前提
     ## 專案背景
-    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）  
-    **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）  
+    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）
+    **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）
     **目前狀態**：Phase I 已完成，進入 Phase II 雲端部署階段
 
     ## 已完成的 Phase I 成果
@@ -194,7 +199,7 @@
 
 ### Evaluate the loading on Vector database, MongoDB Altas.
 1. It is better to do data chunking because the content of each .md file are long-text which might occassionally exceeded the limit of context window of the furture LLM model or the limit of tokens of embedding model.
-2. The dimensions of vectors for the model `text-embedding-3-small` are `1536`, while for `Gemini embedding 2` are `3072`. 
+2. The dimensions of vectors for the model `text-embedding-3-small` are `1536`, while for `Gemini embedding 2` are `3072`.
 
 |Model |維度 |每個向量大小（float32）|
 |------|----|---------------------|
@@ -211,7 +216,7 @@
 
     假設你有 1,000 篇筆記，則 108 MB
     ```
-> `MongoDB Altas M0 Free Tier up to 512 MB, far from 108 MB` 
+> `MongoDB Altas M0 Free Tier up to 512 MB, far from 108 MB`
 
 
 ## 20260526 Work log
@@ -225,7 +230,7 @@
 3. Created the scripts `task06/t_chunk_embed.py` and `task06_obsidian_embed_etl/l_upsert_vectors.py`. Successfully practiced chuncking and embedding the long text in three markdown files.
 4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on Altas.
 5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB Altas.
-6. 
+6.
 
 > Until 20260527, some questions might be solved or optimized:
 > 1. 若未來一份筆記被重新切塊後 chunk 數量減少 (例如從 6 個縮為 4 個)，
@@ -245,7 +250,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     # Model Response: 🆗
     # 使用 R1 方案，R1 命中 rag keyword: ['查詢'], score=0.0222
     print(route("幫我查詢Database的索引建立語法，我只要MySQL的", "router_test_run11"))
-    
+
     # ============= Sample 2 ================
     # Model Response: 🆗
     # 使用 R1 方案，R1 命中 planning keyword: ['規劃'], score=0.0227
@@ -259,13 +264,13 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     # ============= Sample 4 ================
     # Model Response: 🆗
     # 使用 R1 方案，R1 命中 rag keyword: ['在哪'], score=0.0222
-    print(route("小波在哪裡", "router_test_run14"))  
+    print(route("小波在哪裡", "router_test_run14"))
 
     # ============= Sample 5 ================
     # Model Response: 🆗
     # R2 輸出格式異常: '我無法判斷你的意圖。你的輸入「好餓」與查詢筆記內容或生成學習路徑沒有關聯。請提供更明確的指示。'，預設導向 rag_agent, score=0.5
     print(route("好餓", "router_test_run15"))
-    
+
     # ============= Sample 6 ================
     # Model Response: 🆗
     # R1 命中 planning keyword ['規劃']，但同時命中排除詞 ['旅遊']，降級至 R2
@@ -276,7 +281,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     # Model Response: 🆗
     # R2 輸出格式異常: '我無法判斷您的意圖。您是想查詢現有的神戶旅遊筆記內容，還是想生成一個個人化的神戶旅遊學習路徑或行程規劃呢？'，預設導向 rag_agent, score=0.5
     print(route("我想了解神戶旅遊方案", "router_test_run0610-7"))
-    
+
     # ============= Sample 8 ================
     # Model Response: ⚠️ Should not route to 'planning agent' ! ⚠️
     # R2 方案判斷結果: planning, score=0.95
@@ -306,7 +311,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     # 使用 R1 方案，R1 命中 rag keyword: ['查詢'], score=0.0222
     print(route("查詢MySQL索引語法", "test_run0610-10"))
 
-    
+
     # ============= Sample 11 ================
     # Model Response: 🆗
     # R2 輸出格式異常: '我無法判斷您的意圖。您的輸入「好餓唷~」與查詢或摘要筆記內容（rag_agent）或生成個人化學習路徑（planning_agent）的意圖都不相關。'，預設導向 rag_agent, score=0.5
@@ -366,7 +371,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 3. Installed `OpecSpec` for practice of Spec-Driven Development along with this project.
 4. Inititated the testing scripts for pipeline `task07_onenote_to_markdown` where primarily intended to request the personal notes on Microsoft OneNote through the `Azure graph API`, download the raw notes as individual .html file and summarize the `metadata` of html files in .csv file.
 
-- The storage hierarchy of a metadata, .html files and .md files are temporarily operated as follows. Then the granularity of metadata is defined at page-level of a notebook. 
+- The storage hierarchy of a metadata, .html files and .md files are temporarily operated as follows. Then the granularity of metadata is defined at page-level of a notebook.
 
 5. Until 20260612, the downloaded few files are firstly saved disk on premises. Some observations were observed and fixed:
 
@@ -374,10 +379,10 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     ter` 基礎上加指數退避，retry 最多 10 次。
     - **Token 過期（壓力測試發現）**：下載大型筆記本（17 sections、數百頁）時，每小時 rate limit 會觸發長達 46 分鐘的等待，導致 access token 在等待期間過期，下一次
     API 呼叫收到 401 而崩潰。修復方式：`api_get()` 遇到 401 時會自動呼叫 `refresh_token()` 刷新 token 並重試一次（`token_refreshed` flag 防止無限重試）。
-    
+
 > However, audit log was missing, so new function recording the **audit log should be established**.
 
-6. Used python package `markdowndify` to roughly transform the file format from `.html` file to `.md` in order to remove the markup so that the user prompt wrapped with the md content asking LLM for key extraction could be shorter, and the file size could be smaller. When converting to .md, inserted `frontmatter` so that users could be able to manage the .md file on Obsidian better in the future. 
+6. Used python package `markdowndify` to roughly transform the file format from `.html` file to `.md` in order to remove the markup so that the user prompt wrapped with the md content asking LLM for key extraction could be shorter, and the file size could be smaller. When converting to .md, inserted `frontmatter` so that users could be able to manage the .md file on Obsidian better in the future.
 
 7. After utilizing mardowndify package, LLM were introduced to polish the overall content structure. *Two LLM candidates were proposed, Anthropic Haiki 4.5 or Google Gemini flash 2.5 lite.* So far, The performance by the model 'Haiki 4.5' has been tested first on 20260612. Some observation was concluded as follows.
 
@@ -394,7 +399,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 > 就語意強度 h1 > h2 > h3 > ul/li > 單純段落，大部分 RAG 系統都會給標題更高權重。如果一份 html 筆記都用清單來標記，再轉成 markdown 語法時可能只剩 `-` 這樣的階層，這未來可能會讓語意強度減弱。
 
-> **Experience rule of data Transformation to markdown for better data chunking, RAG, AI understanding.**  
+> **Experience rule of data Transformation to markdown for better data chunking, RAG, AI understanding.**
     想讓 Markdown 同時對 人類、Markdown 解析器、RAG 系統、LLM 都穩定可讀，建議：  \
     1. 標題用 # / ## / ###  \
     2. 清單用 -  \
@@ -445,7 +450,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
     - To complement the fix above, an additional instruction `(vi)` was added to the LLM user prompt, explicitly telling the model that any `![]()` pattern in the input is a pre-cleaned, Markdown-compatible image link. The model is instructed to keep the image within its original section (not move it out), allow indentation adjustment, and optionally generate a short 3–5 line AI-generated image description labelled as `「AI生成圖釋」`.
 
-    > **Lesson learned**: `BeautifulSoup.get_text()` is destructive — it silently removes all tags including semantic ones like `<img>`, `<table>`, `<a>`. When the downstream consumer is an LLM that needs to reconstruct structure, always pre-convert semantically important tags to their text-equivalent representations (e.g., Markdown syntax) before calling `get_text()`, rather than assuming the LLM can infer their existence from surrounding context.  
+    > **Lesson learned**: `BeautifulSoup.get_text()` is destructive — it silently removes all tags including semantic ones like `<img>`, `<table>`, `<a>`. When the downstream consumer is an LLM that needs to reconstruct structure, always pre-convert semantically important tags to their text-equivalent representations (e.g., Markdown syntax) before calling `get_text()`, rather than assuming the LLM can infer their existence from surrounding context.
 
 3. The output by LLM was sometimes not perfect. As tested result about the image with embedded table in the notebook `生技製劑筆記本/General technical knowledge/Mycoplasma`. LLM tried to analyze the semantic of the table in a statistic image and created new table via markdown syntax. Although the truth of such table, the original image, did not loss and it was referred by a link in the markdown context, the newly created table by AI need to be fairly and professionally `inspected to judge the reliability of using AI model`. This should be handed over to ML scientist and senior techinicans within biotech domain.
 
@@ -462,7 +467,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
     > All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
 
-3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline. 
+3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline.
     > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
 
 ## 20260616 Work log
@@ -477,7 +482,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 4. Extracted `save_one_page()` as a standalone helper in `l_save_markdown.py`; `l_save_markdown()` is kept as a thin wrapper for backward compatibility. Added `continue` in the `except` block (with `finally` for counters) so that LLM failures skip disk write entirely rather than saving low-quality plain-text fallback.
 
 ## 20260617 Work log
-1. Revised the file path (exactly blob path) planned for archive. 
+1. Revised the file path (exactly blob path) planned for archive.
 - before change:
     - Note-related files in '.md' directly generated by Obsidian laptop app via gcloud rsync, were stored at `gs://personal-vaults/01_daily_logs/`、, `gs://personal-vaults/04_projects/`、,...etc.
     - Note-related files in '.md', '.html', '.png' generated by OneNote graph API and Gemini LLM were uploaded from on-premise laptop via gcloud rsync, were stored at `gs://onenote-vaults/<my-accountid>/<notebook-name>/<sectoin-name>/<page-name>/`.
@@ -506,7 +511,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         | download_as_bytes()    | bytes       | pdf/image/zip   |  對GCS API request get -> 下載 並回傳 bytes <br>例如：得到 b'Hello World' |
         | download_to_filename() | 寫入檔案        | 大檔案             | 直接存成本地檔案，打開檔案內容要另外寫 <br>例如：blob.download_to_filename("report.pdf") <br>with open("report.pdf", "rb") as f: <br>&nbsp;&nbsp;&nbsp;&nbsp;data = f.read()|
         | download_to_file()     | stream      | API/Memory stream/Flask 回傳檔案   | from io import BytesIO<br>blob = bucket.blob("docs/readme.md")  ## 建立 blob 物件<br>buffer = BytesIO()  ## 建立二進位制檔案存在記憶體<br>blob.download_to_file(buffer)   ## 將 blob 寫入這個二進位制檔案<br>buffer.seek(0)  ## 寫完將檔案游標移到字首<br>content = buffer.read().decode("utf-8")  ## 再次從頭讀檔，並以utf-8解析回字串<br>print(content)|
-        
+
     - gcs_archiver.py: Common uploading methods to GCS by python SDK.
 
         | 方法 | 輸入型別 | 適用場景 | 行為 |
@@ -516,15 +521,15 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         | `upload_from_file(file_obj, content_type=...)` | file-like object (`open()`) | 已開啟檔案 / streaming / pipeline | 從 Python file object 讀取資料 → 上傳到 GCS<br><br>例如：<br>`with open("data.json", "rb") as f:`<br>&nbsp;&nbsp;&nbsp;&nbsp;`blob.upload_from_file(f)`<br><br>適合：串流或避免先存成路徑 |
         | `upload_from_fileobj(file_obj)` | file-like object（舊版 API） | legacy / 相容舊 code | 與 `upload_from_file()` 類似，但較舊版本 API<br><br>建議：新專案用 `upload_from_file` |
         | `upload_from_string(..., content_type="application/octet-stream")` | `bytes / str` | binary / unknown format | 將資料當成「純二進位」上傳，不做格式解釋<br><br>例如：<br>`blob.upload_from_string(image_bytes, content_type="application/octet-stream")` |
-                
+
     - app.py： 修改 archive() 矛盾設計，因為函式中已經有 find_one() 確認 page_id 事先存在，如果 page_id 不存在，那後面 updte_one(upsert=True) 基本上不會發生 upsert；如果 padge_id 確實存在，但立刻有人在瞬間毫秒間隙刪了這筆資料，那後面 updte_one(upsert=True) 的 upsert 反而會產出殘缺不全的資料，也就是**race condition / TOCTOU (Time-of-check to time-of-use)**的issue。解決方式：
         - `把 upsert 改為 False`。
         - Pymongo `update_one()` 回傳的 UpdateResult 物件，取出 `matched_count` 屬性判別如果是 0，代表前面 find_one() 有找到資料但是在 update_one() 時資料不見了，此時中止函式不往後執行，且借用 404 code 讓 Flask 泡給前端。
 
     - app.py： 調整 try-exception 顆粒度，初版的 archive() 將 DB 連線、copy_images()、archive_md() 都包在一區 try-except 中，不易除錯。將他們用獨立的 try-exception 包覆後，捕捉400、500、503、504 常見 status code。
-    
+
     | 例外   | 上游  | 狀態碼 |
-    | ----- | ----- | ----- | 
+    | ----- | ----- | ----- |
     | ServerSelectionTimeoutError, NetworkTimeout, DeadlineExceeded   | DB / GCS | 504 |
     | ConnectionFailure, GCS ServiceUnavailable   | DB / GCS | 503 |
     | GCS GoogleAPICallError（其餘 HTTP 錯誤）  | GCS | 502 |
@@ -574,7 +579,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     (1) _extract_filter_tags() inside the function `route()`.  \
     (2) _extract_tags_via_alias() inside the function `route()`. \
     (3) _r_hyde_rewrite() inside the function `route()`: rewrite in the function `route()` for query transformation.
-    
+
     > The performance was somewhat improved. Described as follows:
 
 - Flowchart in route() of router agent:
@@ -679,9 +684,9 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | 2 | 找dev container  | rag | 目前的筆記裡沒有關於「dev container」的內容。 | ❌ router agent 執行 `_extract_filter_tags()` 找到"AI" 筆記 tag，混入雜訊引導 rag agent 的 `vector search()`用這tag 檢索到 AI |
     | 1 | 找dev-container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊：<br>什麼是 Dev Container？ Dev Container 是由微軟提供的 VS Code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境，讓 VS Code IDE 可以直接在該環境中工作。 | ✅ router agent 執行 `_extract_filter_tags()` 找到"dev-container" 筆記 tag，引導 rag agent 的 `vector search()` 用這 tag 檢索到 dev container |
 
-4. After removed the first layer, `_extract_filter_tags()` from the function `route()`:  
+4. After removed the first layer, `_extract_filter_tags()` from the function `route()`:
 > The performance was even better and many issues on the 3. could be solved. New flow chart is described as follows:
-    
+
 - Flowchart in route() of router agent:
     ```plaintext
         query
@@ -760,7 +765,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | 2 | partition_clause 能否再講多一點  | rag | 您好，您提供的筆記片段主要圍繞著 Kafka 的 Partition 概念，而非 MySQL 的 Window Function 中的 partition_clause。<br>根據您提供的筆記片段，我找到以下關於 Kafka Partition 的資訊.... | ❌ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'partition' tag，導致最後 Window function parition clause 沒有出現在 LLM 的回覆參考 |
     | 3 | 我不想知道 kafka，而是想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ✅ router agent 執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者，只有第 2 層一度被污染 |
 
-- Testing case 3 for note querying and summarizing:  
+- Testing case 3 for note querying and summarizing:
 
     | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
     | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
@@ -885,7 +890,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
             alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
 
             # Step 3A: 先確認是否屬於使用者追問：短句且上輪有 filter_tags，直接沿用，不再重新找 tags ──────
-            if _looks_like_followup(query):  # 
+            if _looks_like_followup(query):  #
                 inherited = _get_last_filter_tags(db, session_id)
                 logger.info(f"此波追問，無繼承 filter_tags，需重新抽取 tag")
                 if inherited:
@@ -927,7 +932,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | 3 | 追問 partition_clause 就好，不想知道分片機制。 | ⚠️ 回覆結果幾乎同上一輪，只是把分片機制刪掉而已。 |
     | 4 | 我只想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ⚠️ router agent 不知道這屬於追問，但靠著 user query 中不刻意提及非主題相關性的詞彙，router 會執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者 |
 
-- Testing case 3 for note querying and summarizing:  
+- Testing case 3 for note querying and summarizing:
 
     | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
     | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
@@ -969,3 +974,20 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     > **Conclusion:**  \
     > **Approach 1 比較 pythonic，但是 Approach 2 比較彈性可擴展其他運算需求。**  \
     > **適用場景: 如果很確定文本輸出必定會有一筆 ALIAS: / TAG: / HYPOTHETICAL:，且只想拿一筆， Approach 1 是比較簡潔的寫法。**
+
+## 20260624 Work log
+1. To well judge the model's answering quality in the production-like environment, changed the embedding models from text-only embedding model `text-embedding-3-small` to `Gemini-embedding-2` which was multimodal model.
+
+2. The prospose change plan was appended to the chapter [增量-embeddingcdc成果task-01--task-06 in the branch summary](./branch_etl_pipeline_summary.md#增量-embeddingcdc成果task-01--task-06).
+
+3. Refactored the pipeline of task06 to fit the required prompt format of `Gemini-embedding-2`.
+
+4. Meanwhile, fixed the pending defection of `upsert` behavior to MongoDB Altas collection which might leave silo, broken, and obsoleted data chunks if the length of chunks had been shorten after re-embedding a revised text. As the [resulted script](../task06_obsidian_embed_etl/l_load_to_mongodb.py), `deleteMany and insert` behavior replaced `upsert`.The doc of `all` the embedded chunks pointed to the same note file path would be deleted from the collection `obsidian_vectors_multimodal` first. Then new chunks were inserted. This should prevent the broken chunks left in the vector database after multiple rounds of embedding tasks to a note text.
+
+5. To save the requests to vertex AI API, [data capture change (CDC) approach](../task06_obsidian_embed_etl/l_load_to_mongodb.py) was implemented in refactoring. Only when the file on GCS was changed and the its embedding status in the collection `obsidian_notes` was not done (`embedding_done`=false) yet, the requests to Vertex AI API for embedding the text of the file would be performed. Otherwise, the requests would be skipped.
+
+6. To accomplished the 3. & 4., the schema of collections `obsidian_summary` were revised. See the [revision in the branch_etl_pipeline_summary.md](branch_etl_pipeline_summary.md#mongodb-collections).
+
+7. Installed the linter and formattor via `pre-commit` and `ruff`.
+
+8. Updated the [hand-over of index creation](./task06_vctr_srch_idx_hand_over.md) to align the model type.

@@ -20,7 +20,7 @@ dependencies = [
     "streamlit (>=1.57.0,<2.0.0)",
     "plotly (>=6.7.0,<7.0.0)",
     "google-cloud-storage (>=3.10.1,<4.0.0)",
-    "google-genai (>=2.7.0,<3.0.0)",
+    "google-genai (>=2.9.0,<3.0.0)",
     "pre-commit (>=4.6.0,<5.0.0)",
     "markdown (>=3.10.2,<4.0.0)",
     "flask (>=3.1.3,<4.0.0)",
@@ -31,3 +31,25 @@ dependencies = [
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pre-commit (>=4.6.0,<5.0.0)",
+    "ruff (==0.15.19)"
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "D"]
+# 關掉「強制每處都要有 docstring」的 presence 規則，保留「有寫的 docstring 要格式正確」
+# D415：要求摘要以標點結尾，但只認半形 .!?，不認中文全形「。」，對中文 docstring 必然誤判，停用
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "D415"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "E402"]             # 測試不要求 docstring 格式；E402 為 sys.path 先設定再 import 的刻意寫法
+"**/__init__.py" = ["D104", "F401"]   # 套件入口檔放寬
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
