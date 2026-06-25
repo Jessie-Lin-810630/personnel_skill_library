@@ -1,6 +1,6 @@
-
-from datetime import datetime, timezone
 from collections import defaultdict
+from datetime import datetime, timezone
+
 from loguru import logger
 
 """
@@ -12,17 +12,19 @@ from loguru import logger
 
 
 def build_note_documents(raw_notes: list[dict]) -> list[dict]:
-    """加上 created_at timestamp，準備寫入 obsidian_notes collection"""
-    now = datetime.now(timezone.utc)  # 會變成UTC+0的時間
-    for note in raw_notes:
-        note["created_at"] = now
+    """準備寫入 obsidian_notes 的 documents。
+
+    時間戳改由 load 層的狀態機決定：created_at 只在 insert 設、updated_at 只在內容變更時設，
+    故這裡不再無腦塞 created_at (否則每次跑都會覆蓋 created_at、也會破壞 CDC 的 embedding_done 判斷)。
+    目前為直接 passthrough，保留此函式作為未來清洗邏輯的掛載點。
+    """
     logger.success(f"Built documents for {len(raw_notes)} notes.")
     return raw_notes
 
 
 def build_summary_document(raw_notes: list[dict]) -> dict:
-    """
-    統計所有筆記，產出給 Streamlit 用的快照 document。
+    """統計所有筆記，產出給 Streamlit 用的快照 document。
+
     寫入 obsidian_summary collection，以 snapshot_date 為識別鍵。
     """
     logger.info("Building summary documents for all notes...")
@@ -33,22 +35,11 @@ def build_summary_document(raw_notes: list[dict]) -> dict:
         by_type[note["note_type"]] += 1
         by_topic[note["topic"]] += 1
 
-    summary_notes_docs = {"snapshot_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                          "total_notes": len(raw_notes),
-                          "by_type": dict(by_type),  # MongoDB不支援defaultdict，需轉回dict
-                          "by_topic": dict(by_topic),
-                          }
+    summary_notes_docs = {
+        "snapshot_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "total_notes": len(raw_notes),
+        "by_type": dict(by_type),  # MongoDB不支援defaultdict，需轉回dict
+        "by_topic": dict(by_topic),
+    }
     logger.success(f"Built summary documents for {len(summary_notes_docs)} notes.")
     return summary_notes_docs
-
-
-if __name__ == "__main__":
-    # 測試區：
-    import e_scan_obsidian
-
-    e_scan_obsidian.load_dotenv()
-    obsidian_vault_path = e_scan_obsidian.os.getenv("OBSIDIAN_VAULT_PATH")
-    raw_notes = e_scan_obsidian.scan_vault(obsidian_vault_path)
-    # print(build_note_documents(raw_notes)[0])
-    summary = build_summary_document(raw_notes)
-    print(summary)
