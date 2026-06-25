@@ -2,9 +2,11 @@
 
 > **開發目標**：展示一個從生技領域跨足到資料工程的雙棲求職者所具備的知識庫與資料工程技術。從LeetCode、ccClub、GitHub、 Google Sheet、local Obsidian 盤點個人技能範疇，並寫入 MongoDB，作為後續 Dashboard 資料來源，包含轉換為可視覺化的生技與資料工程雙雷達圖。
 
-> **完成日期**：2026-05-09
+> **完成日期**：2026-06-24
 
-> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB localhost / Google Sheets API service account
+> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry
+
+> **資料存儲**：MongoDB localhost (僅專案前期地端小量測試) / MongoDB Altas (自 task06 開始開發向量資料庫以及 task01、task02、task03、task05 完成第一輪部署測試後確定穩定後，均改連 Altas) / Google Cloud Storage
 
 ---
 
@@ -19,7 +21,7 @@ feature/etl-pipeline/
 ├── task01_obsidian_etl/
 │   ├── __init__.py
 │   ├── e_scan_obsidian.py                      # 掃描 vault .md 檔、解析 frontmatter
-│   ├── t_transform_obsidian.py                 # 清洗、分類、統計邏輯
+│   ├── t_clean_obsidian.py                     # 清洗、分類、統計邏輯
 │   ├── l_load_to_mongodb.py                    # 寫入 MongoDB
 │   └── main.py
 │
@@ -47,15 +49,16 @@ feature/etl-pipeline/
 │   └── main.py                  # 串接 Extract / Transform / Load 流程
 │
 ├──task06_obsidian_embed_etl
-│   ├── t_chunk_embed.py.        # 沿用task01_obsidian_etl/e_scan_obsidian.py腳本直接做向量化。
-│   ├── l_upsert_vectors.py     # 寫入 MongoDB collections
+│   ├── t_chunk_embed.py.        # 沿用 task01_obsidian_etl/e_scan_obsidian.py 函式回傳值接續向量化。
+│   ├── l_load_to_mongodb.py     # 寫入 MongoDB collections
 │   └── main.py                  # 串接 Extract / Transform / Load 流程
 
 └── tests/
     ├── test_task01_obsidian_etl.py
     ├── test_task02_github_restapi_etl.py
     ├── test_task03_leetcode_ccClub_etl.py
-    └── test_task05_googlesheet_skill_etl.py
+    ├── test_task05_googlesheet_skill_etl.py
+    └── test_task06_obsidian_embed_etl.py
 ```
 
 ---
@@ -63,7 +66,7 @@ feature/etl-pipeline/
 ## Task 01 — Obsidian Vault ETL
 
 ### 資料來源
-本地 Obsidian vault，掃描三類資料夾下的 `.md` 檔案：
+GCS bucket `personal-vaults`（本地 Obsidian vault 已同步上雲），以 `scan_vault_gs()` 掃描三類資料夾下的 `.md` 檔案；另保留 `scan_vault()` 供本地路徑掃描（legacy）：
 
 | 資料夾前綴 | note_type |
 |-----------|-----------|
@@ -72,9 +75,11 @@ feature/etl-pipeline/
 | `04_` | `project` |
 
 ### ETL 設計重點
-- **Extract**：`pathlib.rglob("*.md")` 遞迴掃描，以資料夾前綴過濾非目標路徑；`python-frontmatter` 解析 YAML frontmatter
-- **Transform**：優先以 frontmatter `types` 欄位判斷 `note_type`，fallback 用資料夾前綴；以 `TOPIC_KEYWORDS` 字典比對 tags 與檔名，推斷所屬 topic
-- **Load**：以 `file_path` 為唯一鍵做 `upsert`，支援重複執行不重複寫入
+- **Extract**：`scan_vault_gs()` 用 `storage.Client().list_blobs()` 列出 bucket 內所有 blob，以資料夾前綴過濾出目標 `.md`與`md5_hash`，並同時建 `image_md5_index`（{圖片 blob : md5} 字典）；`extract_attached_images()` 解析 `![[ ]]` 推算一份 `.md` 內所有圖片 GCS 路徑與圖片 md5，拼成陣列，傳給後面 Load。這三者存在一筆文檔成為一份筆記的資料血緣：`.md 路徑`、`md5_hash`、[{`圖片 GCS 路徑`, `圖片 md5`}]，見後方 schema詳列。
+
+- **Transform**：優先以 frontmatter `type` 欄位判斷 `note_type`，fallback 用資料夾前綴；以 `TOPIC_KEYWORDS` 字典比對 tags 與檔名，推斷所屬 topic（`build_note_documents()` 目前為 passthrough，保留為清洗掛載點）
+
+- **Load**：`sync_notes()` 為 CDC 狀態機，以 GCS 現況對比 DB 逐筆決定 **insert / update / skip / delete**，並維護 `embedding_done`／`created_at`／`updated_at`（詳見下方〈增量 Embedding（CDC）成果〉）；`upsert_note_summary()` 以 `snapshot_date` 為鍵每日覆蓋一筆統計快照
 
 ### Topic 分類對照表
 
@@ -91,14 +96,18 @@ feature/etl-pipeline/
 | `linux` | os, linux, linux-command |
 | `biotech` | biotech, bioreactor, gmp, technology-transfer, biopharma, perfusion, cell-culture, upstream |
 
-### 執行結果（2026-04-28）
-```
-共發現 36 份 .md 檔，解析完成 36 筆
-obsidian_notes  upsert：新增 6  | 更新 30
-obsidian_summary 快照已更新：2026-04-28
-
-by_type   : { "project": 1, "daily-log": 20, "knowledge-summary": 15 }
-by_topic  : { "python": 12, "gcp": 10, "database": 12, "dockerize": 1, "other": 1 }
+### 執行結果（2026-06-24）
+```bash
+  # loguru logs shown on terminal:
+  === Task 01: Obsidian ETL 開始 ===
+  共發現 82 份 .md 檔、160 張圖片，開始解析...
+  解析完成，成功 82 筆
+  Built documents for 82 notes.
+  Building summary documents for all notes...
+  Built summary documents for 4 notes.
+  obsidian_notes 同步完成 | 新增: 82 | 更新: 0 | 未變更: 0 | 刪除: 87
+  obsidian_summary 快照已更新，快照日期：2026-06-24
+  === Task 01: Obsidian ETL 完成 ===
 ```
 
 ### MongoDB Collections
@@ -107,16 +116,25 @@ by_topic  : { "python": 12, "gcp": 10, "database": 12, "dockerize": 1, "other": 
 ```json
 {
   "file_name": "2024-01-15_daily.md",
-  "file_path": "/vault/01_daily-logs/2024-01-15_daily.md",
+  "file_path": "lucky460721/from-obsidian/01-daily-logs/2024-01-15_daily.md",
   "note_type": "daily-log",
   "tags": ["python", "sql"],
   "alias": "Python基礎筆記",
   "date": "2024-01-15",
   "topic": "python",
   "word_count": 342,
-  "created_at": "2025-04-23T10:00:00Z"
+  "file_md5_hash": "abc123==",
+  "attached_images": [
+    { "image_path": "lucky460721/from-obsidian/01-daily-logs/_attachment/x.png",
+      "image_md5_hash": "def456==" }
+  ],
+  "embedding_done": false,
+  "created_at": "2025-04-23T10:00:00Z",
+  "updated_at": "2025-04-23T10:00:00Z",
+  "embedded_at": "2025-04-23T10:05:00Z"
 }
 ```
+> `file_md5_hash`、`attached_images`、`embedding_done`、`created_at`、`updated_at` 由 task01 `sync_notes()` 維護；`embedded_at` 時間由 task06 在 Compare-And-Swap 翻轉狀態為 `embedding_done=true` 時一併畫押上。
 
 **`obsidian_summary`**（每日快照）
 ```json
@@ -130,14 +148,15 @@ by_topic  : { "python": 12, "gcp": 10, "database": 12, "dockerize": 1, "other": 
 
 ### 套件依賴
 ```
-pymongo, python-frontmatter, python-dotenv, loguru
+pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage
 ```
 
 ### .env 金鑰
 ```
-OBSIDIAN_VAULT_PATH=
-MONGO_URI=
-MONGO_DB_NAME=
+GOOGLE_APPLICATION_CREDENTIALS=   # GCS 讀取（list blobs / 下載 .md）
+MONGO_ALTAS_URI=
+MONGO_DB_NAME=                    # 應為 skill_dashboard
+OBSIDIAN_VAULT_PATH=              # 僅 legacy 本地 scan_vault() 使用
 ```
 
 ---
@@ -202,7 +221,7 @@ pymongo, requests, python-dotenv, loguru
 ### .env 金鑰
 ```
 GITHUB_USERNAME=
-GITHUB_TOKEN=           # PAT (classic) 
+GITHUB_TOKEN=           # PAT (classic)
 GITHUB_MAIL=
 MONGO_URI=
 MONGO_DB_NAME=
@@ -522,17 +541,30 @@ Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault
 
 ### ETL 設計重點
 - **Extract**：沿用 `task01_obsidian_etl.e_scan_obsidian.scan_vault_gs("personal-vaults")` 取得每份筆記的 `file_path`、`file_name`、`tags`、`note_type`、`date` 等 metadata；再由 task06 新函式 `fetch_gcs_note_content()` 使用 `google.cloud.storage.Client()` 依 `file_path` 從 GCS 下載原始 Markdown，並以 `python-frontmatter` 去除 frontmatter，只保留 body 文字
-- **Transform**：`preprocess_obsidian_content()` 清理 Obsidian block ID、圖片嵌入與 wiki-link 語法；`chunk_markdown()` 先用 `MarkdownHeaderTextSplitter` 依 H1-H4 保留段落上下文，再用 `RecursiveCharacterTextSplitter` 以 `chunk_size=800`、`chunk_overlap=100` 做中文友善切塊；`embed_chunks_a_mardown()` 批次呼叫 OpenAI `text-embedding-3-small` 產生 1536 維向量
-- **Load**：`upsert_vectors()` 將所有 chunk documents 分批寫入 MongoDB Atlas 的 `obsidian_vectors` collection；以 `file_path + chunk_index` 作為唯一鍵 upsert，支援重複執行後更新既有 chunk
+
+- **Transform**：`preprocess_obsidian_content()` 清理 Obsidian block ID 與 wiki-link 語法（圖片嵌入 `![[ ]]` 保留不動）；`chunk_markdown()` 先用 `MarkdownHeaderTextSplitter` 依 H1-H4 保留段落上下文，再用 `RecursiveCharacterTextSplitter` 以 `chunk_size=800`、`chunk_overlap=100` 做中文友善切塊；`embed_chunks_a_mardown()` 逐 chunk 呼叫 **Vertex AI `gemini-embedding-2`（多模態）**，把 chunk 文字與其圖片（解析成 `gs://` URI）一起送入，產生 **1536 維**向量並做 L2 normalize
+
+- **Load**：`load_vectors_incremental()`（在 `l_load_to_mongodb.py`）對本次成功處理的每個檔案，先 `delete_many({file_path})` 再 `insert_many` 寫入 MongoDB Atlas 的 `obsidian_vectors_multimodal` collection（**先刪後插**，避免重切後 chunk 數變少殘留孤兒）；完成後以「帶 `file_md5_hash` 守衛的 CAS」翻 `obsidian_notes.embedding_done=true` 並蓋 `embedded_at`。詳見下方[〈此分支改進計劃〉的增量 embedding 設計考量](#增量-embeddingcdc成果task-01--task-06)補充。
 
 ### Obsidian 語法清理規則
 
 | 原始語法 | 處理方式 | 說明 |
 |----------|----------|------|
 | `^8e5a21` | 移除 | Obsidian block ID 僅作內部引用，對語意檢索無直接價值 |
-| `![[image.png]]` | 移除 | 目前使用文字 embedding model，尚未向量化圖片內容 |
+| `![[image.png]]` | 保留 | 改用多模態模型，圖片於 embed 階段解析成 GCS 圖片一起向量化；wiki-link 正則加負向後查 `(?<!!)` 避免破壞圖片語法 |
 | `[[note｜alias]]` | 保留 `alias` | 優先保留 alias，讓 chunk 文字更接近閱讀語意 |
 | `[[note]]` | 保留 `note` | 無 alias 時保留連結名稱 |
+
+### 多模態 Embedding（Gemini Embedding 2）
+
+- **模型**：Vertex AI `gemini-embedding-2`（GA、多模態，文字＋圖片映射到同一向量空間），沿用 GCP 服務帳號（`AGENT_PLATFORM_USER_CREDENTIALS` + `GCP_PROJECT_ID`），`location=us-central1`
+- **圖片解析**：`.md` 內圖片只寫檔名（如 `![[xxx.png]]`），不更動其寫法；embed 時依儲存結構推算 GCS 實體路徑 = `<note 所在目錄>/_attachment/<檔名>`，以各 note 自己的目錄解析，天然避開不同 `_attachment/` 同名 `.png` 衝突；圖片以 `Part.from_uri(gs://...)` 送入，私有 bucket 靠 Vertex AI 直接讀取，圖片不存在則 warning 略過
+- **Task instruction**：`gemini-embedding-2` **不支援 `task_type` 參數**，改把任務型式當 instruction 寫進 prompt 文字，且不同任務型式格式不同（非寫 `RETRIEVAL_DOCUMENT` 字樣）：
+    - 入庫文件（對應 `RETRIEVAL_DOCUMENT`）→ `title: {title} | text: {content}`（本檔用此；title = 筆記標題＋section）
+    - 查詢端（對應 `RETRIEVAL_QUERY`）→ `task: search result | query: {query}`
+    > ⚠️ 未來查詢端做 query embedding 時須對齊同模型／同維度，並用上面的 query 格式，兩端配對 cosine 分數才準
+- **維度**：`output_dimensionality=1536`（MRL 截斷，落在 Atlas M0 的 2048 維上限內）；非預設維度不會自動正規化，故輸出再做 L2 normalize 以符合 cosine
+- **批次**：多模態無法像純文字 batch，故每 chunk 各呼叫一次 `embed_content`
 
 ### Chunking 策略
 
@@ -544,10 +576,10 @@ Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault
 
 ### MongoDB Collections
 
-**`obsidian_vectors`**（每筆 = 一份 Obsidian 筆記的一個 chunk）
+**`obsidian_vectors_multimodal`**（每筆 = 一份 Obsidian 筆記的一個 chunk；多模態版本）
 ```json
 {
-  "file_path": "02_knowledge-base/database/mysql-note.md",
+  "file_path": "lucky460721/from-obsidian/02-knowledge/mysql-note.md",
   "file_name": "mysql-note.md",
   "chunk_index": 0,
   "chunk_total": 6,
@@ -555,14 +587,16 @@ Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault
   "note_type": "knowledge-summary",
   "date": "2026-04-13",
   "section": "MySQL 筆記 > DQL 敘述比較",
-  "content": "SELECT 查詢語句可以搭配 WHERE、GROUP BY 與 ORDER BY...",
+  "content": "SELECT 查詢語句可以搭配 WHERE、GROUP BY 與 ORDER BY...![[diagram.png]]",
+  "image_paths": ["gs://personal-vaults/lucky460721/from-obsidian/02-knowledge/_attachment/diagram.png"],
   "embedding": [0.0123, -0.0045, 0.0312]
 }
 ```
+> `content` 保留原始 chunk 文字（含 `![[ ]]`），方便日後把 .md 另作他用時 Obsidian/IDE 仍能解析圖片；`image_paths` 為該 chunk 圖片的 `gs://` URI（無圖為 `[]`），作為數據血緣追蹤。
 
 ### Atlas Vector Search Index
 
-`obsidian_vectors` 預期搭配 MongoDB Atlas Vector Search index 使用：
+`obsidian_vectors_multimodal` 預期搭配 MongoDB Atlas Vector Search index 使用（維度仍為 1536）：
 
 ```json
 {
@@ -587,15 +621,16 @@ Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault
 
 ### 套件依賴
 ```
-pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage, openai, langchain-text-splitters
+pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage, google-genai, langchain-text-splitters
 ```
 
 ### .env 金鑰
 ```
-GOOGLE_APPLICATION_CREDENTIALS=
-OPENAI_API_KEY=
+GOOGLE_APPLICATION_CREDENTIALS=    # GCS 讀取（scan / 下載 .md / 檢查圖片）
+AGENT_PLATFORM_USER_CREDENTIALS=   # Vertex AI gemini-embedding-2 服務帳號金鑰
+GCP_PROJECT_ID=                    # Vertex AI 專案
 MONGO_ALTAS_URI=
-MONGO_DB_NAME=
+MONGO_DB_NAME=                     # 應為 skill_dashboard
 ```
 
 ---
@@ -603,6 +638,103 @@ MONGO_DB_NAME=
 ## 此分支待辦事項（Task 04）
 
 - [ ] **Task 04**：Udemy 學習歷程 ETL（購買課程數、觀看進度）→ 存入 MySQL
+
 ---
 
-*本摘要由 `feature/etl-pipeline` 分支 task01 - 04 開發完成且於 `feature/dashboard-ui` 分支創建 dashboard UI 後完成，而後再於新增了 task 06 後擴充摘要。*
+## 增量 Embedding（CDC）成果（Task 01 & Task 06）
+
+> 狀態：**已實作並落地**。本節原為「GCS 增量 embedding（CDC）」的設計與決策記錄，現已完成實作；以下保留設計原因，並補上對應的實際函式與檔案。
+
+### 實作對應
+
+| 設計 | 實際落點 |
+|---|---|
+| 掃 GCS 取每檔 `file_md5_hash` ＋圖片血緣 | `task01/e_scan_obsidian.py`：`scan_vault_gs()`、`extract_attached_images()`、`resolve_image_blob_path()` |
+| task01 CDC 狀態機（insert/update/skip/delete，並維護 `embedding_done`） | `task01/l_load_to_mongodb.py`：`sync_notes()`、`_images_changed()` |
+| task06 讀 `obsidian_notes` 狀態做 gate | `task06/l_load_to_mongodb.py`：`get_notes_state()`；gate 判斷在 `task06/main.py` |
+| task06 先刪後插 ＋ 帶 `file_md5_hash` 守衛的 CAS 翻 `embedding_done` | `task06/l_load_to_mongodb.py`：`load_vectors_incremental()` |
+
+### 問題
+
+task06 全量 embedding 會對每份 `.md` 燒 Vertex `gemini-embedding-2` API。但 GCS 上多數筆記是靜態未更新的，全量重跑等於浪費前面的 model calls。目標：**只對新增/修改過的檔做 embedding（Change Data Capture）**。
+
+### 核心訊號：GCS object 的 `md5_hash`
+
+- `list_blobs()` 回傳的每個 blob 在 metadata 即帶 `md5_hash`（**內容 MD5，不需下載檔案內容**），是「內容是否變更」最可靠的訊號。
+- `md5_hash` 是 **GCS object（整份檔）層級**屬性：一個 blob = 一個 md5。chunk 是下載後才在 pipeline 切的，GCS 不知道 chunk 存在，故 chunk 沒有自己的 md5。
+- **可靠度**：`md5_hash` 由 GCS 伺服器端依實際存下的 bytes 計算，與上傳用的 client 無關。唯一會是 `None` 的情況是 composite object / 平行組合上傳（門檻約 150 MiB 的大檔）；本專案的 `.md`、`.png` 都是小檔，`md5_hash` 保證存在。
+
+### 決策與原因
+
+| 決策 | 原因 |
+|---|---|
+| md5 存進 `obsidian_notes`，**不存** `obsidian_vectors_multimodal` | 顆粒度貼近（md5 是「一份檔」層級，notes 也是一份檔一筆）；避免在 vectors 幾萬筆 chunk 重複存同一個 hash |
+| 由 **task01 擁有 md5 的真實來源**，task06 只跟隨 | task01 是定期 Cloud Run、負責寫 metadata；task06 只在「task01 已記錄的版本」上做 embedding，狀態單一來源、好推理 |
+| 共用的「`.md` → 圖片 GCS 路徑」解析邏輯**以 task01 腳本內函式為準**，task06 包圖片時再 copy 過去 | 規則集中在 task01；task06 沿用同一套（取捨：選 copy 而非 import，需留意日後規則改動要兩邊同步） |
+
+### `obsidian_notes` schema 變更（task01 寫入）
+
+在現有欄位（`file_path`、`file_name`、`note_type`、`tags`、`alias`、`date`、`topic`、`word_count`、`created_at`）之外新增：
+
+```jsonc
+{
+  // ...既有欄位...
+  "file_md5_hash": "abc123==",            // 該 .md 的 GCS md5_hash
+  "attached_images": [               // 該 .md 引用的圖片血緣（可查「哪張圖不見了會影響哪些筆記」）
+    { "image_path": "lucky460721/from-obsidian/01-daily-logs/_attachment/xxx.png",
+      "image_md5_hash": "def456==" }
+  ],
+  "embedding_done": false,           // task06 是否已完成此版本的 embedding
+  "updated_at": ISODate("..."),      // 內容變更時更新（task01）；created_at 不動
+  "embedded_at": ISODate("...")      // 本版 embedding 完成時間，UTC（task06 翻 embedding_done=true 時蓋）
+}
+```
+> `file_md5_hash`、`attached_images`、`embedding_done`、`updated_at` 由 **task01** 寫入；`embedded_at` 由 **task06** 在 CAS 翻 `embedding_done=true` 時一併蓋上，語意與 `updated_at`（內容變更時間）切開、互不覆蓋。
+
+### task01 狀態機（每次 Cloud Run 掃 GCS 後）
+
+以 GCS 現況 vs `obsidian_notes` 比對，逐檔決定動作：
+
+| 情境 | 判斷依據 | 動作 |
+|---|---|---|
+| **新增** `.md` | GCS 有、notes 無 | `insert`，`embedding_done=false` |
+| **修改** | `.md` md5 變 **或** 任一 `attached_images[].image_md5_hash` 變 **或** 圖片增減 | `update` metadata/md5/attached_images + `updated_at`，並 **`embedding_done=false`** |
+| **未變更** | 所有 md5 都相同 | **完全不動該 doc**（尤其不可每次無腦設 `embedding_done=false`，否則 CDC 失效） |
+| **`.md` 被刪** | notes 有、GCS 無此 `.md` | `deleteOne`/`deleteMany` 該 note doc |
+| **`.png` 被刪（`.md` 還在）** | 該圖在 GCS 消失，但 owning `.md` 仍在 | **不是刪 note**：`update` 把該圖移出 `attached_images` + **`embedding_done=false`**（向量引用了不存在的圖，需重 embed 成無圖版本） |
+
+> 關鍵：「圖片變更/刪除」也要翻 `embedding_done=false`——因為是多模態 embedding，向量含圖片語意，只看 `.md` md5 會漏掉「換圖但文字沒動」的情況。為求省事，採「一份筆記任一 md5（.md 或 png）變了就一起翻 false」。
+
+### task06 embedding 流程（gate + CAS）
+
+`obsidian_vectors_multimodal` 的 schema **不變**（不存 hash）。task06 實作（`main.py` 串接 E→Gate→T→L）：
+
+1. `scan_vault_gs()`（task01）回傳值已帶每檔的 GCS `md5_hash`，由 task01 `sync_notes()` 寫進 `obsidian_notes.file_md5_hash`。
+2. `get_notes_state()` 讀取 `obsidian_notes` 的 `{file_path: {file_md5_hash, embedding_done}}`。
+3. **Gate（進入 embedding 的條件，在 `main.py`）**：GCS blob 的 `md5_hash` **等於** `obsidian_notes` 的 `file_md5_hash` **且** `embedding_done is False` 才做。
+   - GCS 有新檔但 notes 沒有 → 等下次 task01 `insert`（屆時 `embedding_done=false`）後才輪到。
+   - GCS 已刪檔但 notes 殘留 → 等下次 task01 `delete_many`。
+4. embedding 完成、chunks 寫入 `obsidian_vectors_multimodal` 後，`load_vectors_incremental()` **翻 `embedding_done=true` 並蓋 `embedded_at`，且是帶 `file_md5_hash` 守衛的 compare-and-swap**：
+
+```js
+db.obsidian_notes.updateOne(
+  { file_path: fp, file_md5_hash: embeddedMd5, embedding_done: false },  // 守衛：file_md5_hash 仍是我embed的那版
+  { $set: { embedding_done: true } }
+)
+// matchedCount === 0 → task01 中途改了 file_md5_hash，放著讓下輪重 embed（避免舊向量被誤標 done）
+```
+
+5. **改過的檔重 embed 前要先刪後插**：`obsidian_vectors_multimodal.delete_many({file_path})` 再 insert，避免 chunk 數變少（例 6→4）時殘留舊 chunk 孤兒。新檔不受影響。
+
+### 已接受的取捨
+
+- **embedding 延遲 ≈ task01 排程間隔**：task06 只 embed「task01 已記錄的版本」，剛改的檔最多慢一個 task01 週期才進向量。以一致性換延遲，可接受。
+- **TOCTOU 微窗**：task06 比對 md5 後到真正下載內容之間檔又被改 → 會 embed 比 md5 新的內容；下輪 task01 `update` 會修正，至多浪費一次。可接受。
+
+### 孤兒 chunk 清理（未來獨立維護 job）
+
+若 `obsidian_vectors_multimodal` 殘留已刪檔案的 chunk，用 `$lookup`（或更簡單：`obsidian_vectors_multimodal` distinct `file_path` 集合 − `obsidian_notes` file_path 集合 = 失效集合 → `delete_many`）定期清理即可，不必每次 ETL 都做，避免 data swamp。
+
+---
+
+*本摘要由 `feature/etl-pipeline` 分支 task01 - 04 開發完成且於 `feature/dashboard-ui` 分支創建 dashboard UI 後完成，而後再於修改了 task 06 的 embedding model 為多模態後擴充摘要，最後完成 task01／task06 的 GCS 增量 embedding（CDC）實作並回填本摘要。*
