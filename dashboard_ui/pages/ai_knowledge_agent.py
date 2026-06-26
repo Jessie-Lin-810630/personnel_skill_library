@@ -1,19 +1,19 @@
-"""
-AI Knowledge Agent — Page 3
+"""AI Knowledge Agent — Page 3。
+
 串接 intent_router_agent → rag_agent / planning_agent，
 提供筆記語意查詢、摘要、個人化學習路徑規劃。
 """
 
 # ── Standard imports ─────────────────────────────────────────────────────────
-from agents.intent_router_agent import route
-from agents import rag_agent, planning_agent
-from pathlib import Path
-import sys
 import os
 import uuid
-import streamlit as st
-from utils.ui_elements import _render_side_bar
 
+import streamlit as st
+from agent_tools.query_rewriter import _load_alias_to_tags_map, _load_known_tags
+from agents import planning_agent, rag_agent
+from agents.intent_router_agent import route
+from utils.interact_with_mongodb import get_db_atlas
+from utils.ui_elements import _render_side_bar
 
 # TODO: st.login() Google OAuth
 # 當 GCP Console 上建立好 OAuth 2.0 Client ID 與 Client Secret 後：
@@ -51,6 +51,13 @@ if "api_call_count" not in st.session_state:
 if "planning_map_generated" not in st.session_state:
     st.session_state["planning_map_generated"] = False
 
+# rag_agent 的 rewriter 需要 alias-tag 對照表與合法 tag 字典，
+# 每個 session 只查一次 MongoDB，快取進 session_state 避免每輪重查。
+if "alias_tag_pairs" not in st.session_state:
+    _db = get_db_atlas()
+    st.session_state["alias_tag_pairs"] = _load_alias_to_tags_map(_db, "obsidian_notes")
+    st.session_state["known_tags"] = _load_known_tags(_db, "obsidian_vectors_multimodal")
+
 # ── Sidebar 控制區 ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.divider()
@@ -73,9 +80,11 @@ def _render_sources(sources: list[dict]) -> None:
         return
     with st.expander("📎 來源筆記"):
         for i, src in enumerate(sources, 1):
-            st.markdown(
-                f"{i}.  **{src['file_name']}** ｜ {src['section']} ｜ 相關度: `{src['score']}`"
-            )
+            line = f"{i}.  **{src['file_name']}** ｜ {src['section']} ｜ 向量: `{src.get('vector_score', 0)}`"
+            # rag 經過 reranker 才有意義；planning 的 rerank_score 為 0 不顯示
+            if src.get("rerank_score"):
+                line += f" ｜ rerank: `{src['rerank_score']}`"
+            st.markdown(line)
 
 
 # ── 重播歷史訊息 ─────────────────────────────────────────────────────────────
@@ -87,9 +96,7 @@ for msg in st.session_state["messages"]:
 
 # ── Rate limit 防護（chat_input 前）─────────────────────────────────────────
 if st.session_state["api_call_count"] >= RATE_LIMIT:
-    st.warning(
-        f"已達本次對話 LLM 呼叫上限（{RATE_LIMIT} 次），請點側邊欄的「🔄 開新對話」繼續。"
-    )
+    st.warning(f"已達本次對話 LLM 呼叫上限（{RATE_LIMIT} 次），請點側邊欄的「🔄 開新對話」繼續。")
     st.stop()
 
 # ── Chat input ───────────────────────────────────────────────────────────────
@@ -107,14 +114,14 @@ if query:
         route_result = route(query, session_id)
         agent_target = route_result["agent_target"]
         if agent_target == "rag_agent":
-            result = rag_agent.rag_query(query=query,                          # 存 chat_history 用原始 query
-                                         session_id=session_id,
-                                         filter_tags=route_result.get("filter_tags"),
-                                         filter_file_path=route_result.get("filter_file_paths"),
-                                         # 向量化的search_query可能經過hyde處理，這視 route() 內部判斷結果而決定
-                                         search_query=route_result.get("search_query", query),
-                                         search_optimize_method=route_result.get("search_optimize_method")
-                                         )
+            # v2 pipeline：rewrite → search → rerank → generate，
+            # router 不再傳 filter，retrieval 優化全在 rag_query 內部處理
+            result = rag_agent.rag_query(
+                query=query,
+                session_id=session_id,
+                alias_tag_pairs=st.session_state["alias_tag_pairs"],
+                known_tags=st.session_state["known_tags"],
+            )
 
         elif agent_target == "planning_agent":
             if not st.session_state["planning_map_generated"]:
@@ -125,7 +132,12 @@ if query:
 
         else:
             # router 回傳未預期值時 fallback 至 rag
-            result = rag_agent.rag_query(query, session_id)
+            result = rag_agent.rag_query(
+                query=query,
+                session_id=session_id,
+                alias_tag_pairs=st.session_state["alias_tag_pairs"],
+                known_tags=st.session_state["known_tags"],
+            )
             agent_target = "rag_agent"
 
         # 3. 計數遞增（只有成功時才加）

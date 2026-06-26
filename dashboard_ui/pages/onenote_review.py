@@ -1,18 +1,19 @@
 import os
 import re
+
 import markdown as md_lib
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
-
-from utils.gcs_reader import (SRC_BUCKET,
-                              local_path_to_gcs_blob,
-                              read_bytes_as_base64,
-                              read_text,
-                              )
-from utils.interact_with_mongodb import get_db_altas, get_onenote_pages
-from utils.ui_elements import color_map, _render_side_bar
+from utils.gcs_reader import (
+    SRC_BUCKET,
+    local_path_to_gcs_blob,
+    read_bytes_as_base64,
+    read_text,
+)
+from utils.interact_with_mongodb import get_db_atlas, get_onenote_pages
+from utils.ui_elements import _render_side_bar, color_map
 
 load_dotenv()
 
@@ -49,7 +50,8 @@ CREDENTIALS = [
 
 if not st.session_state.get("authenticated"):
     # ── Hero banner ──
-    st.markdown(f"""
+    st.markdown(
+        f"""
 <div style="
     background: linear-gradient(135deg, #0d1526 0%, #0f2040 60%, #1a1040 100%);
     border-radius: 20px;
@@ -59,33 +61,37 @@ if not st.session_state.get("authenticated"):
     text-align: center;
 ">
     <div style="font-size:2.8rem; margin-bottom:0.6rem;">🧠</div>
-    <h1 style="color:{color_map['FONT_CLR']}; font-size:1.9rem; font-weight:800; margin:0 0 0.6rem 0; line-height:1.35;">
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:1.9rem; font-weight:800;
+        margin:0 0 0.6rem 0; line-height:1.35;">
         歡迎來到 AI 知識協作平台
     </h1>
-    <p style="color:{color_map['TEAL']}; font-size:1.05rem; margin:0; letter-spacing:0.5px; font-weight:500;">
+    <p style="color:{color_map["TEAL"]}; font-size:1.05rem; margin:0; letter-spacing:0.5px; font-weight:500;">
         從日常筆記到企業智慧的關鍵一步
     </p>
 </div>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     # ── 兩欄：左邊文案 / 右邊登入表單 ──
     content_col, form_col = st.columns([3, 2], gap="large")
 
     with content_col:
-        st.markdown(f"""
-<div style="color:{color_map['FONT_CLR']}; line-height:1.85; font-size:0.95rem;">
+        st.markdown(
+            f"""
+<div style="color:{color_map["FONT_CLR"]}; line-height:1.85; font-size:0.95rem;">
 
 <p>在 AI 浪潮湧現的時代，企業數位轉型的關鍵往往不在於引進多強大的 AI 模型，而是在於
-<strong style="color:{color_map['TEAL']};">我們如何餵養它正確的知識</strong>。</p>
+<strong style="color:{color_map["TEAL"]};">我們如何餵養它正確的知識</strong>。</p>
 
 <p>您在 OneNote 中記錄的點點滴滴，是部門歷經無數專案累積下來的珍貴業務結晶。然而，OneNote
 背後隱藏的大量 HTML 程式碼，對人類好看的格式，卻會成為 AI 閱讀時的「雜訊」，導致 AI
 在檢索時產生誤解、遺漏甚至胡言亂語。</p>
 
 <p>這個系統透過自動化 ETL 數據管道，將 OneNote 筆記萃取、清洗並轉換為
-<strong style="color:{color_map['TEAL']};">AI 最喜歡的純淨結構（Markdown）</strong>。</p>
+<strong style="color:{color_map["TEAL"]};">AI 最喜歡的純淨結構（Markdown）</strong>。</p>
 
-<p style="color:{color_map['TEAL']}; font-weight:700; font-size:1rem; margin-top:1.4rem;">
+<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin-top:1.4rem;">
     為什麼需要您的參與？
 </p>
 
@@ -93,7 +99,9 @@ if not st.session_state.get("authenticated"):
 <strong>「督導 AI 的決策者」</strong>。當您在審核時，請帶著以下三個眼光做最後把關：</p>
 
 </div>
-""", unsafe_allow_html=True)
+""",
+            unsafe_allow_html=True,
+        )
 
         # 三個評估面向卡片
         c1, c2, c3 = st.columns(3)
@@ -105,54 +113,66 @@ if not st.session_state.get("authenticated"):
             background:{bg};
         """
         with c1:
-            st.markdown(f"""
-<div style="{card_style.format(border=color_map['TEAL'], bg='rgba(0,212,200,0.07)')}">
+            st.markdown(
+                f"""
+<div style="{card_style.format(border=color_map["TEAL"], bg="rgba(0,212,200,0.07)")}">
     <div style="font-size:1.6rem; margin-bottom:0.4rem;">🎯</div>
-    <div style="color:{color_map['TEAL']}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
+    <div style="color:{color_map["TEAL"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
         準確性 Accuracy
     </div>
-    <div style="color:{color_map['FONT_CLR']}; font-size:0.82rem; line-height:1.6;">
+    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
         AI 真的讀懂業務痛點了嗎？確認摘要是否精準捕捉核心重點，有無遺漏關鍵步驟或報錯邏輯。
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+                unsafe_allow_html=True,
+            )
         with c2:
-            st.markdown(f"""
-<div style="{card_style.format(border=color_map['PURPLE'], bg='rgba(155,109,255,0.07)')}">
+            st.markdown(
+                f"""
+<div style="{card_style.format(border=color_map["PURPLE"], bg="rgba(155,109,255,0.07)")}">
     <div style="font-size:1.6rem; margin-bottom:0.4rem;">⚖️</div>
-    <div style="color:{color_map['PURPLE']}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
+    <div style="color:{color_map["PURPLE"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
         可靠性 Reliability
     </div>
-    <div style="color:{color_map['FONT_CLR']}; font-size:0.82rem; line-height:1.6;">
+    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
         在雜訊中，AI 是否依然清醒？檢視它面對口語化文字與不完美輸入時，是否仍穩定輸出清晰結構。
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+                unsafe_allow_html=True,
+            )
         with c3:
-            st.markdown(f"""
-<div style="{card_style.format(border=color_map['ORANGE'], bg='rgba(249,115,22,0.07)')}">
+            st.markdown(
+                f"""
+<div style="{card_style.format(border=color_map["ORANGE"], bg="rgba(249,115,22,0.07)")}">
     <div style="font-size:1.6rem; margin-bottom:0.4rem;">🛡️</div>
-    <div style="color:{color_map['ORANGE']}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
+    <div style="color:{color_map["ORANGE"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
         隱私與資安 Privacy
     </div>
-    <div style="color:{color_map['FONT_CLR']}; font-size:0.82rem; line-height:1.6;">
+    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
         敏感資料是否被妥善阻擋？確認 AI 未外洩個資或客戶機密，且能防禦 Prompt Injection 攻擊。
     </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+                unsafe_allow_html=True,
+            )
 
     with form_col:
-        st.markdown(f"""
+        st.markdown(
+            f"""
 <div style="
     background: rgba(255,255,255,0.03);
     border: 1px solid #2a3550;
     border-radius: 16px;
     padding: 2rem 2rem 1.5rem;
 ">
-    <p style="color:{color_map['TEAL']}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
+    <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
         🔐 知識守護者登入
     </p>
-""", unsafe_allow_html=True)
+""",
+            unsafe_allow_html=True,
+        )
 
         username = st.text_input("帳號", key="login_user", placeholder="輸入您的帳號")
         password = st.text_input("密碼", type="password", key="login_pwd", placeholder="輸入您的密碼")
@@ -172,12 +192,15 @@ if not st.session_state.get("authenticated"):
                 else:
                     st.error("帳號或密碼錯誤，請重試。")
 
-        st.markdown(f"""
+        st.markdown(
+            """
     <p style="color:#4a5568; font-size:0.78rem; text-align:center; margin-top:1rem;">
         此平台僅供授權人員使用<br>登入即代表您同意以指定角色進行審核操作
     </p>
 </div>
-""", unsafe_allow_html=True)
+""",
+            unsafe_allow_html=True,
+        )
 
     st.stop()
 
@@ -194,10 +217,10 @@ st.markdown(
     border: 1px solid #2a3550;
     text-align: center;
 ">
-    <h1 style="color:{color_map['FONT_CLR']}; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
         🔍 OneNote Review
     </h1>
-    <p style="color:{color_map['TEAL']}; font-size:1rem; margin:0; letter-spacing:1px;">
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
         HTML vs Markdown 並排對照 — 審核 Gemini LLM 輸出品質
     </p>
 </div>
@@ -227,7 +250,7 @@ st.divider()
 
 @st.cache_data(ttl=60)
 def _load_pages() -> list[dict]:
-    db = get_db_altas()
+    db = get_db_atlas()
     return get_onenote_pages(db)
 
 
@@ -248,7 +271,8 @@ with col_nb:
 
 sections_raw = (
     sorted({p["section"] for p in pages if p.get("notebook") == selected_nb and p.get("section")})
-    if selected_nb != PLACEHOLDER else []
+    if selected_nb != PLACEHOLDER
+    else []
 )
 sections_opts = [PLACEHOLDER] + sections_raw
 
@@ -258,7 +282,8 @@ with col_sec:
 
 page_options_raw = (
     [p for p in pages if p.get("notebook") == selected_nb and p.get("section") == selected_sec]
-    if selected_sec != PLACEHOLDER else []
+    if selected_sec != PLACEHOLDER
+    else []
 )
 page_titles_raw = [p.get("page_title", p.get("page_id", "未知")) for p in page_options_raw]
 page_opts_display = [PLACEHOLDER] + page_titles_raw
@@ -274,11 +299,7 @@ with col_pg:
 # ─────────────────────────────────────────
 # 未選滿 → 留白狀態，只顯示標題區
 # ─────────────────────────────────────────
-all_selected = (
-    selected_nb != PLACEHOLDER
-    and selected_sec != PLACEHOLDER
-    and selected_pg_label != PLACEHOLDER
-)
+all_selected = selected_nb != PLACEHOLDER and selected_sec != PLACEHOLDER and selected_pg_label != PLACEHOLDER
 
 if not all_selected:
     st.markdown("")
@@ -340,6 +361,7 @@ def _replace_images_in_html(html: str, section_blob_prefix: str) -> str:
         blob = f"{section_blob_prefix}/_images/{m.group(1)}"
         data_uri = read_bytes_as_base64(SRC_BUCKET, blob)
         return f'src="{data_uri}"' if data_uri else m.group(0)
+
     return re.sub(r'src="_images/([^"]+)"', replacer, html)
 
 
@@ -348,7 +370,8 @@ def _replace_images_in_md(md: str, section_blob_prefix: str) -> str:
         blob = f"{section_blob_prefix}/_images/{m.group(2)}"
         data_uri = read_bytes_as_base64(SRC_BUCKET, blob)
         return f"![{m.group(1)}]({data_uri})" if data_uri else m.group(0)
-    return re.sub(r'!\[([^\]]*)\]\(_images/([^)]+)\)', replacer, md)
+
+    return re.sub(r"!\[([^\]]*)\]\(_images/([^)]+)\)", replacer, md)
 
 
 # ─────────────────────────────────────────

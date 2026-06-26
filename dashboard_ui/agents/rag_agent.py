@@ -1,183 +1,199 @@
-"""
-職責:
-  rag_query(): 筆記語意查詢，回答使用者問題並附上來源清單
+"""agents/rag_agent.py (v2 — rewrite → search → rerank → generate)
+
+改版重點：
+  舊版: prefilter (tags/file_paths) → vector_search(top_k=5) → LLM 生成
+  新版: query_rewrite → vector_search(expanded_query, 無 prefilter, top_k=10)
+        → Cohere rerank(rewritten_query, top_n=5) → LLM 生成
+
+設計決策：
+  - vector_search 不加 prefilter，用 expanded_query（含 tag 關鍵字）做軟性語意增強
+  - rerank 用 rewritten_query（不含 tag 關鍵字），避免 tag 干擾 cross-encoder 判斷
+  - chat_history 存原始 query（使用者真正講的話），不存 rewritten/expanded
+  - metadata 記錄 search_optimize_method、rewritten_query、recommended_tags，方便 debug
 
 依賴:
   - google-genai SDK (Vertex AI)
+  - agent_tools/query_rewriter.py、agent_tools/reranker.py
 """
 
-from google.oauth2.service_account import Credentials
-import os
-from google import genai
+from agent_tools.agent_helpers import build_context, build_source_list
+from agent_tools.chat_history import load_chat_history, save_chat_history
+from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.query_rewriter import rewrite_query
+from agent_tools.query_with_vector_search import vector_search
+from agent_tools.reranker import rerank_chunks
 from google.genai import types
 from loguru import logger
 
-from agent_tools.connect_to_google_genai import _get_genai_client
-from agent_tools.query_with_vector_search import vector_search
-from agent_tools.chat_history import load_chat_history, save_chat_history
-
-
-# ── 常數 ──────────────────────────────────────────────────────────
+# ── 常數 ─────────────────────────────────────────────────────────
 RAG_AGENT1_MODEL = "gemini-2.5-flash-lite"
+RAG_TOP_K = 10
+RERANK_TOP_N = 5
 
-SYSTEM_PROMPT = """你是一位筆記查詢助理。
-你只根據以下提供的筆記片段來回答問題，不使用筆記片段以外的知識。
-若筆記片段中找不到足夠資訊，請提供使用者你找到的片段資訊，跟
-對方確認你找到的關鍵字中是否有切中使用者真正想詢問的。
-如果完全沒有足夠資訊，請明確告知使用者「目前的筆記裡沒有相關內容」，不要自行推測或捏造答案。
-回答時請使用繁體中文，語氣簡潔清楚。"""
-
-
-def _build_context(chunks: list[dict]) -> str:
-    """
-    將 vector_search() 回傳的 top-K chunks 組裝成純文字 context block，
-    每個 chunk 標注來源，讓模型知道每段文字出自哪份筆記。
-
-    格式範例:
-        [來源 1] 檔案: SQL筆記.md｜章節: SQL > DQL > SELECT
-        SELECT 用來從資料表中選取欄位...
-
-        [來源 2] 檔案: MongoDB筆記.md｜章節: MongoDB > Aggregation
-        $match 用來過濾文件...
-    """
-    blocks = []
-    for i, chunk in enumerate(chunks, start=1):
-        header = f"[來源 {i}] 檔案: {chunk['file_name']}｜章節: {chunk['section']}"
-        blocks.append(f"{header}\n{chunk['content']}")
-    return "\n\n".join(blocks)
+SYSTEM_PROMPT = (
+    "你是一位筆記查詢助理。\n"
+    "你只根據以下提供的筆記片段來回答問題，不使用筆記片段以外的知識，不可自行捏造。\n"
+    "- 回答時請使用繁體中文，語氣簡潔清楚，回答開頭直接描述找到的知識，"
+    "且要**標註引用的來源 (檔案名稱與章節)**。"
+    "不用「根據你提供的筆記、根據資料庫」等這種客套用語作為開頭。\n"
+    "- 若筆記片段中找不到足夠資訊，請明確告知使用者「目前的筆記裡沒有相關內容」，不要自行推測或捏造答案，\n"
+    "- 若筆記片段中找不到足夠資訊，除了告知使用者沒有找到足夠資訊外，也請提供使用者你找到的片段資訊，"
+    "詢問片段資訊中是否有切中使用者真正想詢問的部分。\n"
+)
 
 
-def _build_source_list(chunks: list[dict]) -> list[dict]:
-    """
-    組裝準備回傳給呼叫方 (Streamlit UI) 的來源清單，
-    包含去重後的 "file_name + section 組合"。
-
-    Returns:
-        {
-         "file_name":  "某份筆記檔案名稱.md",  
-         "section":  "一個筆記資料塊所屬的文章標題",  
-         "score":  "與查詢語意的相似度評分，小數點後四位"
-         }
-    """
-    seen = set()
-    sources = []
-    for chunk in chunks:
-        key = (chunk["file_name"], chunk["section"])
-        if key not in seen:
-            seen.add(key)
-            sources.append({"file_name": chunk["file_name"],
-                            "section":   chunk["section"],
-                            "score":     round(chunk["score"], 4),
-                            })
-    return sources
-
-
-def rag_query(query: str,
-              session_id: str,
-              filter_tags: list[str] | None = None,
-              filter_file_path: str | None = None,
-              filter_note_type: str | None = None,
-              search_query: str | None = None,
-              search_optimize_method: str | None = None,
-              chat_history_n: int = 3,
-              rag_top_k: int = 5,
-              ) -> dict:
-    """
-    筆記語意查詢主函式。
+# ── 主函式 ────────────────────────────────────────────────────────
+def rag_query(
+    query: str,
+    session_id: str,
+    alias_tag_pairs: list[dict],
+    known_tags: set[str],
+) -> dict:
+    """筆記語意查詢主函式 (v2: rewrite → search → rerank → generate)。
 
     Args:
-        query:            使用者的問題或查詢文字
-        session_id:       目前對話的 uuid4（用於讀寫 chat_history）
-        filter_tags:      可選，限定搜尋範圍的 tag，例如 ["MySQL"]
-        filter_note_type: 可選，限定筆記類型，例如 "knowledge_summary"
-        search_query:     從 query 修飾過來、真正拿來做向量化查詢的問題，修飾程度由 route() 函式回傳而定。
-        search_optimize_method: router agent 預先使用什麼策略增加查詢精準度，例如：筆記關鍵字(structure search)或是重寫使用者查詢語句(rewrite)，由 route() 函式回傳值而定。
-        chat_history_n:   RAG agent 要回讀前面多少輪的對話作為回應參考
-        rag_top_k:        TOP K
+        query:            使用者的原始提問文字
+        session_id:       目前對話的 uuid4 (用於讀寫 chat_history)
+        alias_tag_pairs:  筆記 alias-tag 對照表 (從collection obsidian_notes 撈取)
+        known_tags:       向量資料庫裡實際存在的 tag set
+
     Returns:
         {
-            "answer":  "模型生成的回答文字",
-            "sources": [
-                {"file_name": "xxx.md", "section": "...", "score": 0.91},
-                ...
-            ]
+            "answer": str,
+            "sources": list[dict],
+            "debug": dict,   # 方便觀察 pipeline 每一步的結果
         }
     """
     client = _get_genai_client()
 
     # ── Step 1: 儲存使用者訊息 ─────────────────────────────────
-    save_chat_history(session_id=session_id,
-                      agent_type="rag",
-                      role="user",
-                      message_text=query,
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="rag",
+        role="user",
+        message_text=query,
+    )
 
-    # ── Step 2: 向量搜尋，取得相關 chunks ──────────────────────
-    logger.info(f"rag_query: 執行 vector_search, search_query='{search_query[:40]}…'")
-    chunks = vector_search(query=search_query,  # 注意不是用 query
-                           top_k=rag_top_k,
-                           filter_tags=filter_tags,
-                           filter_file_path=filter_file_path,
-                           filter_note_type=filter_note_type,
-                           )
+    # ── Step 2: 讀取對話歷史 ──────────────────────────────────
+    history_user_model_msg = load_chat_history(
+        session_id=session_id, agent_type="rag", n=3
+    )  # 最近 3 輪 (user + model 各一筆 = 6 筆)
+
+    # ── Step 3: Query Rewrite ─────────────────────────────────
+    #   - rewritten_query: 獨立問句（給 reranker）
+    #   - expanded_query:  rewritten + tag 關鍵字（給 vector_search）
+    logger.info(f"調用 query rewritter, \nquery='{query[:40]}...'")
+    rewrite_result = rewrite_query(
+        query=query,
+        alias_tag_pairs=alias_tag_pairs,
+        chat_history_msgs=history_user_model_msg,
+        known_tags=known_tags,
+        client=client,
+    )
+    rewritten_query = rewrite_result["rewritten_query"]
+    expanded_query = rewrite_result["expanded_query"]
+    recommended_tags = rewrite_result["recommended_tags"]
+
+    logger.success(
+        f"query rewritting 完成: \nrewritten='{rewritten_query[:50]}…', "
+        f"\nexpanded_query='{expanded_query[:60]}..., "
+        f"\nrecommended_tags={recommended_tags}"
+    )
+
+    # ── Step 4: 向量搜尋，取得相關 chunks ─────────────────────────────────
+    logger.info(f"執行 vector_search, top_k={RAG_TOP_K}...")
+    chunks = vector_search(
+        query=expanded_query,
+        top_k=RAG_TOP_K,
+        filter_tags=None,  # 關鍵：已不做 prefilter
+        filter_file_path=None,
+    )
+    logger.success(f"vector_search 完成: chunk_amount={len(chunks)}")
+
     if not chunks:
         answer = "目前的筆記裡沒有找到與這個問題相關的內容，請換個關鍵字試試。"
-        save_chat_history(session_id=session_id,
-                          agent_type="rag",
-                          role="model",
-                          message_text=answer,
-                          metadata={
-                              "search_optimize_method": search_optimize_method,
-                          },
-                          )
-        return {"answer": answer, "sources": []}
+        save_chat_history(
+            session_id=session_id,
+            agent_type="rag",
+            role="model",
+            message_text=answer,
+        )
+        return {"answer": answer, "sources": [], "debug": {}}
 
-    # ── Step 3: 將chunks 組裝回 context ───────────────────────────────────
-    context_from_chks = _build_context(chunks)
+    # ── Step 5: Rerank Chunks ─────────────────────────────────
+    # reranker 需要看的是「使用者真正想問什麼」跟「這個 chunk 有多相關」，
+    # tag 關鍵字反而會干擾 cross-encoder 的判斷，故用 rewritten_query 而不是 expanded
+    logger.info(f"調用 Cohere reranker, {len(chunks)} candidates → top_n={RERANK_TOP_N}")
+    reranked_chunks = rerank_chunks(
+        query=rewritten_query,
+        chunks=chunks,
+        top_n=RERANK_TOP_N,
+    )
+    logger.success(f"Cohere rerank 完成: chunk_amount={len(reranked_chunks)}")
 
-    # ── Step 4: 讀取對話歷史（最近 3 輪，包含 user 與 model 講的話，所以有 6 筆）─────────────────────
-    history_user_model_msg = load_chat_history(session_id=session_id,
-                                               agent_type="rag",
-                                               n=chat_history_n,
-                                               )
+    # ── Step 6: 將 chunks 組裝回 context ───────────────────────────────────
+    context_from_chks = build_context(reranked_chunks)
 
-    # ── Step 5: 組裝本輪 user message，包含 history + context，包成 contents 餵給 LLM 摘要。
-    # 為了避免每輪 prompt 膨脹過頭，也確保每輪都用最新的 vector search 結果，contents 不存入 chat_history
-    current_user_msg = {"role": "user",   # 因為是餵給 LLM，所以 role 為 user
-                        "parts": [{"text": f"以下是相關筆記片段：\n\n{context_from_chks}\n\n---\n\n問題：{query}"}],
-                        }
+    # ── Step 7: 組裝要給 LLM 的 content，包含 history + context_from_chunks
+    # 隨著多輪對話增長的 history，若存入 chat_history 可能讓下一輪 prompt 膨脹過頭，
+    # 故 contents 不存入 chat_history
+    current_user_msg = {
+        "role": "user",  # 因為是餵給 LLM，所以 role 為 user
+        "parts": [{"text": f"以下是相關筆記片段：\n\n{context_from_chks}\n\n---\n\n問題：{query}"}],
+    }
     contents = history_user_model_msg + [current_user_msg]
-    # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform)，等待其回應 ────────────────────────────
-    logger.info(f"呼叫模型 {RAG_AGENT1_MODEL}，挾帶 {len(history_user_model_msg)} recent history messages.")
-    response = client.models.generate_content(model=RAG_AGENT1_MODEL,
-                                              contents=contents,
-                                              config=types.GenerateContentConfig(
-                                                  system_instruction=SYSTEM_PROMPT,
-                                                  temperature=0.2,   # 查詢任務必須穩定，選低 temperature
-                                              ),
-                                              )
+
+    # ── Step 8: 呼叫 LLM，等待其回應 ────────────────────────────
+    logger.info(
+        f"呼叫模型 {RAG_AGENT1_MODEL}, 挾帶 {len(history_user_model_msg)} 歷史對話紀錄 {len(reranked_chunks)} 筆文件"
+    )
+    response = client.models.generate_content(
+        model=RAG_AGENT1_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.2,
+        ),
+    )
     answer = response.text
 
-    # ── Step 7: 儲存模型回應 ───────────────────────────────────
-    source_list = _build_source_list(chunks)  # 順便整理這次查到的來源筆記檔有幾個
+    # ── Step 9: 儲存模型回應 ───────────────────────────────────
+    source_list = build_source_list(reranked_chunks)
 
-    save_chat_history(session_id=session_id,
-                      agent_type="rag",
-                      role="model",
-                      message_text=answer,
-                      metadata={
-                          "model": RAG_AGENT1_MODEL,
-                          "retrieved_chunks": [
-                              {
-                                  "file_path":   c.get("file_path", ""),
-                                  "chunk_index": c.get("chunk_index"),
-                                  "score": c.get("score", 0),
-                              } for c in chunks
-                          ],
-                          "note_files": list(set(c["file_name"] for c in chunks)),
-                          "search_optimize_method": search_optimize_method,
-                      },
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="rag",
+        role="model",
+        message_text=answer,
+        metadata={
+            "model": RAG_AGENT1_MODEL,
+            "retrieved_chunks": [
+                {
+                    "file_path": c.get("file_path", ""),
+                    "chunk_index": c.get("chunk_index"),
+                    "score": round(c.get("score", 0), 4),
+                    "rerank_score": round(c.get("rerank_score", 0), 4),
+                }
+                for c in reranked_chunks
+            ],
+            "note_files": list({c["file_name"] for c in reranked_chunks}),
+            "search_optimize_method": "rewrite_expand_rerank",
+            "rewritten_query": rewritten_query,
+            "recommended_tags": recommended_tags,
+        },
+    )
 
-    logger.info(f"rag_query: 回應生成完成，來源 {len(source_list)} 筆")
-    return {"answer": answer, "sources": source_list}
+    logger.success(f"RAG Agent 回應生成完成，來源 {len(source_list)} 筆")
+    return {
+        "answer": answer,
+        "sources": source_list,
+        "debug": {
+            "original_query": query,
+            "rewritten_query": rewritten_query,
+            "expanded_query": expanded_query,
+            "recommended_tags": recommended_tags,
+            "vector_search_count": len(chunks),
+            "reranked_count": len(reranked_chunks),
+            "rerank_scores": [c.get("rerank_score") for c in reranked_chunks],
+        },
+    }

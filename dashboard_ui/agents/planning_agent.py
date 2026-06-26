@@ -1,6 +1,7 @@
 # agents/planning_agent.py
 
-"""
+"""Planning Agent：個人化學習路徑生成與多輪追問調整。
+
 職責:
   generate_learning_map(): 學習地圖初版生成
   refine_learning_map():   多輪追問調整（沿用同一 session 的脈絡）
@@ -14,19 +15,15 @@
   - tools/chat_history.py
 """
 
-import os
-from google.oauth2.service_account import Credentials
-from google import genai
+from agent_tools.agent_helpers import build_context, build_history_context_message, build_source_list
+from agent_tools.chat_history import save_chat_history
+from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.query_with_vector_search import vector_search
 from google.genai import types
 from loguru import logger
 
-from agent_tools.connect_to_google_genai import _get_genai_client
-from agent_tools.query_with_vector_search import vector_search
-from agent_tools.chat_history import load_chat_history, save_chat_history
-
-
 # ── 常數 ──────────────────────────────────────────────────────────
-PLANNING_AGENT_MODEL = "gemini-2.5-flash"   # 推理能力更強模型
+PLANNING_AGENT_MODEL = "gemini-2.5-flash"  # 推理能力更強模型
 
 SYSTEM_PROMPT = """你是一位跨領域的學習路徑規劃師，專長橫跨生物科技 (Biotech) 與資料工程 (Data Engineering) 兩個領域。
 
@@ -43,88 +40,18 @@ SYSTEM_PROMPT = """你是一位跨領域的學習路徑規劃師，專長橫跨�
 你只根據以下提供的筆記片段判斷使用者現有知識，不要憑空假設使用者會什麼。"""
 
 
-def _build_context(chunks: list[dict]) -> str:
-    """
-    將 vector_search() 回傳的 top-K chunks 組裝成純文字 context block。
-    每個 chunk 標注來源，讓模型知道每段文字出自哪份筆記。
-
-    格式範例:
-        [來源 1] 檔案: SQL筆記.md｜章節: SQL > DQL > SELECT
-        SELECT 用來從資料表中選取欄位...
-
-        [來源 2] 檔案: MongoDB筆記.md｜章節: MongoDB > Aggregation
-        $match 用來過濾文件...
-    """
-    blocks = []
-    for i, chunk in enumerate(chunks, start=1):
-        header = f"[來源 {i}] 檔案: {chunk['file_name']}｜章節: {chunk['section']}"
-        blocks.append(f"{header}\n{chunk['content']}")
-    return "\n\n".join(blocks)
+PLANNING_HISTORY_INTRO = "以下是這個 session 過去的學習地圖討論紀錄，供你接續調整時參考："
 
 
-def _build_history_context_message(session_id: str, chat_history_n: int = 5) -> list[dict]:
-    """
-    讀取本 session 過去的 planning 對話歷史，
-    以背景資訊的形式包成獨立的 user/model 對組帶入，
-    避免 LLM 把過去的回應誤判為自己當下要接續輸出的內容。
-    """
-    history_planning_msg = load_chat_history(session_id=session_id,
-                                             agent_type="planning",
-                                             n=chat_history_n)
-
-    if not history_planning_msg:
-        return []
-
-    planning_lines = "\n".join(f"  [{m['role']}] {m['parts'][0]['text']}" for m in history_planning_msg
-                               )
-
-    return [{"role": "user",
-            "parts": [{"text": f"以下是這個 session 過去的學習地圖討論紀錄，供你接續調整時參考：\n\n{planning_lines}"}],
-             },
-            {"role": "model",
-            "parts": [{"text": "好的，我已了解先前的討論脈絡，請告訴我這一輪的需求。"}],
-             },
-            ]
-
-
-def _build_source_list(chunks: list[dict]) -> list[dict]:
-    """
-    組裝準備回傳給呼叫方 (Streamlit UI) 的來源清單，
-    包含去重後的 "file_name + section 組合"。
-
-    Returns:
-        {
-         "file_name":  "某份筆記檔案名稱.md",  
-         "section":  "一個筆記資料塊所屬的文章標題",  
-         "score":  "與查詢語意的相似度評分，小數點後四位"
-         }
-    """
-    seen = set()
-    # deduped = []
-    sources = []
-    for chunk in chunks:
-        key = (chunk["file_name"], chunk["section"])
-        if key not in seen:
-            seen.add(key)
-            # deduped.append(chunk)
-            sources.append({"file_name": chunk["file_name"],
-                            "section":   chunk["section"],
-                            "score":     round(chunk["score"], 4),
-                            })
-    return sources
-
-
-def generate_learning_map(query: str,
-                          session_id: str,
-                          planning_top_k: int = 5,
-                          chat_history_n: int = 5) -> dict:
-    """
-    學習地圖初版生成。
+def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, chat_history_n: int = 5) -> dict:
+    """學習地圖初版生成。
 
     Args:
         query:      使用者描述目標方向與現有背景，例如
                     「我想從生技轉資料工程，目前熟 Python 與 SQL，請給我學習建議」
         session_id: 目前對話的 uuid4
+        planning_top_k: vector_search 取回的 chunk 數量，預設 5
+        chat_history_n: 回讀幾輪 planning 歷史作為背景，預設 5
 
     Returns:
         {
@@ -135,11 +62,12 @@ def generate_learning_map(query: str,
     client = _get_genai_client()
 
     # ── Step 1: 儲存使用者訊息 ─────────────────────────────────
-    save_chat_history(session_id=session_id,
-                      agent_type="planning",
-                      role="user",
-                      message_text=query,
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="planning",
+        role="user",
+        message_text=query,
+    )
 
     # ── Step 2: 向量搜尋，取得更廣的 context（top_k=10，跨 domain）──
     logger.info(f"generate_learning_map: 執行 vector_search, query='{query[:40]}...'")
@@ -147,70 +75,77 @@ def generate_learning_map(query: str,
 
     if not chunks:
         answer = "目前的筆記裡沒有找到足夠的背景資訊來規劃學習路徑，可以多告訴我一些你目前熟悉的技術或工具嗎？"
-        save_chat_history(session_id=session_id,
-                          agent_type="planning",
-                          role="model",
-                          message_text=answer,
-                          )
+        save_chat_history(
+            session_id=session_id,
+            agent_type="planning",
+            role="model",
+            message_text=answer,
+        )
         return {"answer": answer, "sources": []}
 
     # ── Step 3: 將chunks 組裝回 context ───────────────────────────────────
-    context_from_chunk = _build_context(chunks)
+    context_from_chunk = build_context(chunks)
 
     # ── Step 4: 讀取對話歷史 ───────────────────────────────────────────────
     # 雖然這函式用於初版生成，理論上不需要過去的 planning history，
     # 但若使用者是在既有 session 重新觸發初版生成，仍保留讀取以策安全
-    history_user_model_msg = _build_history_context_message(session_id, chat_history_n=chat_history_n)
+    history_user_model_msg = build_history_context_message(
+        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=chat_history_n
+    )
 
     # ── Step 5: 組裝本輪 user message，包含 history + context，包成 contents 餵給 LLM 摘要。
-    current_user_msg = {"role": "user",
-                        "parts": [{"text": f"以下是相關筆記片段：\n\n{context_from_chunk}\n\n---\n\n使用者需求：{query}"}],
-                        }
+    current_user_msg = {
+        "role": "user",
+        "parts": [{"text": f"以下是相關筆記片段：\n\n{context_from_chunk}\n\n---\n\n使用者需求：{query}"}],
+    }
     contents = history_user_model_msg + [current_user_msg]
 
     # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
     logger.info(f"呼叫模型 {PLANNING_AGENT_MODEL}，挾帶 {len(chunks)} 筆 chunks")
-    response = client.models.generate_content(model=PLANNING_AGENT_MODEL,
-                                              contents=contents,
-                                              config=types.GenerateContentConfig(
-                                                  system_instruction=SYSTEM_PROMPT,
-                                                  temperature=0.5,   # 規劃任務需要一定彈性，但不宜過高避免天馬行空
-                                              ),
-                                              )
+    response = client.models.generate_content(
+        model=PLANNING_AGENT_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.5,  # 規劃任務需要一定彈性，但不宜過高避免天馬行空
+        ),
+    )
     answer = response.text
 
     # ── Step 7: 儲存模型回應 ───────────────────────────────────
-    source_list = _build_source_list(chunks)  # 順便整理這次查到的來源筆記檔有幾個
+    source_list = build_source_list(chunks)  # 順便整理這次查到的來源筆記檔有幾個
 
-    save_chat_history(session_id=session_id,
-                      agent_type="planning",
-                      role="model",
-                      message_text=answer,
-                      metadata={
-                          "model": PLANNING_AGENT_MODEL,
-                          "stage": "initial_map",
-                          "retrieved_chunks": [
-                              {
-                                  "file_path":   c.get("file_path", ""),
-                                  "chunk_index": c.get("chunk_index"),
-                                  "score":       c.get("score", 0),
-                              } for c in chunks
-                          ],
-                          "note_files": list({c["file_name"] for c in chunks}),
-                      },
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="planning",
+        role="model",
+        message_text=answer,
+        metadata={
+            "model": PLANNING_AGENT_MODEL,
+            "stage": "initial_map",
+            "retrieved_chunks": [
+                {
+                    "file_path": c.get("file_path", ""),
+                    "chunk_index": c.get("chunk_index"),
+                    "score": c.get("score", 0),
+                }
+                for c in chunks
+            ],
+            "note_files": list({c["file_name"] for c in chunks}),
+        },
+    )
 
     logger.info("generate_learning_map: 初版地圖生成完成")
     return {"answer": answer, "sources": source_list}
 
 
 def refine_learning_map(followup_query: str, session_id: str, planning_top_k: int = 5) -> dict:
-    """
-    多輪追問調整。
+    """多輪追問調整。
 
     Args:
         followup_query:      使用者的追問或調整需求，例如「把 MLOps 的部分展開」
         session_id: 目前對話的 uuid4（沿用初版生成時的同一個 session）
+        planning_top_k: vector_search 取回的 chunk 數量，預設 5
 
     Returns:
         {
@@ -221,59 +156,66 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
     client = _get_genai_client()
 
     # ── Step 1: 儲存使用者追問 ─────────────────────────────────
-    save_chat_history(session_id=session_id,
-                      agent_type="planning",
-                      role="user",
-                      message_text=followup_query,
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="planning",
+        role="user",
+        message_text=followup_query,
+    )
 
     # ── Step 2: 針對追問內容重新向量搜尋（例如「MLOps」會檢索到更精準的 chunk）
     logger.info(f"refine_learning_map: 執行 vector_search, query='{followup_query[:100]}...'")
     chunks = vector_search(query=followup_query, top_k=planning_top_k)
 
     # ── Step 3: 將chunks 組裝回 context ───────────────────────────────────
-    context = _build_context(chunks) if chunks else " (這次追問沒有檢索到新的相關筆記片段，請根據先前討論的脈絡回答。) "
+    context = build_context(chunks) if chunks else " (這次追問沒有檢索到新的相關筆記片段，請根據先前討論的脈絡回答。) "
 
     # ── Step 4: 讀取過去的 planning 對話歷史（這裡才是「多輪」的關鍵）
-    history_user_model_msg = _build_history_context_message(session_id, chat_history_n=5)
+    history_user_model_msg = build_history_context_message(
+        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=5
+    )
 
     # ── Step 5: 組裝本輪 user message，包含 history + context，包成 contents 餵給 LLM 摘要。
-    current_user_msg = {"role": "user",
-                        "parts": [{"text": f"以下是這次追問相關的筆記片段：\n\n{context}\n\n---\n\n使用者追問：{followup_query}"}],
-                        }
+    current_user_msg = {
+        "role": "user",
+        "parts": [{"text": f"以下是這次追問相關的筆記片段：\n\n{context}\n\n---\n\n使用者追問：{followup_query}"}],
+    }
     contents = history_user_model_msg + [current_user_msg]
 
     # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
     logger.info(f"呼叫模型 {PLANNING_AGENT_MODEL}，多輪追問調整")
-    response = client.models.generate_content(model=PLANNING_AGENT_MODEL,
-                                              contents=contents,
-                                              config=types.GenerateContentConfig(
-                                                  system_instruction=SYSTEM_PROMPT,
-                                                  temperature=0.4,
-                                              ),
-                                              )
+    response = client.models.generate_content(
+        model=PLANNING_AGENT_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.4,
+        ),
+    )
     answer = response.text
 
     # ── Step 7: 儲存模型回應 ───────────────────────────────────
-    source_list = _build_source_list(chunks)  # 順便整理這次查到的來源筆記檔有幾個
+    source_list = build_source_list(chunks)  # 順便整理這次查到的來源筆記檔有幾個
 
-    save_chat_history(session_id=session_id,
-                      agent_type="planning",
-                      role="model",
-                      message_text=answer,
-                      metadata={
-                          "model": PLANNING_AGENT_MODEL,
-                          "stage": "refinement",
-                          "retrieved_chunks": [
-                              {
-                                  "file_path":   c.get("file_path", ""),
-                                  "chunk_index": c.get("chunk_index"),
-                                  "score":       c.get("score", 0),
-                              } for c in chunks
-                          ],
-                          "note_files": list({c["file_name"] for c in chunks}),
-                      },
-                      )
+    save_chat_history(
+        session_id=session_id,
+        agent_type="planning",
+        role="model",
+        message_text=answer,
+        metadata={
+            "model": PLANNING_AGENT_MODEL,
+            "stage": "refinement",
+            "retrieved_chunks": [
+                {
+                    "file_path": c.get("file_path", ""),
+                    "chunk_index": c.get("chunk_index"),
+                    "score": c.get("score", 0),
+                }
+                for c in chunks
+            ],
+            "note_files": list({c["file_name"] for c in chunks}),
+        },
+    )
 
     logger.info("refine_learning_map: 追問調整完成")
     return {"answer": answer, "sources": source_list}
