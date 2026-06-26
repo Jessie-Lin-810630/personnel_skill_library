@@ -2,9 +2,12 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import frontmatter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TASK_DIR = PROJECT_ROOT / "task01_obsidian_etl"
@@ -90,6 +93,126 @@ class ScanObsidianTests(unittest.TestCase):
     def test_scan_vault_raises_when_path_does_not_exist(self):
         with self.assertRaises(FileNotFoundError):
             e_scan_obsidian.scan_vault("/path/that/does/not/exist")
+
+
+class ResolveImagePathTests(unittest.TestCase):
+    def test_strips_size_alias_and_keeps_basename_under_note_dir(self):
+        # ![[img.png|492]] 的尺寸/別名要被去掉，圖片掛在「該 .md 所在目錄」的 _attachment/
+        self.assertEqual(
+            e_scan_obsidian.resolve_image_blob_path("img.png|492", "u/from-obsidian/01-daily/x.md"),
+            "u/from-obsidian/01-daily/_attachment/img.png",
+        )
+
+    def test_ref_with_subpath_uses_basename_only(self):
+        # ref 帶子路徑時只取檔名，避免把 ref 的路徑誤拼進 blob path
+        self.assertEqual(
+            e_scan_obsidian.resolve_image_blob_path("sub/img.png", "u/01-daily/x.md"),
+            "u/01-daily/_attachment/img.png",
+        )
+
+    def test_alias_with_surrounding_spaces_is_trimmed(self):
+        self.assertEqual(
+            e_scan_obsidian.resolve_image_blob_path("img.png | 300 ", "u/01-daily/x.md"),
+            "u/01-daily/_attachment/img.png",
+        )
+
+
+class ExtractAttachedImagesTests(unittest.TestCase):
+    def test_dedups_same_image_keeps_order_and_attaches_md5(self):
+        # ![[a.png|300]] 與 ![[a.png]] 解析到同一 blob → 去重；出現順序保留
+        index = {
+            "u/01-daily/_attachment/a.png": "MD5A",
+            "u/01-daily/_attachment/b.png": "MD5B",
+        }
+        body = "![[b.png]] 文字 ![[a.png|300]] 再來 ![[a.png]]"
+
+        result = e_scan_obsidian.extract_attached_images(body, "u/01-daily/note.md", index)
+
+        self.assertEqual(
+            result,
+            [
+                {"image_path": "u/01-daily/_attachment/b.png", "image_md5_hash": "MD5B"},
+                {"image_path": "u/01-daily/_attachment/a.png", "image_md5_hash": "MD5A"},
+            ],
+        )
+
+    def test_image_missing_in_index_is_skipped(self):
+        # GCS 找不到的圖片 (已刪 / 非 _attachment 結構) 不記血緣
+        body = "![[gone.png]]"
+        self.assertEqual(
+            e_scan_obsidian.extract_attached_images(body, "u/01-daily/note.md", {}),
+            [],
+        )
+
+    def test_body_without_images_returns_empty_list(self):
+        self.assertEqual(
+            e_scan_obsidian.extract_attached_images("純文字沒有圖片", "u/01-daily/note.md", {}),
+            [],
+        )
+
+
+class InferDateTests(unittest.TestCase):
+    def test_valid_iso_date_parses(self):
+        self.assertEqual(e_scan_obsidian._infer_date("2026-06-27"), datetime(2026, 6, 27))
+
+    def test_empty_or_none_returns_none(self):
+        self.assertIsNone(e_scan_obsidian._infer_date(""))
+        self.assertIsNone(e_scan_obsidian._infer_date(None))
+
+    def test_none_stringified_returns_none(self):
+        # scan_vault_gs 以 str(fm.get("date")) 餵入，date 缺值時會傳 "None" 字串
+        self.assertIsNone(e_scan_obsidian._infer_date("None"))
+
+    def test_non_iso_formats_return_none(self):
+        self.assertIsNone(e_scan_obsidian._infer_date("2026/06/27"))
+        # 帶時間的字串不符合 %Y-%m-%d，回 None (見下方 misposition 髒資料的關聯)
+        self.assertIsNone(e_scan_obsidian._infer_date("2026-06-27 10:30"))
+
+
+class InferMispositionMetadataTests(unittest.TestCase):
+    """_infer_misposition_metadata：frontmatter 漏寫進正文時的補救解析 (髒資料來源)。"""
+
+    @staticmethod
+    def _post(content: str) -> frontmatter.Post:
+        return frontmatter.Post(content)
+
+    def test_parses_tags_date_alias_from_body(self):
+        post = self._post("tags: [python, sql]\ndate: 2026-06-27\nalias: [foo, bar]\n")
+
+        fm = e_scan_obsidian._infer_misposition_metadata(post)
+
+        self.assertEqual(fm["tags"], "python, sql")
+        self.assertEqual(fm["date"], "2026-06-27")
+        self.assertEqual(fm["alias"], ["foo", "bar"])
+
+    def test_full_width_colon_is_supported(self):
+        post = self._post("tags：python\ndate：2026-06-27\n")
+
+        fm = e_scan_obsidian._infer_misposition_metadata(post)
+
+        self.assertEqual(fm["tags"], "python")
+        self.assertEqual(fm["date"], "2026-06-27")
+
+    def test_empty_body_returns_defaults(self):
+        fm = e_scan_obsidian._infer_misposition_metadata(self._post(""))
+        self.assertEqual(fm, {"tags": "", "date": "", "alias": []})
+
+    def test_value_containing_colon_should_not_crash(self):
+        # 髒資料 Bug A（已修）：value 內含冒號 (如時間 "10:30"、URL) 原本會讓
+        # feature.split(":") 拋 ValueError: too many values to unpack，使該筆記在
+        # scan_vault_gs 的 try/except 中被「靜默丟棄」。已改 split(":", 1) 只切第一個冒號。
+        post = self._post("date: 2026-06-27 10:30\n")
+        fm = e_scan_obsidian._infer_misposition_metadata(post)
+        self.assertEqual(fm["date"], "2026-06-27 10:30")
+
+    def test_inline_hash_tags_should_not_be_truncated(self):
+        # 髒資料 Bug B（已修）：原本 content.split("#")[0] 會在第一個 '#' 處截斷，
+        # Obsidian 行內標籤 (tags: #python) 連同後面的 date 一起被切掉。已改為逐行掃描、
+        # 只在真正的 Markdown 標題行 (行首 '# ') 才停，行內標籤不再誤截。
+        post = self._post("tags: #python #sql\ndate: 2026-06-27\n")
+        fm = e_scan_obsidian._infer_misposition_metadata(post)
+        self.assertTrue(fm["tags"])
+        self.assertEqual(fm["date"], "2026-06-27")
 
 
 class CleanObsidianTests(unittest.TestCase):
