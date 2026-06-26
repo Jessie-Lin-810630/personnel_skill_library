@@ -153,7 +153,7 @@
     ---
     # Phase II 部署工作啟動前提
     ## 專案背景
-    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）
+    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB atlas + GCP）
     **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）
     **目前狀態**：Phase I 已完成，進入 Phase II 雲端部署階段
 
@@ -197,7 +197,7 @@
 |初次全量建立 5,000 篇| ~4M tokens |$0.08（約 2.5 台幣）|
 |每週增量（50 篇新筆記| 50 篇~40K tokens|$0.0008（幾乎免費）|
 
-### Evaluate the loading on Vector database, MongoDB Altas.
+### Evaluate the loading on Vector database, MongoDB atlas.
 1. It is better to do data chunking because the content of each .md file are long-text which might occassionally exceeded the limit of context window of the furture LLM model or the limit of tokens of embedding model.
 2. The dimensions of vectors for the model `text-embedding-3-small` are `1536`, while for `Gemini embedding 2` are `3072`.
 
@@ -216,7 +216,7 @@
 
     假設你有 1,000 篇筆記，則 108 MB
     ```
-> `MongoDB Altas M0 Free Tier up to 512 MB, far from 108 MB`
+> `MongoDB atlas M0 Free Tier up to 512 MB, far from 108 MB`
 
 
 ## 20260526 Work log
@@ -228,8 +228,8 @@
     - 費用：$0.02 / 1M tokens（2025 年定價）
 2. Went to https://platform.openai.com/api-keys to create an API secret key (and set billing detail which needed credit card). Keep it in .env and secret managers.
 3. Created the scripts `task06/t_chunk_embed.py` and `task06_obsidian_embed_etl/l_upsert_vectors.py`. Successfully practiced chuncking and embedding the long text in three markdown files.
-4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on Altas.
-5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB Altas.
+4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on atlas.
+5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB atlas.
 6.
 
 > Until 20260527, some questions might be solved or optimized:
@@ -237,7 +237,7 @@
     舊的 chunk_index 4、5 不會自動被刪除。
     目前資料量小，影響不大；若未來需要清理孤立 chunk，
     可在 upsert 前先 delete_many({"file_path": file_path})，再重新 insert。
-> 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 Altas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
+> 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 atlas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
 
 ## 20260528 Work log
 1. Evaluated which AI agents are suitable for this project. Then exported to [report](./ai-agent-evaluation-report.md).
@@ -468,7 +468,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     > All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
 
 3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline.
-    > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
+    > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB atlas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB atlas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
 
 ## 20260616 Work log
 1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
@@ -502,7 +502,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 3. By combining the [hand-over created by myself](task07_html_to_md_hand_over.md) and spec-driven development (SDD) tool OpenSpec, established the [`Note Reviewer` streamlit page](./../dashboard_ui/pages/onenote_review.py) and created the [archive endpoint](./../archive_service/) via python Flask.
 
 4. Summarized what has learned from the result of 1 & 2.
-    - gcs_archiver.py: Most of python function design followed the logistic of my hand-over, especially, how to get the markdown path, html path, image path correctly from the single-truth, MongoDB Altas `onenote_page_metadata`.
+    - gcs_archiver.py: Most of python function design followed the logistic of my hand-over, especially, how to get the markdown path, html path, image path correctly from the single-truth, MongoDB atlas `onenote_page_metadata`.
     - gcs_archiver.py: Commons downloading methods of blobs from GCS by python SDK:
 
         | 方法                     | 回傳型別        | 適用場景            |     行為         |
@@ -618,7 +618,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
 
             # Step 3A: 全庫 tag 字典字串比對
@@ -713,7 +713,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
 
             # Step 3A: alias 模糊比對，用來反查 tags，專治 tags 沒有正確標示、但是筆記名稱本身有符合查詢語意的時候
@@ -885,7 +885,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
             alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
 
@@ -928,7 +928,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
     | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
     | 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `_extract_filter_tags()` 找到 MySQL 筆記 tag，包含： {'alias': 'MySQL資料型態', 'tags': ['MongoDB', 'MySQL', 'data-type', 'BSON'], 'score': 62.5} 與 {'alias': 'MySQL Window Function', 'tags': ['MySQL', 'SQL', 'window-function'], 'score': 95.23809523809523} 這兩份筆記，引導 rag agent 的 `vector search()` |
-    | 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，關於 partition_clause 的說明如下：<br>partition_clause 是資料表中的分區方式。在套用 Window Function 時，MySQL 會針對 partition_clause 分區後的每一個區塊，分別......您提供的其他筆記片段（來源 1、3、5）主要在討論資料庫的分片 (Sharding) 和分割 (Partitioning) 機制，以及 SQL 與 NoSQL 的比較，這些內容與 MySQL Window Function 中的 partition_clause 的具體用法關聯性較小。 | ⚠️ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次 filter tags ('MongoDB', 'MySQL', 'data-type', 'BSON', 'SQL')，最後 Window function parition clause 留在 LLM 的回覆參考中，但因為 vector search 是由 rag agent 繼承 tags 與追問 query 後重新計算相似度，造成此時混入新的筆記來源與追問語意較相似但是跟上一輪語意較遠，最後造成 rag agent 仍有部分上下文污染。在這輪測試中發現來源筆記變成了 |
+    | 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，關於 partition_clause 的說明如下：<br>partition_clause 是資料表中的分區方式。在套用 Window Function 時，MySQL 會針對 partition_clause 分區後的每一個區塊，分別......您提供的其他筆記片段（來源 1、3、5）主要在討論資料庫的分片 (Sharding) 和分割 (Partitioning) 機制，以及 SQL 與 NoSQL 的比較，這些內容與 MySQL Window Function 中的 partition_clause 的具體用法關聯性較小。 | ⚠️ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次 filter tags ('MongoDB', 'MySQL', 'data-type', 'BSON', 'SQL')，最後 Window function parition clause 留在 LLM 的回覆參考中，但因為 vector search 是由 rag agent 繼承 tags 與追問 query 後重新計算相似度，造成此時混入新的筆記來源與追問語意較相似但是跟上一輪語意較遠，最後造成 rag agent 仍有部分上下文污染。在這輪測試中發現來源筆記變成了 MongoDB 筆記 |
     | 3 | 追問 partition_clause 就好，不想知道分片機制。 | ⚠️ 回覆結果幾乎同上一輪，只是把分片機制刪掉而已。 |
     | 4 | 我只想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ⚠️ router agent 不知道這屬於追問，但靠著 user query 中不刻意提及非主題相關性的詞彙，router 會執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者 |
 
@@ -982,7 +982,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 3. Refactored the pipeline of task06 to fit the required prompt format of `Gemini-embedding-2`.
 
-4. Meanwhile, fixed the pending defection of `upsert` behavior to MongoDB Altas collection which might leave silo, broken, and obsoleted data chunks if the length of chunks had been shorten after re-embedding a revised text. As the [resulted script](../task06_obsidian_embed_etl/l_load_to_mongodb.py), `deleteMany and insert` behavior replaced `upsert`.The doc of `all` the embedded chunks pointed to the same note file path would be deleted from the collection `obsidian_vectors_multimodal` first. Then new chunks were inserted. This should prevent the broken chunks left in the vector database after multiple rounds of embedding tasks to a note text.
+4. Meanwhile, fixed the pending defection of `upsert` behavior to MongoDB atlas collection which might leave silo, broken, and obsoleted data chunks if the length of chunks had been shorten after re-embedding a revised text. As the [resulted script](../task06_obsidian_embed_etl/l_load_to_mongodb.py), `deleteMany and insert` behavior replaced `upsert`.The doc of `all` the embedded chunks pointed to the same note file path would be deleted from the collection `obsidian_vectors_multimodal` first. Then new chunks were inserted. This should prevent the broken chunks left in the vector database after multiple rounds of embedding tasks to a note text.
 
 5. To save the requests to vertex AI API, [data capture change (CDC) approach](../task06_obsidian_embed_etl/l_load_to_mongodb.py) was implemented in refactoring. Only when the file on GCS was changed and the its embedding status in the collection `obsidian_notes` was not done (`embedding_done`=false) yet, the requests to Vertex AI API for embedding the text of the file would be performed. Otherwise, the requests would be skipped.
 
@@ -991,3 +991,129 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 7. Installed the linter and formattor via `pre-commit` and `ruff`.
 
 8. Updated the [hand-over of index creation](./task06_vctr_srch_idx_hand_over.md) to align the model type.
+
+## 20260625 Work log
+1. After changed the embedding model to multimodal models and migrate the collection of vector database from `obsidian_vectors` to `obsidian_vectors_multimodal`, the router and rag agents were tested again. This time key word search method was changed from `tags of note` to `file path of note` to avoid the context contamination in the follow-up questions in a session that was resulted by the less relevant tags of function `_extract_filter_tags()` inherited from the last question in the same session ([See Test case 2](#20260621-work-log)). In this change, inherited items was `file path of note from the last question`, I hope this could pinning the retreival scope in multi-run conversations with router,/rag agent. The testing materials included the `case 2 and case 3 ever used in 20260621 Work log` and one new case. The testing results were explained as follows.
+
+| Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+| ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+| 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `extract_file_paths_via_alias` 找到兩份筆記：["MongoDB 與 MySQL 資料型態彙整兼比較.md", "MySQL Window Function.md"]，引導 rag agent 的 `vector search()`，這一輪回答同前面測試結果、能夠聚焦在 Window function 的解釋 |
+| 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，以下是關於 `partition_clause` 的詳細說明.....`partition_clause` 的作用是定義資料表中的分區方式。當您指定了 `partition_clause` 後，MySQL 會將資料表分割成不同的區塊（或稱為「分區」）。接著，Window Function 會針對每一個獨立的分區， | ✅ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次的兩份筆記，最後 Window function parition clause 留在 LLM 的回覆參考中，這一次 rag agent 的 `vector_search()` 計算後，取得的 top 5 chunk 都來自的 Window function 筆記，回答並無失焦、且無上下文污染。 |
+| 3 | 有用到partition的範例 | rag | 您提供的筆記片段主要是在說明 Kafka 的 Partition 概念，而不是 MySQL 的  | ⚠️ router agent 不認為是追問，所以執行了`extract_file_paths_via_alias()`，重新搜索跟 query 相似的筆記，結果歪樓找到 Kafka 的 partition 主題筆記，導致 rag agent 的檢索範圍再度被新筆記 "Kafka - Partition、Replication、Segment、Cleanup.md" 污染|
+| 4 | 你找看看 window function 的 cte 範例中是否有提過 partition | rag | 關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ❌ router agent 不知道這屬於追問，但靠著 user query 重新正面表述是 Window function 的 partition ，router 會執行 `02_knowledge_bases/MySQL Window Function.md` 找到精準筆記給 rag，但這樣正面表述法並不是每次都很符合人類的對話習慣。 |
+
+- Testing case 3 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | 容器化技術的核心在於隔離應用程式及其依賴，.... | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'docker' tag 給 rag agent，接著 rag agent 基於 tag 但不侷限 note file path (因為是 router agent 程式邏輯導致)，找到了筆記["Docker - 專有名詞與概念.md"]，從而開始聚焦在 docker |
+    | 2 | 找dev container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊...<br>定義與目的：... | ⚠️ router agent 不知道這屬於追問，直接執行 `extract_file_paths_via_alias` 找到兩份筆記["20260105 在 VS code 啟動Dev Container.md", "建置開發環境 - 使用 Dev container 與 Poetry 的差異.md"]，引導 rag agent 的 `vector search()` |
+    | 3 | 進一步詢問怎麼開啟 Dev Container 使用 Claude Code | rag | 根根據您提供的筆記片段，目前沒有直接說明如何「開啟 Dev Container 使用 Claude Code」的具體步驟... | ❌ router agent 執行 `_extract_filter_path_via_alias()`找到兩份筆記["Claude Code 基本組成.md", "Claude Code Prompt 相關核心思維.md"]，提供給 rag agent 的 `vector search()`，`但問題是這兩份筆記不是正確來源`，所以 rag agent 拿到錯誤命中的資料且又被限縮只能在這兩份筆記中做搜尋。 rag agent 應該要檢索到 ["20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md"] 這份筆記，然而這份筆記不論是file path 還是 tag 都沒有 dev container/container 的語意。 |
+
+> Conclusion:
+> 不論是 0621 還是 0625 用 file path 或 note tags 來作為 vector search 執行前的 prefilter，prefilter 本身就是雙面刃，雖然它在精準命中時能大幅提升回答品質、多輪對話中不會失焦，但在初始命中錯誤或漏掉時反而會把正確答案排除在外。
+
+2. Changed previous the RAG flow:
+    ```
+    # 舊版:
+    query
+    │
+    ├─ Router: intent 分類 (R1/R2)
+    │    └─ 如果 rag_agent → 啟動 tag 抽取流程:
+    │         ├─ Step A: _extract_filter_tags() ← 全庫 tag 字串比對
+    │         ├─ Step 2A: _extract_tags_via_alias() ← alias 模糊比對
+    │         ├─ Step 2B: _r_hyde_rewrite() ← HyDE + tag 推薦
+    │         ├─ _looks_like_followup() + 繼承上輪 filter_tags/file_paths
+    │         └─ Step 2C: 退化全庫搜索
+    │
+    ├─ vector_search(filter_tags=..., top_k=5) ← prefilter 硬排除
+    │
+    └─ LLM 生成回答
+
+    # 5 層 tag 抽取邏輯互相干擾，debug 困難
+    # prefilter 是 boolean 邏輯，tag/file_path 沒命中就把正確答案排除
+    # 追問繼承機制傳遞錯誤 → 後續每輪都歪
+    # 程式碼複雜度高（~350 行 router 邏輯）
+    ```
+
+    ```
+    # 新版
+    query + chat_history
+        │
+        ├─ Router: intent 分類 (R1/R2)  ← 職責單一化
+        │
+        └─ rag_query() 內部:
+            │
+            ├─ Step 3: Query Rewrite (帶 history)
+            │    ├─ rewritten_query  → 獨立問句（給 reranker）
+            │    ├─ expanded_query   → rewritten + tags（給 vector_search）
+            │    └─ recommended_tags → 純記錄用
+            │
+            ├─ Step 4: vector_search(expanded_query, 無 prefilter, top_k=10)
+            │
+            ├─ Step 5: Cohere rerank(rewritten_query, top_n=5)
+            │
+            └─ Step 6: LLM 生成回答
+    # 預期優勢：
+    # Router 只做 intent，rag_agent 封裝所有 retrieval 邏輯
+    # 不做 prefilter → 標籤缺失不會排除正確答案
+    # Query expansion → 軟性增強語意信號（而非硬排除）
+    # Reranker (cross-encoder) → 精準度遠高於 bi-encoder 向量距離
+    # 追問自動處理 → rewrite 看 history 就能補全指代
+    ```
+3. RAG agent 新版整體流程
+    ```
+    query + chat_history (最近3輪)
+            │
+            ▼
+    ┌──────────────────┐
+    │  Query Rewrite   │  ← 一次 LLM call，看著 history 改寫成獨立問句
+    │  (帶 history)     │     + 推薦 3-5 個 tags 做 query expansion（不做 prefilter）
+    └──────────────────┘
+            │
+            ▼ expanded_query（改寫句 + tag 關鍵字）
+    ┌──────────────────┐
+    │  Vector Search   │  ← 不加 filter，top_k=10~15
+    │  (無 prefilter)   │     讓向量語意自由匹配
+    └──────────────────┘
+            │
+            ▼ 10~15 candidate chunks
+    ┌──────────────────┐
+    │  Cohere Rerank   │  ← cross-encoder 精排
+    │                  │     用原始 query（不是 expanded），取 top 5
+    └──────────────────┘
+            │
+            ▼ top 5 reranked chunks
+    ┌──────────────────┐
+    │  RAG Agent LLM   │  ← 生成最終回答
+    │  (+ chat_history) │
+    └──────────────────┘
+    ```
+4. Testing result:
+
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | NoSQL 的 CAP 理論探討分散式架構下的三項權衡議題：Consistency... | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `幫我找CAP理論在分散式架構下的應用。` 推薦三個 tags，三個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | 找尋CAP  | rag | CAP理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance (分區容忍)。這三者不可能兼顧，最多只能滿足其中兩種。... | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | CAP理論 | rag | 同上 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | 找尋cap理論筆記然後摘要理論的主張。 | rag | CAP理論主張，在分散式架構下，一致性（Consistency）、可用性（Availability）和分區容忍（Partitioning Tolerance）這三者不可能同時兼顧，最多只能同時滿足其中兩種。  | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。  |
+    | 1 | find the note about 'cap-theorem' | rag | CAP 理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning tolerance (分區容忍)。這三者不可能兼顧，之間只能滿足其中二種。 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `find the note about 'cap-theorem'` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+
+- Testing case 2 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 查詢MySQL的Window function | rag | MySQL 的 Window function 架構主要包含 window_function_name(expression) OVER ([partition_clause], [order_clause], [frame_clause]) [new_column_name]。 | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢MySQL的Window function...` 推薦4個 tags，4個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 2 | partition_clause 能否再講多一點  | rag | partition_clause 用於資料表的分區方式，分區完成後，MySQL 會針對每個分區分別套用 window function 進行運算。 | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢MySQL的Window function...` 推薦9個 tags，9個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 3 | 我想要知道他的範例程式碼 | rag | 以下是關於 MySQL Window Function 的範例程式碼：範例 1：使用 DENSE_RANK() 進行排名，並透過 CTE 過濾出每個部門薪水前三名的員工 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `MySQL Window function 的 partition_clause 的範例程式碼` 推薦9個 tags，9個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+
+- Testing case 3 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | Dev Container 是由微軟提供的 VS code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境，並讓 VS code IDE 直接在該環境中工作。 (來源 1)... | ⚠️ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `容器化技術` 推薦4個 tags，4個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案，但是回得有點狹隘，原因是資料庫對於 docker/k8s 這類通識型的的筆記量少於 dev container。 |
+    | 2 | 進一步詢問怎麼開啟 Dev Container 使用 Claude Code | rag | 根據目前的筆記內容，無法提供詳細的步驟說明如何在 Dev Container 中開啟並使用 Claude Code。... | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `進一步詢問怎麼開啟 Dev Container 使用 Claude Code` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 3 | 那繼續找 ，改找 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md這份筆記中是否有claude code 投用於 dev container的章節 | rag | 在「20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md」這份筆記中，有提到如何讓 AI 參考 OpenSpec 來實作專案功能，其中包含「啟動 Claude Code」的步驟，但沒有直接說明將 Claude Code 投用於 Dev Container 的章節...不過，在另一份筆記「20260105 在 VS code 啟動Dev Container.md」中，有提到「在 Dev Container 中任意使用 Claude Code」，並參照「使用 Dev container 建置 Node 環境然後使用 Claude Code」。 (來源 5) 這兩份筆記片段可能暗示了將 Claude Code 與 Dev Container 結合使用的可能性，但具體的實作步驟或專門的章節在您提供的片段中並未出現。 | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md 這份筆記中是否有關於 Claude Code 應用於 Dev Container 的章節` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，但最高只有 0.7，不過模型仍給出一些可能的探索空間，所以可再追問一次。 |
+    | 4 | 原來如此，那如果找「使用 Dev container 建置 Node 環境然後使用 Claude Code 」這個章節呢? 這章節裡面提到什麼全部列給我看 | rag | 根據您提供的筆記片段，關於「使用 Dev container 建置 Node 環境然後使用 Claude Code」這個主題，可以整理出以下資訊：<br>核心概念: 這部分內容是關於如何在 Dev Container 中建立 Node.js 開發環境，並能夠自由使用 Claude Code。 (來源 1, 來源 2)<br>參考資料: 提供了一個 GitHub 連結作為參考教材：https://github.com/deancourse/claude-code-docker-container-demo#。 (來源 3)<br>相關筆記: 提到了「20260105 在 VS code 啟動Dev Container」這份筆記。 (來源 1, 來源 2)...<br>目前提供的筆記片段中，沒有更詳細的步驟或內容說明具體如何在 Dev Container 中建置 Node.js 環境並使用 Claude Code，僅提及了這個主題、一個參考連結以及相關的筆記名稱。 | ✅ rag agent 這次回答得十分貼近筆記內文真實的面貌，測試通過。 |
