@@ -54,5 +54,5 @@ def local_path_to_gcs_blob(local_path: str) -> str:
         return local_path
     base = base.rstrip("/") + "/"
     if local_path.startswith(base):
-        return local_path[len(base):]
+        return local_path[len(base) :]
     return local_path

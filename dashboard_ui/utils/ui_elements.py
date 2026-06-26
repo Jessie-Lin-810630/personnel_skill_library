@@ -1,22 +1,24 @@
-import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
 import textwrap
-from utils.precomputing import (_normalize_radar_label)
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from utils.precomputing import _normalize_radar_label
 
 # ─────────────────────────────────────────
 # Plotly 色條
 # ─────────────────────────────────────────
-color_map = dict(BG="#0d1526",
-                 CARD_BG="#55575AD8",
-                 TEAL="#00d4c8",
-                 PURPLE="#9b6dff",
-                 PINK="#ff6dbd",
-                 FONT_CLR="#e0e8f8",
-                 ORANGE="#f97316",
-                 WHITE="#ffffff",
-                 LIGHTBLUE="#90c2ff")
+color_map = dict(
+    BG="#0d1526",
+    CARD_BG="#55575AD8",
+    TEAL="#00d4c8",
+    PURPLE="#9b6dff",
+    PINK="#ff6dbd",
+    FONT_CLR="#e0e8f8",
+    ORANGE="#f97316",
+    WHITE="#ffffff",
+    LIGHTBLUE="#90c2ff",
+)
 
 plotly_layout_base = dict(
     paper_bgcolor="rgba(0,0,0,0)",  # 代表完全透明 (Alpha = 0)
@@ -31,8 +33,9 @@ plotly_layout_base = dict(
 
 
 def _render_side_bar():
-    """Customize demonstrating style of the nevigation bar after switch off 
-        `showSidebarNavigation` in .streamlit/config.toml.
+    """Customize demonstrating style of the nevigation bar.
+
+    Applies after switching off `showSidebarNavigation` in .streamlit/config.toml.
     """
     st.sidebar.page_link("app.py", label="HOME", icon="🏠")
     st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
@@ -113,8 +116,8 @@ def _render_task_detail(title, labels, tasks_dict, chart_event, key_prefix):
 
 
 def make_radar(labels, values, color, title, tasks_dict):
-    """
-    tasks_dict: { label_str: [task1, task2, ...] }
+    """繪製雷達圖，tasks_dict 格式為 { label_str: [task1, task2, ...] }。
+
     Hover tooltip 顯示該軸向的代表任務清單。
     """
     # 組合 hover 文字（每個軸向）
@@ -134,19 +137,21 @@ def make_radar(labels, values, color, title, tasks_dict):
     customdata_closed = customdata + [customdata[0]]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        mode="lines+markers",
-        marker=dict(size=9, color=color),
-        r=values + [values[0]],
-        theta=labels + [labels[0]],
-        fill="toself",
-        fillcolor=color.replace(")", ", 0.25)").replace("rgb", "rgba"),
-        line=dict(color=color, width=2.5),
-        name=title,
-        text=hover_texts_closed,
-        customdata=customdata_closed,
-        hovertemplate="%{text}<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatterpolar(
+            mode="lines+markers",
+            marker=dict(size=9, color=color),
+            r=values + [values[0]],
+            theta=labels + [labels[0]],
+            fill="toself",
+            fillcolor=color.replace(")", ", 0.25)").replace("rgb", "rgba"),
+            line=dict(color=color, width=2.5),
+            name=title,
+            text=hover_texts_closed,
+            customdata=customdata_closed,
+            hovertemplate="%{text}<extra></extra>",
+        )
+    )
     radar_layout = {**plotly_layout_base, "margin": dict(l=70, r=70, t=30, b=20)}
     fig.update_layout(
         **radar_layout,
@@ -155,7 +160,8 @@ def make_radar(labels, values, color, title, tasks_dict):
             domain=dict(x=[0.18, 0.82], y=[0.08, 0.95]),
             bgcolor="rgba(255,255,255,0.03)",
             radialaxis=dict(
-                visible=True, range=[0, 5],
+                visible=True,
+                range=[0, 5],
                 tickvals=[1, 2, 3, 4, 5],
                 ticktext=["Lv1", "Lv2", "Lv3", "Lv4", "Lv5"],
                 tickfont=dict(size=10, color="#dfe1e6"),
