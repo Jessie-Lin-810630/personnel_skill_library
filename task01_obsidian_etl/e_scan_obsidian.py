@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from pathlib import Path
 
 import frontmatter  # 原本就有
@@ -144,7 +145,6 @@ def scan_vault(vault_path: str) -> list[dict]:
         try:
             post = frontmatter.load(str(md_file))  # open .md file & parsing the filename
             fm = post.metadata  # frontmatter dict
-
             tags_raw = fm.get("tags", [])
             # tags 可能是 list 或逗號分隔字串，統一轉成 list
             # 通常我自己是用list表示tags，這裡只是寫個預防偶發意外搞錯 yaml 寫法。
@@ -174,6 +174,50 @@ def scan_vault(vault_path: str) -> list[dict]:
 
     logger.info(f"解析完成，成功 {len(results)} 筆")
     return results
+
+
+def _infer_date(date_str: str | None):
+    if not date_str:
+        return None
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+        return date
+    except Exception as e:
+        logger.warning(f"筆記元數據日期轉換失敗，標記為None，原因:{e}")
+        return None
+
+
+def _infer_misposition_metadata(post: frontmatter.Post) -> dict[str, list | str]:
+    """當 frontmatter 漏寫進正文時的補救解析：掃描正文「頂端」的 key: value 區塊。
+
+    逐行掃描，碰到第一個真正的 Markdown 標題行（行首 '# '、'## '…）才停，
+    避免行內標籤 (#python) 被誤判成標題而截斷。用 str.partition 取代 split，
+    永遠回三段、只切第一個冒號，value 內含冒號（時間 10:30、URL）也不會出錯。
+    """
+    fm = {"tags": "", "date": "", "alias": []}
+    for raw_line in post.content.splitlines():
+        line = raw_line.strip().strip("-").strip()  # 容忍殘留的 '---' frontmatter 分隔線
+        if not line:
+            continue
+        # 真正的標題行 = '#' 後接空白或再一個 '#'；'#python' 這種行內標籤不算，不會誤停
+        if line.startswith("#") and (len(line) == 1 or line[1] in " #"):
+            break
+
+        if ":" in line:
+            feat_key, _, fea_value = line.partition(":")
+        elif "：" in line:
+            feat_key, _, fea_value = line.partition("：")
+        else:
+            continue
+
+        fea_value = fea_value.strip()
+        if "tag" in feat_key and fea_value:
+            fm["tags"] = fea_value.replace("[", "").replace("]", "")
+        elif "date" in feat_key and fea_value:
+            fm["date"] = fea_value
+        elif "alias" in feat_key and fea_value:
+            fm["alias"] = [t.strip() for t in fea_value.replace("[", "").replace("]", "").split(",")]
+    return fm
 
 
 def scan_vault_gs(bucket_name: str = "personal-vaults") -> list[dict]:
@@ -219,6 +263,8 @@ def scan_vault_gs(bucket_name: str = "personal-vaults") -> list[dict]:
             content_str = blob.download_as_text(encoding="utf-8")  # 回傳字串而不是bytes
             post = frontmatter.loads(content_str)  # loads() 接受字串
             fm = post.metadata
+            if not fm:
+                fm = _infer_misposition_metadata(post)
 
             # 以下邏輯與 scan_vault() 完全相同
             # tags 可能是 list 或逗號分隔字串，統一轉成 list
@@ -233,6 +279,7 @@ def scan_vault_gs(bucket_name: str = "personal-vaults") -> list[dict]:
             md_file_path = Path(blob.name)
             note_type = _infer_note_type(md_file_path, fm)
             topic = _infer_topic(tags, md_file_path.stem)
+            note_date = _infer_date(str(fm.get("date")))
 
             doc = {
                 "file_name": md_file_path.name,
@@ -240,7 +287,7 @@ def scan_vault_gs(bucket_name: str = "personal-vaults") -> list[dict]:
                 "note_type": note_type,
                 "tags": tags,
                 "alias": fm.get("alias", fm.get("aliases", "")),
-                "date": str(fm.get("date", "")),
+                "date": note_date,
                 "topic": topic,
                 "word_count": len(post.content.split()),
                 # CDC 增量 embedding 用：該 .md 的內容 md5，與其引用圖片的血緣＋md5
