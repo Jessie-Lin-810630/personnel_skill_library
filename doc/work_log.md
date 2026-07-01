@@ -1117,3 +1117,240 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | 2 | 進一步詢問怎麼開啟 Dev Container 使用 Claude Code | rag | 根據目前的筆記內容，無法提供詳細的步驟說明如何在 Dev Container 中開啟並使用 Claude Code。... | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `進一步詢問怎麼開啟 Dev Container 使用 Claude Code` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
     | 3 | 那繼續找 ，改找 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md這份筆記中是否有claude code 投用於 dev container的章節 | rag | 在「20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md」這份筆記中，有提到如何讓 AI 參考 OpenSpec 來實作專案功能，其中包含「啟動 Claude Code」的步驟，但沒有直接說明將 Claude Code 投用於 Dev Container 的章節...不過，在另一份筆記「20260105 在 VS code 啟動Dev Container.md」中，有提到「在 Dev Container 中任意使用 Claude Code」，並參照「使用 Dev container 建置 Node 環境然後使用 Claude Code」。 (來源 5) 這兩份筆記片段可能暗示了將 Claude Code 與 Dev Container 結合使用的可能性，但具體的實作步驟或專門的章節在您提供的片段中並未出現。 | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md 這份筆記中是否有關於 Claude Code 應用於 Dev Container 的章節` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，但最高只有 0.7，不過模型仍給出一些可能的探索空間，所以可再追問一次。 |
     | 4 | 原來如此，那如果找「使用 Dev container 建置 Node 環境然後使用 Claude Code 」這個章節呢? 這章節裡面提到什麼全部列給我看 | rag | 根據您提供的筆記片段，關於「使用 Dev container 建置 Node 環境然後使用 Claude Code」這個主題，可以整理出以下資訊：<br>核心概念: 這部分內容是關於如何在 Dev Container 中建立 Node.js 開發環境，並能夠自由使用 Claude Code。 (來源 1, 來源 2)<br>參考資料: 提供了一個 GitHub 連結作為參考教材：https://github.com/deancourse/claude-code-docker-container-demo#。 (來源 3)<br>相關筆記: 提到了「20260105 在 VS code 啟動Dev Container」這份筆記。 (來源 1, 來源 2)...<br>目前提供的筆記片段中，沒有更詳細的步驟或內容說明具體如何在 Dev Container 中建置 Node.js 環境並使用 Claude Code，僅提及了這個主題、一個參考連結以及相關的筆記名稱。 | ✅ rag agent 這次回答得十分貼近筆記內文真實的面貌，測試通過。 |
+
+## 20260701 Work log
+1. Initiate the task07 with lazy loading in the branch `feature/html-to-markdown` based on the requirement changes description in [task07_onenote_versioned_etl_hand_over_v2](./task07_onenote_versioned_etl_hand_over_v2.md). New goal in the task07 was "implementation of the incremental loads for the raw notes of OneNote app and keeping the historical versions available", and "open the LLM call for document enrichment being triggered on demand to reduce the waste of token".
+> In previous task07, the historical versions of note from OneNote cannot be accessible unless using GCS versioning control; However, the latter one could not be easily read and check directly on GCP console. So, the [variants](../task07_onenote_to_markdown_lazy_loading/) of original task07 was created in this branch.
+
+2. To meet the new goals, the schema of collections in this task07 was also revised to carefully make sure the data lineage and datalogs. New schema definition also referred to [task07_onenote_versioned_etl_hand_over_v2](./task07_onenote_versioned_etl_hand_over_v2.md).
+
+3. Start to implement the codes against the hand-over, the learning notes from this part was written as follows.
+
+- MSAL module
+    ```python
+    """Procedure:
+    1. 連線應用程式中心後，優先嘗試自動更新 (用 Refresh Token 換新的 Access Token)
+    2. 失敗時才提示登入（Device Flow）取得新 Token。
+    3. 最後存檔將 Token 持久化，以利下次能自動更新。
+    """
+    import msal
+    from pathlib import Path
+
+    def _build_msal_app() -> tuple[msal.PublicClientApplication,
+                                    msal.SerializableTokenCache]:
+        """建立可快取物件 cache 與 Microsoft 應用程式物件 app。不回傳 token。
+
+        此函式會自動檢查全域變數 CACHE_PATH (Path 物件) 是否存在，
+        若存在則會讀取並載入先前的快取紀錄。
+
+        **Notes**:
+            此函式本身不會將更新後的快取寫回硬碟，呼叫端需自行負責後續儲存。
+
+        Returns:
+            tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
+                傳回設定好的 MSAL 應用程式實例與 Token 快取物件。
+        """
+        # 建立可被序列化（也就是能轉成文字存成檔案）的快取物件 cache
+        cache = msal.SerializableTokenCache()
+        # 檢查指定的路徑（CACHE_PATH, Path 物件）下有沒有先前存好的快取檔案
+        # 本機測試可以考慮把 CACHE_PATH 建在 ~/.config/ 下
+        if CACHE_PATH.exists():
+            # 用 .deserialize() 把裡面的文字資料讀進記憶體的快取物件
+            cache.deserialize(CACHE_PATH.read_text())
+
+        # 建立 PublicClientApplication 物件
+        # CLIENT_ID 為應用程式註冊識別碼，AUTHORITY 為微軟的身分驗證中心網址
+        app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
+        return app, cache
+
+    def get_token() -> tuple[str,
+                            msal.PublicClientApplication,
+                            msal.SerializableTokenCache]:
+        """Acquire access token; triggers device-flow login when no cached token exists."""
+
+        # 1. 建立應用程式物件、快取物件
+        app, cache = _build_msal_app()
+
+        # 2. 從應用程式的快取中尋找是否有記錄著使用者帳號
+        accounts = app.get_accounts()
+
+        # 3. 嘗試在背景自動取得 Token。若有快取帳號且 Access Token 已過期，會自動用 Refresh Token 刷新。
+        result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
+
+        # 4. 如果無法在背景靜態取得 Token（無帳號或快取提前失效），則觸發互動式登入
+        if not result:
+
+            # 啟動裝置驗證流程 (Device Flow)
+            # initiate_device_flow() 跟 acquire_token_by_device_flow() 配合使用
+            flow = app.initiate_device_flow(scopes=SCOPES)
+            if "user_code" not in flow:
+                logger.error(f"Device flow initiation failed: {flow}")
+                sys.exit(1)
+            print("\n" + flow["message"])
+            print("等待瀏覽器授權完成...")
+            result = app.acquire_token_by_device_flow(flow)
+
+        # 5. 將最新的快取狀態序列化，寫回硬碟檔案中（確保下次能靜態自動更新）
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(cache.serialize())
+
+        # 6. 若最後仍未成功取得 access_token，終止程式並記錄錯誤訊息
+        if "access_token" not in result:
+            logger.error(f"Auth failed: {result.get('error_description', result)}")
+            sys.exit(1)
+
+        return result["access_token"], app, cache
+    ```
+    > 可思考的是，這2支函式每次執行都只能在地端 CLI 手動觸發跑，如果需要設計成 Web 服務讓使用者到彈出式瀏覽器打開做第一次登入授權，然後第二次開始都自動化啟動函式且更新 token，則這 2 個函式的授權策略與金鑰存放地點需要改動。
+    > 但是 OneNote Graph API 自 2025 年起已經不支持採用 Client Credentials flow 驗證機制的 app-only authentication。需由人做 delegated authentication。
+- Slide Window 演算法做 API Ratelimiter
+    ```python
+    """核心設計：
+    1. 閱讀官方說明確認 rate-limit rule
+    2. 設計 rate buffer 空間
+    3. 用 deque() 管理一段時間窗口內實際發生的請求時間點，失效的時間點不納入佇列
+    4. Sliding-window 計算要等多久來達到重置時間點。
+    5. 用 time.sleep() 暫停請求，直到跨過重置時間點。
+    """
+    class RateLimiter:
+    """Sliding-window (滑動窗口演算法) limiter enforcing OneNote API caps (120/min, 400/hour)."""
+
+    def __init__(self, per_minute: int = 115, per_hour: int = 380):
+        self.per_minute = per_minute
+        self.per_hour = per_hour
+        self._min_q = deque()  # 紀錄一分鐘內的請求時間
+        self._hour_q = deque()  # 紀錄一小時內的請求時間
+
+    def acquire(self):
+        while True:
+            now = time.time()
+            while self._min_q and now - self._min_q[0] > 60:
+                self._min_q.popleft()
+            while self._hour_q and now - self._hour_q[0] > 3600:
+                self._hour_q.popleft()
+            wait = 0
+            if len(self._min_q) >= self.per_minute:
+                # 預測下一次重置請求量的時間點，且扣除現在時間點，即可得到還要等多久才能觸達重置時間點。
+                wait = max(wait, self._min_q[0] + 60 - now)
+            if len(self._hour_q) >= self.per_hour:
+                wait = max(wait, self._hour_q[0] + 3600 - now)
+            if wait <= 0:
+                break
+            logger.info(f"[rate limiter] waiting {wait:.1f}s "
+                        f"(min={len(self._min_q)}/115, hour={len(self._hour_q)}/380)")
+            # time.sleep() 實際表現出來的睡眠時間長度會有浮點數誤差，+0.05 以確保迴圈下一輪一定可以走到 break
+            time.sleep(wait + 0.05)
+        now = time.time()
+        self._min_q.append(now)
+        self._hour_q.append(now)
+    ```
+- `api_get()` 的錯誤處理：從「先成功、再看 status_code」改為 try/except 分層 + timeout，並釐清 onenote_graph_api_logs 的 log 寫入責任
+    ```python
+    """學到的重點：
+    1. requests.get() 若沒設 timeout，遇到伺服器 hang 住不回應時會「無限等待」，
+       連 requests.exceptions.Timeout 都不會被拋出——所以 timeout 是讓後續捕捉能生效的前提。
+    2. 「有回應但狀態碼不好 (401/429/5xx)」和「連請求都送不出去 (連線逾時、DNS 失敗、
+       連線被 reset、endpoint 壞掉)」是兩種不同層次的錯誤，要分開接。
+    3. 4xx 裡除了 401/429 之外 (如 400/403/404) 屬於非暫時性錯誤，重試 10 次也不會變好，
+       應寫一筆 log 後直接往上拋，不浪費配額。
+    4. log 寫在哪一層要想清楚：同一次失敗如果內層 (api_get) 與外層 (download_notebooks)
+       都各寫一次 onenote_graph_api_logs，會產生重複列，且外層用 status_code=0 反而蓋掉內層真實的狀態碼。
+    """
+    ```
+    - **修改前**：先 `r = requests.get(...)` 拿到回應物件，再用一連串 `if r.status_code == 401 / 429 / >=500` 判斷。
+        ```python
+        r = requests.get(url, headers=headers, stream=binary)   # ← 沒有 timeout
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        if r.status_code == 401 and not token_refreshed: ...
+        if r.status_code == 429: ...
+        if r.status_code >= 500: ...
+        r.raise_for_status()
+        return r
+        ```
+        > 盲點：只要 `requests.get()` 這一行本身在傳輸層就噴例外 (Timeout / ConnectionError / DNS 解析失敗 / endpoint 壞掉)，程式根本走不到後面的 `r.status_code`，例外會直接穿透整個 `for attempt in range(1, 11)` 重試迴圈往上拋，**既不重試、也不留 log**。再加上沒設 timeout，伺服器 hang 住時會卡死。
+    - **修改後**：把 `requests.get()` 包進 `try`，並加 `timeout=REQUEST_TIMEOUT`；用 `r.raise_for_status()` 把非 2xx 統一轉成 `HTTPError`，再分兩層 `except` 接。
+        ```python
+        REQUEST_TIMEOUT = (10, 60)  # (connect, read) 秒
+
+        for attempt in range(1, 11):
+            try:
+                r = requests.get(url, headers=headers, stream=binary, timeout=REQUEST_TIMEOUT)
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                r.raise_for_status()          # 非 2xx → 拋 HTTPError
+                return r
+            except requests.exceptions.HTTPError as e:
+                r = e.response                # 從例外物件取回 response
+                status_code = r.status_code
+                if status_code == 401 and not token_refreshed: ...   # 換 token 重試
+                elif status_code == 429: ...                          # 退避重試
+                elif status_code >= 500: ...                          # 退避重試
+                else:                                                 # 其他 4xx
+                    log_api_call(..., status_code=status_code, ...)
+                    raise                     # 不重試，直接拋
+            except requests.exceptions.RequestException as e:
+                # Timeout / ConnectionError / DNS 失敗等傳輸層錯誤
+                log_api_call(..., status_code=0, error_msg=str(e))    # status_code=0 代表沒拿到回應
+                time.sleep(2 ** attempt * 5)  # 指數退避後重試
+                continue
+
+        # retry 耗盡：補一筆「收尾列」再拋 RuntimeError，讓 api_get 成為 onenote_graph_api_logs 的完整單一來源
+        log_api_call(..., status_code=0, error_msg=f"Request failed after 10 retries: {url}")
+        raise RuntimeError(f"Request failed after 10 retries: {url}")
+        ```
+        > 差異總結：(1) `HTTPError` 是 `RequestException` 的子類別，所以 `except HTTPError` 一定要放在 `except RequestException` 前面，否則傳輸層以外的 HTTP 錯誤會被前者攔截後就進不到分流；(2) 傳輸層錯誤時可能連 `r` 都沒有，log 用 `status_code=0` 標記「沒有回應」，並把 `latency_ms` 重算到出錯當下；(3) 只有 401/429/5xx 與傳輸層錯誤會 `continue` 重試，其餘 4xx 直接 `raise`。
+    - **踩到的坑：重複的 log**。`download_notebooks()` 呼叫 page content 那一支 `api_get()` 時用 `try/except Exception` 包住。原本 except 裡「又」寫了一筆 `log_api_call(..., status_code=0)`，於是一次 4xx 失敗會在 onenote_graph_api_logs 產生 **2 筆**：內層 api_get 已寫過正確 `status_code` (如 404)，外層再寫一筆 `status_code=0`，反而把真實狀態碼蓋掉、也誤導判讀。
+        ```python
+        # download_notebooks() 內：只保留 onenote_graph_api_logs (page 層狀態)，不再寫 onenote_graph_api_logs
+        try:
+            raw_html = api_get(..., page_id=page_id).text
+        except Exception as e:
+            # C1 request 層 log 已由 api_get() 內部 (逐次 attempt + 收尾列) 完整寫過，
+            # 這裡只記 onenote_graph_api_logs 的 page 層狀態，避免重複寫 C1、也避免 status_code=0 蓋掉真實碼
+            upsert_version_meta(page_id, dt,
+                                set_fields={..., "status": "fetched_failed", "error_msg": str(e)})
+            continue
+        ```
+        > 職責分離結論：**C1 (request 層稽核) 全歸 `api_get()`**——逐次 attempt 失敗 + 4xx/retry 耗盡的收尾列都在這寫；**C3 (page 層生命週期) 全歸 `download_notebooks()`**——只記 `status=fetched_failed`。這樣同一次失敗在 C1 不再重複，「這頁最終失敗」在 C1 (收尾列) 與 C3 (fetched_failed) 各有對應、可交叉追溯。
+- `request_id` 該由誰生成：注入 (往下傳) 而非回傳 (往上拿)
+    ```python
+    """學到的重點：
+    1. request_id 的語意是「同一個邏輯請求 (含其 retry) 共用一個 ID」，
+       用來把 C1 裡分散的多筆列 join 回同一次請求。
+    2. api_get() 內部的「失敗 attempt log」是在『執行中、還沒 return 之前』就寫進 C1 的，
+       所以 request_id 必須在『進入 api_get 的當下』就已確定——這是選型的決定性條件。
+    3. api_get() 會 raise (4xx / retry 耗盡 / token 刷新失敗)，raise 時沒有回傳值。
+    """
+    ```
+    - **情境**：`download_notebooks()` 在 `api_get()` 成功拿到 `raw_html` 後，還會在外面補寫「hash 未變動跳過」或「新版本已存」的結果列。這些結果列與 api_get 內部的失敗 attempt 列，本質上都是「同一次請求」的衍生，理應共用同一個 request_id 才能 join。
+    - **為何不用「回傳式」`return response, request_id` 讓外部 unpack**：
+        - (a) **raise 死穴**：api_get 一旦 raise 就沒有回傳值，呼叫端在**失敗時拿不到** request_id；但要關聯 log 最需要 ID 的時機恰恰是失敗時。要補救得自訂例外把 id 塞進 exception 帶出，machinery 變多、職責更糊。
+        - (b) **時序兜不起來**：失敗 attempt 列是 mid-call 當下就寫的，若等 api_get 結束才回傳 id，那些列早已用某個 id 寫進去、呼叫端事後才知道，順序上對不上 (何況失敗根本 return 不到)。
+        - (c) **破壞 fluent 串接**：現在各處是 `api_get(...).text` / `.json()` / `.content` 直接鏈；改回傳 tuple 後連 listing、圖片這些不在乎 id 的呼叫都被迫 `resp, rid = api_get(...)`。
+    - **採用「注入式」**：request_id 由呼叫端 (= 一個 page 的邏輯操作範圍) 先生成，再傳進 api_get 共用；api_get 只是**繼承**這個 context，不是它的擁有者。它預設仍自己生成 (`request_id = request_id or uuid.uuid4().hex[:12]`)，只有「結果要在 api_get 外面被補記 log」的 page content 呼叫才注入。
+        ```python
+        # api_get(): 省略則自生成；呼叫端有傳就共用
+        def api_get(..., request_id: str | None = None):
+            request_id = request_id or uuid.uuid4().hex[:12]
+
+        # download_notebooks(): page 層先生成，注入 content 呼叫，結果列共用同一 id
+        request_id = uuid.uuid4().hex[:12]
+        raw_html = api_get(..., page_id=page_id, request_id=request_id).text
+        ...
+        log_api_call(..., request_id=request_id, status="success", downloaded=False)  # 掛同一 id
+        ```
+        > 這就是 dependency injection 的味道：把「上下文」往下傳、而不是往上回傳。反面案例 (listing、`_store_images` 的圖片呼叫) 各自是獨立邏輯請求，本來就該有自己的 id，所以**不注入**、讓 api_get 自生成——「不同 url endpoint 不同 request_id」正是預期行為。
+
+- `PurePosixPath()` vs. `Path()` 解析 URI 字串
+    - Path() 下面有兩個子類別 PosixPath() 與 WindowsPath()，建立 Path() 物件時，會自動根據機器的文件系統來建立出 PosixPath 類別或 WindowsPath，像是 Mac 系統就會建成 PosixPath 類別:
+    ```python
+        from pathlib import Path
+        print(type(Path.home()))
+        # 在 Mac 上執行的話就會出現 <class 'pathlib.PosixPath'>
+    ```
+    - PurePosixPath() 則是一律用 Posix 規則來解析傳入的路徑字串，不會因為作業系統差異而解析不同。底層運作也不涉及任何文件檔案系統 (不會調用 resolve 等)，純粹是解析字串。當要解析的字串本身是帶有冒號之類的路徑字串時，例如: URI 字串，PurePosixPath() 不隨作業系統而有解析差異。
+    ```python
+        from pathlib import Path
+        Path("s3://bucket/key.jpg").suffix # 輸出 '.jpg'  在 Linux/Mac 上没问题，但在 Windows 可能會把 s3: 理解為盤符。
+        PurePosixPath("s3://bucket/key.jpg")  # 就沒有差異了，不論什麼系統都用 Posix 解析，而 URI 本身也是遵循 Posix 規則。
+    ```
+4. Established the ETL scripts of task07 with lazy loading, named as [`task07_onenote_to_markdown_lazy_loading`](../task07_onenote_to_markdown_lazy_loading/) to distinguish from the previous task07. Since T and L task would be triggered on demand in frontend UI, their python scripts will be delivered to the `branch feature/dashboard-ui` for integration.
