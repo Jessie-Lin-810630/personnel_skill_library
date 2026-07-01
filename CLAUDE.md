@@ -51,6 +51,35 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 - `l_*.py` — Load（寫入目的地；多數為 MongoDB，task07 同時寫本地 `.md` 檔與 MongoDB）
 - `main.py` — 串接 E → T → L 的入口
 
+### Module Docstring 規範
+
+每個 `.py`（`__init__.py` 除外）的 module docstring 一律採以下樣板：**中文寫摘要與執行流程，env variable / 依賴項說明用英文**。
+
+```python
+"""<一句中文摘要，緊貼三引號、同一行、以「。」結尾>。
+
+<中文執行流程，可多行；用箭頭串主要步驟>：
+取得 token → 遞迴列出 page → 下載 html → 比對 html_hash →
+有變動才以 dt= 分區寫入 GCS 並 upsert metadata。
+
+Usage:
+    poetry run python -m <package>.<module>
+
+Required .env keys:
+    ONENOTE_CLIENT_ID      Azure App Registration Client ID (Notes.Read scope).
+    ONENOTE_GCS_BUCKET     GCS bucket for the data lake.
+
+Optional .env keys:
+    ONENOTE_NOTEBOOK_IDS   JSON array of notebook IDs; interactive select if omitted.
+"""
+```
+
+規則（違反會被 ruff `D` / pre-commit 擋下，本專案 `convention = "google"`）：
+- **D212**：摘要必須緊貼 `"""` 同一行，不可 `"""` 後換行才寫摘要。
+- **D205**：摘要與後續段落之間必須空一行。
+- 中文摘要以「。」結尾即可（`D415` 已在 `pyproject.toml` 停用，因其誤判全形句號）；英文說明以「.」結尾。
+- `Usage` / `Required .env keys` / `Optional .env keys` 三個區塊**視情況取捨**：無 env 依賴或非執行入口的檔案可省略對應區塊。
+
 ### ETL Tasks 與輸出目的地
 
 | Task | 資料來源 | 輸出目的地 |
@@ -61,12 +90,19 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
 | task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
+| task07 變體（`task07_onenote_to_markdown_lazy_loading`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`） |
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
+> **task07 目前有兩個並存版本**：原版 `task07_onenote_to_markdown/`（本機磁碟輸出、ETL 主動逐頁呼叫 LLM）與變體 `task07_onenote_to_markdown_lazy_loading/`（GCS 資料湖多版本、ETL 只到 Bronze、Silver 純 on-demand）。兩者**尚未定案去留**——需先進入 `feature/dashboard-ui` 分支各自接上審查 UI 做遴選後，由使用者指定「依哪一份 summary 接續開發」，屆時才淘汰另一個。在使用者明確定奪前，兩個版本都保留、不得逕行刪除任一個。
+
 > **需要修改 task01–task06 時**，請先閱讀 [`doc/branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md) 了解各 task 的資料來源、ETL 邏輯與 MongoDB schema。
 >
-> **需要修改 task07 時**，請先閱讀 [`doc/branch_html_to_md_summary.md`](doc/branch_html_to_md_summary.md) 了解 OneNote Graph API 下載、Gemini LLM 轉換、三個 MongoDB collections 的設計與狀態流轉。
+> **需要修改 task07 時**，先確認要動的是哪一版：
+> - 原版 `task07_onenote_to_markdown/` → 讀 [`doc/branch_html_to_md_summary.md`](doc/branch_html_to_md_summary.md)（OneNote Graph API 下載、Gemini LLM 轉換、三個 MongoDB collections 的設計與狀態流轉）。
+> - 變體 `task07_onenote_to_markdown_lazy_loading/` → 讀 [`doc/branch_onenote_lazy_loading_summary.md`](doc/branch_onenote_lazy_loading_summary.md)（Bronze/Silver medallion 分層、`html_hash` 冪等快取、on-demand enrichment、LLM 服務級斷路器）。
+>
+> 兩版最終在 `feature/dashboard-ui` 分支接上審查 UI 遴選，由使用者依所選 summary 定奪保留哪一個 task07 後，另一版才淘汰。
 
 ### Dashboard UI（`dashboard_ui/`）
 
