@@ -1,3 +1,9 @@
+"""Load 步驟：把單頁 .md 寫入磁碟並 upsert MongoDB Collection 3。
+
+執行流程：將 page 的 Markdown 內容寫入本地 .md 檔 → 依寫檔結果映射 status →
+以 page_id 為鍵 upsert Collection 3（md_path、md_exported_at、note_type、status、error_msg）。
+"""
+
 from .utils.audit_log import upsert_page_metadata
 from pathlib import Path
 from loguru import logger

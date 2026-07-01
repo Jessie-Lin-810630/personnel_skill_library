@@ -1,3 +1,13 @@
+"""Transform 步驟：解析 HTML、呼叫 Gemini 重整為 Markdown，並附掛 tags/alias。
+
+執行流程：讀取每頁 HTML → 以 BeautifulSoup 解析 → 呼叫 Gemini（RESHAPE_MODEL）依
+response schema 產出 tags、alias 與重整後的 Markdown → 交由 l_save_markdown 存檔並記錄 LLM 呼叫。
+
+Required .env keys:
+    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI Gemini service account JSON.
+    GCP_PROJECT_ID                    GCP project ID for Vertex AI.
+"""
+
 from .utils.audit_log import log_llm_call, _now_utc, get_page_meta
 from .l_save_markdown import save_one_page
 import os
