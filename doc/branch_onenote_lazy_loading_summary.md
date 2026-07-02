@@ -1,6 +1,6 @@
 # Feature Branch: `feature/html-to-markdown` — Task07 v02（純 Lazy Loading 改版）開發執行成果摘要
 
-> **開發目標**：在原 task07 的基礎上，把 OneNote → Markdown pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：(1) **Bronze layer 保留同一份筆記的歷史版本**——以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）；(2) **省 multimodal LLM enrichment 的 token**——ETL 階段完全不呼叫 LLM，所有 enrichment 改為 UI **on-demand** 觸發，並以 `html_hash` 為冪等鍵建立 md 快取，使用者重複點擊同一版本不再產生額外 token。
+> **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：(1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）；(2) **省 multimodal LLM enrichment 的 token**：ETL 階段完全不呼叫 LLM，所有 enrichment 改為 UI **on-demand** 觸發，並以 `html_hash` 為冪等鍵建立 md 快取，使用者重複點擊同一版本不再產生額外 token。
 
 > **開發起始日期**：2026-07-01（於 `feature/html-to-markdown` 分支內另建 v02 變體資料夾）
 
@@ -8,7 +8,9 @@
 
 > **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB Atlas / GCS 資料湖 / Azure App Registration（公用用戶端，委派式驗證）/ Vertex AI Gemini
 
-> **與 v01 的關係**：v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出到本機磁碟、ETL 主動逐頁呼叫 LLM、C3 主鍵為 `page_id`（單版本）。v02 為**平行資料夾** `task07_onenote_to_markdown_lazy_loading/`，改為 GCS 資料湖多版本、ETL 只到 Bronze、Silver 純 on-demand，C3 主鍵改為 `(page_id, dt)`。兩者並存、不互相取代。
+> **與 v01 的差異**：
+> - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 主鍵為 `page_id`，一個筆記只存一個版本。
+> - v02 為**平行資料夾** `task07_onenote_to_markdown_lazy_loading/`，改存 onenote筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；僅有將輸出筆記做自動化 ETL (定義為 Bronze layer)；呼叫 LLM 生成 markdown 由純前端 on-demand 觸發 (Silver layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
 
 ---
 
@@ -66,6 +68,14 @@ processed-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.md      Sil
 
 `dt=` 分區為版本鍵：同一份筆記每次偵測到 `html_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。
 
+### 資料表 Collections
+
+存在 MongoDB Atlas Database `skill_dashboard`，總計 [3 份](#mongodb-collections):
+
+1. `onenote_graph_api_logs` (簡稱 `C1`): [Schema 定義見後方](#collection-1onenote_graph_api_logs)
+2. `multimodal_llm_enrichment_logs` (簡稱 `C2`): [Schema 定義見後方](#collection-2multimodal_llm_enrichment_logs)
+3. `onenote_note_metadata` (簡稱 `C3`): [Schema 定義見後方](#collection-3onenote_note_metadata主鍵--page_id--dt)
+
 ---
 
 ### ETL 設計重點
@@ -103,23 +113,24 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 
 #### 入口（`main.py`）
 
-- `run_task07_bronze_etl()` 只呼叫 `e_onenote_download()` 下載並記錄新版本數
-- **Silver enrichment 不在此執行**，由 UI on-demand 觸發
+- 函式 `run_task07_bronze_etl()` 只調用 `e_onenote_download()` 下載並記錄新版本數
+- **Silver Transform 與 Silver Load 不放在此執行**，由 UI on-demand 觸發
 
 ---
 
 ## MongoDB Collections
 > 總計三份 collections, C1, C2 and C3
-> 由 `utils/audit_log.py` 統一封裝。C1、C2 只追加；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
+> 由 `utils/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
 
-### Collection 1：`onenote_graph_api_logs`（只追加）
+### Collection 1：`onenote_graph_api_logs`
 
 每筆 = 一次 Graph API 請求嘗試。新增 `html_hash`、`html_path`、`downloaded` 三欄，讓「hash 未變動而跳過」也能留下 `downloaded=False` 的紀錄。
 
 ```json
 {
-  "page_id": "onenote-page-id",
-  "timestamp": "2026-07-01T10:00:00Z",
+  "_id" : ObjectId("6a44ce421996a609c157b692"),
+  "page_id": "0-c69860f9dd8507...",
+  "timestamp": ISODate("2026-07-01T10:00:00.012Z+0000"),
   "event_type": "onenote_api_download",
   "method": "GET",
   "api_endpoint": ".../pages/{id}/content",
@@ -128,7 +139,7 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
   "status": "success",
   "status_code": 200,
   "latency_ms": 312,
-  "html_hash": "sha256...",
+  "html_hash": "aa58a....",
   "html_path": "gs://onenote-vaults/raw-notes/lucky460721/NB/Sec/dt=2026-07-01/page.html",
   "downloaded": true,
   "environment": "local",
@@ -136,15 +147,16 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 }
 ```
 
-### Collection 2：`multimodal_llm_enrichment_logs`（只追加）
+### Collection 2：`multimodal_llm_enrichment_logs`
 
 每筆 = 一次 LLM enrichment 呼叫（含 cache hit）。用於 `count_regenerate()` 統計配額，也是 on-demand 省 token 的稽核依據——**沒人點的版本永遠不會出現在 C2**。
 
 ```json
 {
-  "page_id": "onenote-page-id",
+  "_id": ObjectId("6a4526abcf5f1da7406adebd"),
+  "page_id": "0-c69860f9dd8507...",
   "html_hash": "sha256...",
-  "timestamp": "2026-07-01T10:01:00Z",
+  "timestamp": ISODate("2026-07-01T10:00:00.012Z+0000"),
   "event_type": "llm_enrichment_call",
   "model": "gemini-2.5-flash",
   "cache_hit": false,
@@ -166,8 +178,10 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 每筆 = 一頁 OneNote 的**某一版本**完整生命週期，貫穿 Bronze → Silver → Gold 逐步 upsert。
 
 ```json
+// 下方 schema 欄位值為 null 將在 Silver layer 開發完成後更新。
 {
-  "page_id": "onenote-page-id",
+  "_id": ObjectId("6a4526abcf5f1da7406adebd"),
+  "page_id": "0-c69860f9dd8507...",
   "dt": "2026-07-01",
   "onenote_user_id": "lucky460721",
   "notebook": "工作筆記",
@@ -176,39 +190,41 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
   "html_hash": "sha256...",
   "html_md5": "base64...",
   "html_path": "gs://onenote-vaults/raw-notes/.../dt=2026-07-01/MongoDB 索引設計.html",
-  "html_downloaded_at": "2026-07-01T10:00:00Z",
+  "html_downloaded_at": ISODate("2026-07-01T08:22:26.093+0000"),
   "img_md5": ["base64..."],
   "img_path": ["gs://onenote-vaults/raw-notes/.../_images/res-abc.png"],
-  "md_path": null,
-  "md_md5": null,
-  "md_exported_at": null,
+  "md_path": null,  // Silver layer transform task 執行後更新
+  "md_md5": null,  // Silver layer transform task 執行後更新
+  "md_exported_at": null,  // Silver layer transform task 執行後更新
   "note_type": "knowledge_summary",
   "status": "bronze_stored",
-  "embedded_status": false,
+  "embedded_status": false,  // Silver layer transform task 執行後更新
   "error_msg": null,
-  "review_result": null,
-  "reviewed_by_role": null,
-  "reviewed_at": null,
-  "md_archive_path": null,
-  "img_archive_path": null,
-  "archived_at": null
+  "review_result": null,  // Silver layer transform task 執行後更新
+  "reviewed_by_role": null,  // Silver layer transform task 執行後更新
+  "reviewed_at": null,  // Silver layer transform task 執行後更新
+  "md_archive_path": null,  // Silver layer transform task 執行後更新
+  "img_archive_path": null,  // Silver layer transform task 執行後更新
+  "archived_at": null  // Silver layer transform task 執行後更新
 }
 ```
 
 #### Collection 3 狀態流轉
 
-| 情境 | `status` | `review_result` | `embedded_status` |
-|------|----------|-----------------|-------------------|
-| 新版下載完成、待 on-demand enrich | `bronze_stored` | null | false |
-| html 下載但寫入失敗 | `fetched_failed` | null | false |
-| LLM enrichment 進行中（on-demand 觸發） | `fetched` | null | false |
-| LLM 生成失敗 | `enrich_failed` | null | false |
-| 生成成功、等人審查 | `pending_review` | null | false |
-| 按通過、歸檔成功 | `archived` | `approved` | true |
-| 按通過、歸檔中途失敗 | `archive_failed` | `approved` | false |
-| 被退回 | `review_closed` | `rejected` | false |
+| 執行層 | 情境 | `status` | `review_result` | `embedded_status` |
+|-------|------|----------|-----------------|-------------------|
+| Bronze | 新版下載完成、待 on-demand enrich | `bronze_stored` | null | false |
+| Bronze | html 下載但寫入失敗 | `fetched_failed` | null | false |
+| Silver | LLM enrichment 進行中（on-demand 觸發） | `fetched` | null | false |
+| Silver | LLM 生成失敗 | `enrich_failed` | null | false |
+| Silver | 生成成功、等人審查 | `pending_review` | null | false |
+| Silver | 按通過、歸檔成功 | `archived` | `approved` | true |
+| Silver | 按通過、歸檔中途失敗 | `archive_failed` | `approved` | false |
+| Silver | 被退回 | `review_closed` | `rejected` | false |
 
-> 相較 v01：C3 主鍵由 `page_id` 改為 `(page_id, dt)`；新增 `html_hash`、`embedded_status`；不再使用 `superseded` 旗標——「同名筆記一次只認可一份」改由 Gold/UI 於 approve 時讀回 C3 判斷是否已有 `archived` 版本來控制。
+> 相較 v01：
+> - C3 主鍵由 `page_id` 改為 `(page_id, dt)`；
+> - 新增 `html_hash`、`embedded_status`；
 
 ---
 
@@ -294,7 +310,7 @@ poetry run python -m unittest tests.test_task07_onenote_to_markdown_v02 -v
 - [x] Unit tests 覆蓋各模組型別正確性與例外處理（37 個測試全數通過）
 
 **後續待開發（跨分支）**
-- [ ] Silver→Gold on-demand 觸發點與多版本對照審查頁（`feature/dashboard-ui`）——圓鈕切換同名筆記 1~5 版、點未處理版本即時生成 md、人工核可後 Archive
+- [ ] Silver → Gold on-demand 觸發點與多版本對照審查頁（`feature/dashboard-ui`）——圓鈕切換同名筆記 1~5 版、點未處理版本即時生成 md、人工核可後 Archive
 - [ ] Gold layer：最終清洗、歸檔（`archived`）與向量化（`embedded_status`）
 - [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver 服務隨 dashboard Cloud Run Service）
 
