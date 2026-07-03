@@ -1354,3 +1354,315 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         PurePosixPath("s3://bucket/key.jpg")  # 就沒有差異了，不論什麼系統都用 Posix 解析，而 URI 本身也是遵循 Posix 規則。
     ```
 4. Established the ETL scripts of task07 with lazy loading, named as [`task07_onenote_to_markdown_lazy_loading`](../task07_onenote_to_markdown_lazy_loading/) to distinguish from the previous task07. Since T and L task would be triggered on demand in frontend UI, their python scripts will be delivered to the `branch feature/dashboard-ui` for integration.
+
+## 20260702 Work log
+1. Switched to the branch feature/dashboard-ui and established the new page [`onenote_versioned_review`](../dashboard_ui/pages/onenote_versioned_review.py) using python streamlit module. The web page utilized [`silver_service`](../silver_service/app.py) endpoint using python flask module to realize the document enrichment by LLM call on-demand.
+
+2. Questions when practing 1. were noted down as follows. Some of them were not actually faced problems but predicted by myself.
+
+- What will happen if user logged in the web page and selected one of notes to started human review process but in the meanwhile the bronze layer task (downloading the latest html note from OneNote graph API) ran as scheduled? What is the impact on the collection `onenote_note_metadata` in MongoDB Atlas database when reading (to render frontend) and writting (to save metadata of new downloaded note)?
+
+- Timeout in regeneraton step may happen if the image size is larger.
+```bash
+2026-07-02 14:50:50.520 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:387 - [enrich failed] Untitled: No JSON in response: None
+
+2026-07-02 14:50:50.523 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-b43f9de7dc534591aefa34e1f6fb45b7!1-A5F7F5395D4FB9F!209, dt=2026-07-02, trigger=regenerate → enrich_failed
+```
+
+- Guard of LLM call quota work normally.
+```bash
+127.0.0.1 - - [02/Jul/2026 14:58:07] "POST /enrich HTTP/1.1" 200 -
+2026-07-02 15:00:23.330 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:305 - [regenerate] html_hash=e32f98dc 已達上限 2 次
+
+2026-07-02 15:00:23.330 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-0849dd0b84ac43de85e1707f7dcdaaf6!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+```
+
+- 針對"生技製劑筆記本/General Technical Knowledge/Saline"筆記測試:
+1. 下拉式清單點選該筆記後，頁面成功顯示這份筆記屬於哪個分區 (=哪一天透過 bronze 上傳到GCS的)，且顯示尚未LLM 生成筆記 ("🟠 未生成")。
+2. 接著網頁確實自動 calling LLM，成功生成後，四處地點的顯示結果如下：
+    - terminal logger
+    ```bash
+    2026-07-02 15:06:45.710 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+    2026-07-02 15:06:45.728 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（5726 tokens）
+
+    2026-07-02 15:06:45.729 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=on_demand → pending_review
+    ```
+
+    - Streamlit 網頁跳出 LLM 生成的 Markdown ，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        {
+        "_id" : ObjectId("6a460e05a007164164223750"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:06:45.605+0000"), // 確實是生成日的 UTC 時間
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "on_demand",
+        "status" : "success",
+        "latency_ms" : NumberInt(21107),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(948),
+        "total_tokens" : NumberInt(5726),
+        "environment" : "local",
+        "error_msg" : null
+    }
+    ```
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:06:45.711+0000"), // 確實排在 LLM 回應給 silver_serivce 後。
+        "md_md5" : "Whtn34q7R+K2s+mU+lhHVg==",  // 如實寫入
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+3. 故意點選 `regenerate` 觸發再生成後，上面提及的四個地點變成:
+
+    - terminal logger
+    ```bash
+        2026-07-02 15:33:33.463 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+        2026-07-02 15:33:33.482 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（6459 tokens）
+
+        2026-07-02 15:33:33.484 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+    - Streamlit 網頁自動刷新為 LLM 再版的 Markdown，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第一筆尚在
+        // 新增第二筆如下：
+        {
+        "_id" : ObjectId("6a46144da007164164223751"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:33:33.353+0000"),
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "regenerate",
+        "status" : "success",
+        "latency_ms" : NumberInt(22884),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(843),
+        "total_tokens" : NumberInt(6459),
+        "environment" : "local",
+        "error_msg" : null
+        }
+    ```
+
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:33:33.463+0000"), // 刷新了，上一版的被覆蓋
+        "md_md5" : "I04xzLBR9j0ryj9COqVdCQ==", // 刷新了，上一版的被覆蓋
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確，但也導致上一版的被覆蓋
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+
+4. 第二次故意點選 `regenerate` 觸發再生成後，上面提及的四個地點:
+
+    - terminal logger
+    ```bash
+    2026-07-02 15:47:16.594 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+    2026-07-02 15:47:16.610 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（6161 tokens）
+
+    2026-07-02 15:47:16.612 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+    - Streamlit 網頁自動刷新為 LLM 再版的 Markdown，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第一筆尚在
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第二筆尚在
+        // 新增第三筆如下：
+        {
+        "_id" : ObjectId("6a461784a007164164223752"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:47:16.488+0000"),
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "regenerate",
+        "status" : "success",
+        "latency_ms" : NumberInt(20751),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(982),
+        "total_tokens" : NumberInt(6161),
+        "environment" : "local",
+        "error_msg" : null
+        }
+    ```
+
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:47:16.595+0000"), // 刷新了，再次被覆蓋
+        "md_md5" : "teDegRXTRtwy/E55hLVrSA==", // 刷新了，上一版的被覆蓋
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確，但也導致上一版的被覆蓋
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+
+5. 第三次故意點選 `regenerate` ，跳出 `regenerate quota exceeded`，正確擋下 regenerate 需求。
+    - 故意切到其他筆記後再點選一次 `regenerate`，仍然正確地擋下 regenerate 需求。
+    - 重新整理頁面，再登入一次後，點選 `regenerate`，仍然正確地擋下 regenerate 需求。
+    - Terminal logger 輸出如下:
+
+    ```bash
+        2026-07-02 16:00:45.443 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:305 - [regenerate] html_hash=5d33e857 已達上限 2 次
+
+        2026-07-02 16:00:45.443 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+6. 針對初步測試總結似乎可以優化的地方：
+    - 大檔案的 `regenerate` 會 timeout 失敗
+    - LLM 生成時所套的 tags 是基於他的訓練資料來生成，長遠來看，客製化的向量資料庫是不是應該要餵給他 tags references set，以確保他可以為 enriched content 挑 tags 時，有一定的比例是符合企業文化的關鍵字、另外比例則是仰賴生成技術為企業潛在的資訊/知識冰山做紀錄。
+    > 跟 CLAUDE Opus 4.8 CHAT 討論後:
+    > 第一: rewriter model 的工作流目前是每一輪都要「看著整份 tag 清單」來挑推薦與重寫查詢語句。清單就是它的 per-query 輸入，如果 tags 基數爆炸，trade-off 就是每輪 token 變貴、嚴重者 attention 被稀釋，要從幾千個 tag (其中可能有一堆只出現一次的噪音) 裡挑出對的幾個，讓查詢品質掉。
+    > 第二: 語意漂移會稀釋 tag 本來要給的「集中效應」。 tag 之所以能拉高 recall,靠的是同一概念被一致地、重複地標記,把語意質量集中到一個點,讓改寫後的查詢向量能被拉進那一區。一旦 k8s / kubernetes / 容器編排 散成三個,這個「重複」就沒了,推薦哪個都像擲骰子,拉力變弱。注意這裡的傷害形態是recall miss(相關 chunk 沒被撈出來),而不是精度下降。
+
+    - streamlit app 執行時的 warning:
+        ```bash
+        `st.components.v1.html` will be removed after 2026-06-01.
+        2026-07-02 16:00:45.280 Please replace `st.components.v1.html` with `st.iframe`.
+        ```
+    - 前端頁面設計修改為：
+        - 圓點切換設計改成下拉式選單放在頁面旁邊，選單標題命名為`版號(dt)`，後面跟著提示可審閱版本數量，可審閱的版本數量意思是 `上次 archived"後到現在有多少份筆記是沒有被 rejected，現在可以開放審閱`。
+        - 歸檔後 tag 分佈、note_type 分佈 ()
+        - Gemini 輸出 markdown <筆記 title> <版本 dt=>
+
+    - 一份筆記某版本在 `rejected` 後，當下應該是`那一版本`的所有按鈕都失效，不能影響其他版本操作，而且再重新整理後不需要出現在前端了，此外，如果下次要在審閱同名筆記的其他版本 (=其他 dt)，則也應該要先過濾掉已經被判為 `rejected` 的筆記，避免使用者疑惑。
+    > 已經修正，現在效果為：
+    > reject 一個版本 → md 消失在頁面、其他版本的按鈕照常可被點。
+
+    -  以 page_id 與 dt 作為主鍵查詢一份筆記的所有版本，並在前端做審閱，approved 觸發歸檔後，`regenerate`、`approved`、`rejected` 確實都已經失效，但這裡可能會有一個不便點在於，如果該 page_id 後續還有加入新內容造成 html_hash 變了然後會被下載到 `/raw-notes/` bronze layer，但是前端由於是以 `page_id` 與 `dt` 來管理按鈕是否生效，所以這時候會遇到新版筆記要歸檔的話將會不可行、沒有按鈕可操作，也沒辦法生成 enriched document。建議改成 page_id 在歸檔後，如果後面的日子有內容變動，新出現的 dt 版的筆記可重回 Silver 層生成文件且進入 gold layer，所以前端在跟使用者互動之前應有篩選機制，如下：
+    ```MongoDB
+        db.onenote_note_metadata.aggregate([{$match: {page_id: "abc123",
+                                                    review_result: {$ne:"rejected"}
+                                                    }
+                                            },
+                                    {$addFields: {dt_n: {$convert: {input: "$dt",
+                                                                    to: "date",
+                                                                    onError: null,
+                                                                    onNull: null }}
+                                                  }
+                                    },
+                                     {$setWindowFields: {
+                                          sortBy: { archived_at: 1 },
+                                          output: {
+                                            lastArchivedAt: {
+                                                      $max: {$dateTrunc: {date: "$archived_at", unit: "day"}},
+                                                      window: { documents: ["unbounded", "unbounded"] }
+                                                      }
+                                                  }
+                                            }
+                                      },
+                                      { $match: { $expr: { $gte: ["$dt_n", "$lastArchivedAt"] } } },
+                                      { $project: {dt_n:0, lastArchivedAt:0}}
+                                   ]);
+    ```
+    > 已經修正，現在效果為：
+    > approve 某版歸檔後，對同 page_id 在 OneNote 加新內容 → 跑 bronze ETL 產生新 dt → 審查頁應出現該新版、可重走 Silver → Gold。
+
+    - t_enrich_html_to_markdown.py 的 convert_img_tag_to_md_str() 在改寫 alt 圖釋時如果 alt 本來就有 `]` 符號，會在 convert to markdown string 時無法正常顯示圖片，因為 markdown 的圖片連結語法是`![替代文字](圖片相對路徑)`，如果替代文字中有`]`，解析器會看到`![替代]文字](圖片相對路徑)`，多出來的`]`會造成圖片顯示失敗，因此，需要修改此函式，把 `]` 同 alt 取代掉。此外，經實測，`!`、`[`、`%`等特殊符號夾在替代文字中不會影響，所以不需要特別處理。
+    - 但即使如此，convert_img_tag_to_md_str() 執行後的 markdown string 會傳入 LLM call，這裡會有一個風險是，LLM 回傳的 enriched document `![](圖片相對路徑)` 有可能跟送進去之前的 markdown string 不太一致，例如："(0-02abd90`c`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)" 會變成 "(0-02abd90`b`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)"，而 `regenerate` 又換成另一張圖，例如："(0-4c3f19486a09451db`58f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209.png)"
+    變成了 "(0-4c3f19486a09451db`8f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209")"，此為模型隨機性，透過提示工程修改 system prompt 可以較為緩解。
+    > 除了修改 system prompt，也新增 `md_frontmatter` 欄位 在 metadata 中，追蹤有效圖片數量，作為評估資料品質的依據，未來可以搭配視覺化工具來擴展前端圖表。
+    > `md_frontmatter` 在 archive 與 reject 觸發後都會寫入，以評估好 md 與壞 md 的特性。(例如：哪類別的筆記容易被退件、歸檔的筆記是不是存在人工審查疏漏沒發現破圖)。

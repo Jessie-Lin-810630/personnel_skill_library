@@ -26,6 +26,14 @@ poetry shell
 # 執行 Streamlit dashboard（從專案根目錄）
 poetry run streamlit run dashboard_ui/app.py
 
+# 啟動 Silver enrich 端點（task07 lazy_loading 變體的 on-demand enrichment 服務，localhost:8002）
+# 供多版本對照審查頁（pages/onenote_versioned_review.py）on-demand 觸發；需與 dashboard 同時啟動
+poetry run python -m silver_service.app
+
+# 啟動 Gold/Archive 端點（task07 lazy_loading 變體的核可後歸檔服務，localhost:8003）
+# 審查頁 approve/reject 呼叫；與 dashboard、silver_service 同時啟動
+poetry run python -m gold_service.app
+
 # 執行個別 ETL task（從專案根目錄）
 poetry run python -m task01_obsidian_etl.main
 poetry run python -m task02_github_restapi_etl.main
@@ -90,7 +98,7 @@ Optional .env keys:
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
 | task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
-| task07 變體（`task07_onenote_to_markdown_lazy_loading`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`） |
+| task07 變體（`task07_onenote_to_markdown_lazy_loading`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Silver 由 `silver_service`（8002）on-demand 觸發、Gold 歸檔由 `gold_service`（8003）approve 觸發；向量化解耦至另一條 pipeline |
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
@@ -134,6 +142,8 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 - `ONENOTE_OUTPUT_DIR` — HTML / `.md` 輸出根目錄；實際寫入路徑為 `{ONENOTE_OUTPUT_DIR}/{帳號}/{筆記本}/{章節}/`（task07）
 - `ONENOTE_NOTEBOOK_IDS` — （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇（task07）
 - `ONENOTE_SELECTED_NOTEBOOKS` — （選填）逗號分隔的 notebook 名稱；省略則於終端機互動選擇（task07）
+- `SILVER_ENDPOINT_URL` — task07 lazy_loading 多版本審查頁呼叫 Silver enrich 端點的 URL（本機預設 `http://localhost:8002/enrich`）
+- `GOLD_ENDPOINT_URL` — task07 lazy_loading 多版本審查頁 approve/reject 呼叫 Gold/Archive 端點的 URL（本機預設 `http://localhost:8003/archive`）
 
 ## 部署架構（Phase II+）
 

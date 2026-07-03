@@ -164,25 +164,32 @@ gs://onenote-vaults/processed-notes/<onenote_user_id>/
 
 ---
 
-### Gold layer — 最終清洗、歸檔與向量化
+### Gold layer — 核可後歸檔
 
-> 將 silver 產出且經人工 `approved` 的 md 做最終格式清洗與向量化。
+> 將 silver 產出且經人工 `approved` 的 md 做最終格式歸檔
 
 - Hierarchy of blobs
 ```plaintext
-gs://<onenote_user_id>/from_onenote/archived_note
+gs://onenote-vaults/archived-notes/<onenote_user_id>/
 ├── <notebook_name>/
 │       └── <section_name>/
-│               ├── <page_name>.md          ⬅️ cleaned，從 processed_note 清洗複製
-│               └── _images/
-│                     └── image01.png        ⬅️ cleaned，從 processed_note 複製
+│               └── dt=<bronze執行日>/             # 注意是 bronze 的執行日，從 C3 可讀 dt 取得
+│                       ├── <page_name>.md.       # 從 processed_note 讀取後清理存入
+│                       └── _images/
+│                             └── image01.png     # 從 raw-notes 複製過來，每份筆記的 img 來自
+                                                  # 哪個 raw-notes/ 下的路徑，可以從 C3
+                                                  # 讀 img_path 得知。
 ```
 
 - Load 步驟:
-  1. cleaned md 與 png 存 `gs://<onenote_user_id>/from_onenote/archived_note/...`，各自有 md5。
-  2. 向量化資料存 MongoDB Atlas Vector Database collection `note_vectors_multimodal`。
-  3. **向量化亦以 hash 做冪等**：避免同內容重複 embed。
+  1. 當觸發 approved 後，將 md 與 md 引用的 png 從 `gs://onenote-vaults/processed-notes/<onenote_user_id>/...` 複製到 `gs://onenote-vaults/archived-notes/<onenote_user_id>/`，得到新 md5。
+  2. 前端顯示 `archive 完成` 後，歸檔的那份筆記以及比他舊的筆記 (dt 較早) 的所有 `approved`、`reject`、`regenerate` 按鈕立即失效。
+  3. 更新資料庫: 同 silver upsert 目標 (以 page_id & dt 為主鍵)，Upsert C3 `onenote_note_metadata`，更新欄位 archived_at、img_archive_path、md_archive_path、review_result、reviewed_at、reviewed_by_role、error_msg (若有例外)。
+  4. 歸檔後才讀取 `gs://onenote-vaults/archived-notes/<onenote_user_id>/` 那份剛剛歸檔的 md 檔，萃取 frontmatter 區的 metadata (tags、date、type、alias)。
+  5. 更新資料庫: 同 silver upsert 目標 (以 page_id & dt 為主鍵)，Upsert C3 `onenote_note_metadata`，更新欄位 tags、date、type、alias，[schema 見後方](#collection-3-簡稱-c3-onenote_note_metadata)
   > bronze 的 html 留存於各 `dt=` 分區、不自動刪除，保留期人工評估。
+  > 存在 archived-notes/ 下的資料 (md、png) 的向量化工作由另一條解耦的 pipeline (分支 feature/etl-pipeline task06) 開發後額外部署，避免初期模型調整頻繁但過度管道依賴性太黏而不易維護。
+  > 向量化以 hash 做冪等：避免同內容重複 embed。embed 存 MongoDB Atlas Vector Database collection `note_vectors_multimodal`。
 
 ---
 
@@ -263,6 +270,12 @@ gs://<onenote_user_id>/from_onenote/archived_note
 | img_archive_path   | Array<String> | N    | gold 歸檔 png 路徑集合 |
 | archived_at        | Date          | N    | 歸檔完成時間 |
 | error_msg          | String        | N    | C1/C2 未接住的其他關卡錯誤 |
+| md_frontmatter     | Object        | N    | archive & reject 後觸發寫入 md 的 frontmatter，作為筆記識別與追蹤資料品質用 |
+| md_frontmatter.tags | Array<String> | N    | 在 md frontmatter 欄位裡面，筆記的關鍵字清單 |
+| md_frontmatter.date | Date          | N    | md frontmatter 欄位裡面，原始筆記上傳到 html 時間 |
+| md_frontmatter.type | String        | N    | md frontmatter 欄位裡面，筆記的大類別 |
+| md_frontmatter.alias | Array<String> | N   | md frontmatter 欄位裡面，單篇筆記的別名 |
+| md_frontmatter.valid_img | int      | N    | md frontmatter 欄位裡面，筆記中能正常解析與渲染的圖片數量 |
 
 - Indexes
 ```javascript
@@ -289,7 +302,7 @@ gs://<onenote_user_id>/from_onenote/archived_note
 
 > approved ≠ archived，審核通過後仍視檔案系統運作分 archive_failed / archived，以 status 為最終判斷依據。
 >
-> 同名筆記「一次只認可一份」由 Gold/UI 控制：approve 某版後，UI 讀回 C3 發現該 page_id 已有 `archived` 版本，其餘版本歸檔按鈕即失效。不需要 `superseded` 旗標。
+> 同名筆記「一次只認可一份」由 Gold/UI 控制：approve 某版後，UI 讀回 C3 發現該 page_id 已有 `archived` 版本，其餘版本歸檔按鈕即失效。
 
 ### Example - 同名筆記在 week 1 ~ week 4 的變化歷程（純 Lazy Loading）
 > 下面用同一份筆記 `page_id=p1`、人類連續幾週沒登入、第 4 週才回來審查走一遍。`vx` 代表筆記版本、`Hx`代表筆記版本的 `html_hash`：v1=H1、v2=H2、v3=H3、v4=H4。C1、C2、C3 代表前述提到的 collection 1、2、3。
