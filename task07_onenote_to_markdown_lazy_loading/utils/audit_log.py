@@ -225,6 +225,20 @@ def find_cached_md_by_hash(html_hash: str) -> dict:
         return {}
 
 
+def get_latest_archived_version(page_id: str) -> dict:
+    """取該 page_id 最近一筆 status=archived 的版本（依 archived_at 由新到舊）；無則 {}。
+
+    供 archive_note 把關「已有更新內容歸檔時不覆寫舊版」，與前端 dt≥最後歸檔日的篩選一致。
+    """
+    try:
+        cursor = _get_db()[C3].find({"page_id": page_id, "status": "archived"}).sort("archived_at", -1).limit(1)
+        docs = list(cursor)
+        return docs[0] if docs else {}
+    except Exception as e:
+        logger.warning(f"[audit] Failed to query archived version ({page_id}): {e}")
+        return {}
+
+
 def upsert_version_meta(
     page_id: str,
     dt: str,
