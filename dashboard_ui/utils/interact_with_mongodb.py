@@ -206,6 +206,53 @@ def get_onenote_pages(db) -> list[dict]:
     return list(data)
 
 
+def get_onenote_versioned_pages(db) -> list[dict]:
+    """查詢 Collection onenote_note_metadata，回傳一篇筆記「目前哪些版本可審閱」。
+
+    同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為主鍵鎖定筆記版本。
+    以 aggregation 做兩層篩選，讓前端只看到需要審閱的版本：
+    - 濾掉 review_result=rejected 的版本（已退件，不再出現）。
+    - 每個 page_id 算出 lastArchivedAt = max(dateTrunc(archived_at, day))，只保留 dt≥最後歸檔日
+      的版本（尚無歸檔時全留）；使歸檔後的新內容（新 dt）能重新進入審閱，舊版自動退場。
+
+    Args:
+        db: pymongo Database 物件。
+
+    Returns:
+        list[dict]: 可審閱的 (page_id, dt) 版本，依 html_downloaded_at 由新到舊排序。
+    """
+    coll = db["onenote_note_metadata"]
+    pipeline = [
+        {"$match": {"review_result": {"$ne": "rejected"}}},
+        {"$addFields": {"dt_n": {"$convert": {"input": "$dt", "to": "date", "onError": None, "onNull": None}}}},
+        {
+            "$setWindowFields": {
+                "partitionBy": "$page_id",
+                "sortBy": {"archived_at": 1},
+                "output": {
+                    "lastArchivedAt": {
+                        "$max": {"$dateTrunc": {"date": "$archived_at", "unit": "day"}},
+                        "window": {"documents": ["unbounded", "unbounded"]},
+                    }
+                },
+            }
+        },
+        {
+            "$match": {
+                "$expr": {
+                    "$or": [
+                        {"$eq": ["$lastArchivedAt", None]},
+                        {"$gte": ["$dt_n", "$lastArchivedAt"]},
+                    ]
+                }
+            }
+        },
+        {"$sort": {"html_downloaded_at": -1}},
+        {"$project": {"_id": 0, "dt_n": 0, "lastArchivedAt": 0}},
+    ]
+    return list(coll.aggregate(pipeline))
+
+
 def get_problem_features(db, collection: str = "ccClub&leetcode_summary") -> dict:
     coll = db[collection]
     data = list(coll.find({}, {"_id": 0}).sort({"snapshot_date": -1}).limit(1))
