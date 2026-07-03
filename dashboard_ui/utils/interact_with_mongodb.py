@@ -185,27 +185,6 @@ def get_problem_kpi_donut(db, collection: str = "ccClub&leetcode_summary") -> di
         }
 
 
-def get_onenote_pages(db) -> list[dict]:
-    """查詢 onenote_page_metadata，回傳所有頁面的審核所需欄位。"""
-    coll = db["onenote_page_metadata"]
-    data = coll.find(
-        {},
-        {
-            "_id": 0,
-            "page_id": 1,
-            "notebook": 1,
-            "section": 1,
-            "page_title": 1,
-            "html_path": 1,
-            "md_path": 1,
-            "status": 1,
-            "review_result": 1,
-            "reviewed_at": 1,
-        },
-    )
-    return list(data)
-
-
 def get_onenote_versioned_pages(db) -> list[dict]:
     """查詢 Collection onenote_note_metadata，回傳一篇筆記「目前哪些版本可審閱」。
 

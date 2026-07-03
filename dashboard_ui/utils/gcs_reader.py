@@ -65,19 +65,3 @@ def read_image_base64_by_uri(uri: str) -> str:
     """以完整 gs:// URI 讀取圖片並回傳 base64 data URI。找不到回傳空字串。"""
     bucket, key = _split_gs_uri(uri)
     return read_bytes_as_base64(bucket, key)
-
-
-def local_path_to_gcs_blob(local_path: str) -> str:
-    """將本地絕對路徑轉為 GCS blob 路徑（strip ONENOTE_OUTPUT_DIR prefix）。
-
-    本地：/Users/foo/Desktop/OneNote-Export/lucky460721/NB/Sec/page.html
-    GCS：  lucky460721/NB/Sec/page.html
-    """
-    base = os.getenv("ONENOTE_OUTPUT_DIR", "")
-    if not base:
-        logger.warning("ONENOTE_OUTPUT_DIR 未設定，無法轉換 GCS blob 路徑")
-        return local_path
-    base = base.rstrip("/") + "/"
-    if local_path.startswith(base):
-        return local_path[len(base) :]
-    return local_path

@@ -1,3 +1,22 @@
+"""OneNote 審查頁：登入 hero + 多版本對照 + on-demand Silver enrichment + Gold 歸檔/退件。
+
+登入沿用原 onenote_review 的 hero 版面（帳密→角色）；登入後採 task07 lazy_loading 變體的多版本審查。
+執行流程：讀 onenote_note_metadata（唯讀）依 page_id 分組 → 三層下拉選頁 →
+以 dt= 圓鈕切換同名筆記多版本 → 左渲染 bronze html、右渲染 silver md（皆自 gs:// URI）→
+選到 md_path=null 版本時 POST 呼叫 Silver enrich 端點即時生成 md、已生成則直接讀 GCS（cache hit）。
+含 regenerate（trigger=regenerate、受 quota）與 approve/reject 佔位按鈕（Gold 後端下一階段接）。
+
+Required .env keys:
+    MONGO_ALTAS_URI        MongoDB Atlas connection URI.
+    MONGO_DB_NAME          MongoDB database name.
+    SILVER_ENDPOINT_URL    Silver enrich Flask endpoint URL (e.g. http://localhost:8002/enrich).
+
+Optional .env keys:
+    ROLE_ML_USERNAME / ROLE_ML_PASSWORD          Demo login credential for ML/DL Engineer.
+    ROLE_OWNER_USERNAME / ROLE_OWNER_PASSWORD    Demo login credential for Note Owner.
+    ROLE_SENIOR_USERNAME / ROLE_SENIOR_PASSWORD  Demo login credential for Dept. Senior Specialist.
+"""
+
 import os
 import re
 
@@ -6,25 +25,19 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
-from utils.gcs_reader import (
-    SRC_BUCKET,
-    local_path_to_gcs_blob,
-    read_bytes_as_base64,
-    read_text,
-)
-from utils.interact_with_mongodb import get_db_atlas, get_onenote_pages
+from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
+from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages
 from utils.ui_elements import _render_side_bar, color_map
 
 load_dotenv()
 
 PLACEHOLDER = "請選擇"
+SILVER_URL = os.getenv("SILVER_ENDPOINT_URL", "")
+GOLD_URL = os.getenv("GOLD_ENDPOINT_URL", "")
 
-# ─────────────────────────────────────────
-# 頁面設定
-# ─────────────────────────────────────────
 st.set_page_config(
-    page_title="AI 協作知識平台: OneNote to Markdown Review",
-    page_icon="🔍",
+    page_title="AI 協作知識平台: OneNote 多版本對照審查",
+    page_icon="🗂️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -40,7 +53,7 @@ st.markdown(
 )
 
 # ─────────────────────────────────────────
-# Demo 登入 gate（帳密決定角色）
+# Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）
 # ─────────────────────────────────────────
 CREDENTIALS = [
     (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
@@ -205,32 +218,25 @@ if not st.session_state.get("authenticated"):
     st.stop()
 
 # ─────────────────────────────────────────
-# 標題
+# 標題 + 角色 + 登出
 # ─────────────────────────────────────────
 st.markdown(
     f"""
 <div style="
     background: linear-gradient(135deg, #0d1526 0%, #1a2a4a 100%);
-    border-radius: 16px;
-    padding: 2rem 3rem;
-    margin-bottom: 1.2rem;
-    border: 1px solid #2a3550;
-    text-align: center;
-">
+    border-radius: 16px; padding: 2rem 3rem; margin-bottom: 1.2rem;
+    border: 1px solid #2a3550; text-align: center;">
     <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
-        🔍 OneNote Review
+        🗂️ OneNote 多版本對照審查
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
-        HTML vs Markdown 並排對照 — 審核 Gemini LLM 輸出品質
+        切換同名筆記各 dt= 版本 — 點到未處理版本即時 on-demand 生成 Markdown
     </p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-# ─────────────────────────────────────────
-# 登入角色顯示 + 登出按鈕
-# ─────────────────────────────────────────
 role_col, logout_col = st.columns([8, 1])
 with role_col:
     st.markdown(f"目前角色：**{st.session_state.role}**")
@@ -242,148 +248,164 @@ with logout_col:
 
 st.divider()
 
-
 # ─────────────────────────────────────────
-# 載入 MongoDB 頁面清單
+# 載入多版本清單
 # ─────────────────────────────────────────
 
 
 @st.cache_data(ttl=60)
-def _load_pages() -> list[dict]:
+def _load_versions() -> list[dict]:
     db = get_db_atlas()
-    return get_onenote_pages(db)
+    return get_onenote_versioned_pages(db)
 
 
-pages = _load_pages()
+versions_all = _load_versions()
 
-if not pages:
-    st.warning("尚無 OneNote 頁面資料，請先執行 task07 pipeline。")
+if not versions_all:
+    st.warning("尚無 Bronze 資料，請先執行 task07 lazy_loading Bronze ETL。")
     st.stop()
 
 # ─────────────────────────────────────────
-# 三層下拉選擇器（key 連動：換筆記本時章節/頁面自動重置）
+# 三層下拉選定一頁筆記（notebook → section → page_title）
 # ─────────────────────────────────────────
-notebooks_opts = [PLACEHOLDER] + sorted({p["notebook"] for p in pages if p.get("notebook")})
+notebooks_opts = [PLACEHOLDER] + sorted({v["notebook"] for v in versions_all if v.get("notebook")})
 col_nb, col_sec, col_pg = st.columns(3)
 
 with col_nb:
-    selected_nb = st.selectbox("📓 筆記本", notebooks_opts, key="sel_notebook")
+    selected_nb = st.selectbox("📓 筆記本", notebooks_opts, key="vr_notebook")
 
 sections_raw = (
-    sorted({p["section"] for p in pages if p.get("notebook") == selected_nb and p.get("section")})
+    sorted({v["section"] for v in versions_all if v.get("notebook") == selected_nb and v.get("section")})
     if selected_nb != PLACEHOLDER
     else []
 )
-sections_opts = [PLACEHOLDER] + sections_raw
-
 with col_sec:
-    # key 含 selected_nb：換筆記本時 widget key 改變，自動回到 index 0（請選擇）
-    selected_sec = st.selectbox("📂 章節", sections_opts, key=f"sel_section_{selected_nb}")
+    selected_sec = st.selectbox("📂 章節", [PLACEHOLDER] + sections_raw, key=f"vr_section_{selected_nb}")
 
-page_options_raw = (
-    [p for p in pages if p.get("notebook") == selected_nb and p.get("section") == selected_sec]
+titles_raw = (
+    sorted(
+        {
+            v["page_title"]
+            for v in versions_all
+            if v.get("notebook") == selected_nb and v.get("section") == selected_sec and v.get("page_title")
+        }
+    )
     if selected_sec != PLACEHOLDER
     else []
 )
-page_titles_raw = [p.get("page_title", p.get("page_id", "未知")) for p in page_options_raw]
-page_opts_display = [PLACEHOLDER] + page_titles_raw
-
 with col_pg:
-    # key 含 selected_nb + selected_sec：換任一層時頁面下拉自動重置
-    selected_pg_label = st.selectbox(
-        "📄 頁面",
-        page_opts_display,
-        key=f"sel_page_{selected_nb}_{selected_sec}",
-    )
+    selected_title = st.selectbox("📄 頁面", [PLACEHOLDER] + titles_raw, key=f"vr_page_{selected_nb}_{selected_sec}")
 
-# ─────────────────────────────────────────
-# 未選滿 → 留白狀態，只顯示標題區
-# ─────────────────────────────────────────
-all_selected = selected_nb != PLACEHOLDER and selected_sec != PLACEHOLDER and selected_pg_label != PLACEHOLDER
-
+all_selected = selected_nb != PLACEHOLDER and selected_sec != PLACEHOLDER and selected_title != PLACEHOLDER
 if not all_selected:
-    st.markdown("")
-    col_html, col_md = st.columns(2)
-    with col_html:
-        st.markdown("#### 原始 HTML")
-    with col_md:
-        st.markdown("#### Gemini 輸出 Markdown")
+    st.info("請由上方依序選擇筆記本 / 章節 / 頁面，以載入該頁的多版本對照。")
     st.stop()
 
-page = page_options_raw[page_titles_raw.index(selected_pg_label)]
-page_id = page.get("page_id", "")
-status = page.get("status", "")
-review_result = page.get("review_result")
-reviewed_at = page.get("reviewed_at")
-
 # ─────────────────────────────────────────
-# 狀態標籤
+# 該頁的所有 dt= 版本（依 html_downloaded_at 由新到舊；圓鈕切換）
 # ─────────────────────────────────────────
-STATUS_STYLE = {
-    "pending_review": ("🟠 待審核", "#f97316", "#1a0f00"),
-    "archived": ("✅ 已歸檔", "#22c55e", "#001a0a"),
-    "summarized failed": ("❌ LLM 失敗", "#ef4444", "#1a0000"),
-    "saved failed": ("❌ 存檔失敗", "#ef4444", "#1a0000"),
-}
-label_text, label_fg, label_bg = STATUS_STYLE.get(status, ("⬜ " + status, "#94a3b8", "#1e293b"))
+page_versions = [
+    v
+    for v in versions_all
+    if v.get("notebook") == selected_nb and v.get("section") == selected_sec and v.get("page_title") == selected_title
+]
+page_versions.sort(key=lambda v: str(v.get("html_downloaded_at", "")), reverse=True)
 
-st.markdown(
-    f"""
-<div style="
-    display:inline-block;
-    background:{label_bg};
-    color:{label_fg};
-    border:1px solid {label_fg};
-    border-radius:8px;
-    padding:0.3rem 1rem;
-    font-weight:700;
-    font-size:0.95rem;
-    margin-bottom:0.5rem;
-">
-    {label_text}
-</div>
-""",
-    unsafe_allow_html=True,
+
+def _version_label(v: dict) -> str:
+    """圓鈕顯示文字：dt + 下載時間 + 是否已生成 md。"""
+    dt = v.get("dt", "?")
+    ts = str(v.get("html_downloaded_at", ""))[:19]
+    mark = "✅ 已生成" if v.get("md_path") else "🟠 未生成"
+    return f"dt={dt}　({ts})　{mark}"
+
+
+selected_idx = st.radio(
+    "🕘 版本（同名筆記的各 dt= 分區）",
+    options=list(range(len(page_versions))),
+    format_func=lambda i: _version_label(page_versions[i]),
+    key=f"vr_ver_{selected_nb}_{selected_sec}_{selected_title}",
 )
+version = page_versions[selected_idx]
+page_id = version.get("page_id", "")
+dt = version.get("dt", "")
+html_uri = version.get("html_path", "")
+md_uri = version.get("md_path")
+status = version.get("status", "")
 
-if status == "archived":
-    st.success(f"此頁面已於 {reviewed_at} 歸檔（{review_result}）。")
+# 逐版本判斷：只有選中版本自己已歸檔時，該版唯讀、按鈕失效（不影響其他版本）。
+# rejected 版本已由 get_onenote_versioned_pages 過濾掉、不會出現在此。
+is_version_archived = status == "archived"
+if is_version_archived:
+    st.success(
+        f"✅ 此版本已於 {str(version.get('archived_at', ''))[:19]} 歸檔"
+        f"（{version.get('reviewed_by_role', '')}），唯讀。"
+    )
 
 st.divider()
 
 # ─────────────────────────────────────────
-# 圖片 base64 替換工具
+# on-demand 觸發 Silver 端點
 # ─────────────────────────────────────────
+if "enrich_attempted" not in st.session_state:
+    st.session_state.enrich_attempted = {}  # {(page_id, dt): error_msg or None}
 
 
-def _replace_images_in_html(html: str, section_blob_prefix: str) -> str:
-    def replacer(m):
-        blob = f"{section_blob_prefix}/_images/{m.group(1)}"
-        data_uri = read_bytes_as_base64(SRC_BUCKET, blob)
-        return f'src="{data_uri}"' if data_uri else m.group(0)
+def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
+    """POST Silver enrich 端點，回傳 (result_dict, error_msg)。"""
+    if not SILVER_URL:
+        return None, "SILVER_ENDPOINT_URL 未設定，無法呼叫 Silver 端點。"
+    try:
+        resp = requests.post(
+            SILVER_URL,
+            json={"page_id": page_id, "dt": dt, "trigger": trigger},
+            timeout=180,
+        )
+    except requests.exceptions.ReadTimeout:
+        return None, "Silver 端點回應逾時（LLM 生成耗時，請稍後重新整理確認）。"
+    except requests.exceptions.ConnectionError:
+        return None, "無法連線至 Silver 端點，請確認服務是否啟動。"
+    except Exception as e:  # noqa: BLE001
+        return None, f"呼叫 Silver 端點時發生錯誤：{e}"
 
-    return re.sub(r'src="_images/([^"]+)"', replacer, html)
+    data = resp.json() if resp.content else {}
+    if resp.status_code == 404:
+        return None, data.get("error", f"查無版本 (page_id={page_id}, dt={dt})")
+    if not resp.ok:
+        return None, data.get("error", f"端點回應錯誤：{resp.status_code}")
+    return data, None
 
 
-def _replace_images_in_md(md: str, section_blob_prefix: str) -> str:
-    def replacer(m):
-        blob = f"{section_blob_prefix}/_images/{m.group(2)}"
-        data_uri = read_bytes_as_base64(SRC_BUCKET, blob)
-        return f"![{m.group(1)}]({data_uri})" if data_uri else m.group(0)
+def _trigger(trigger: str) -> None:
+    """呼叫端點、依結果更新 UI 狀態；成功產出 md 則清快取重載。"""
+    with st.spinner("Silver enrichment 進行中（首次生成需呼叫 LLM）…"):
+        data, err = _call_silver(trigger)
+    if err:
+        st.session_state.enrich_attempted[(page_id, dt)] = err
+        st.error(err)
+        return
+    if data.get("circuit_open"):
+        msg = "Silver 服務暫停中（LLM 連續失敗觸發斷路器），請稍後再試。"
+        st.session_state.enrich_attempted[(page_id, dt)] = msg
+        st.warning(msg)
+        return
+    if data.get("error"):  # 例如 regenerate quota exceeded
+        st.warning(data["error"])
+        return
+    # 成功產出（cache hit / miss 皆有 md_path）→ 清快取重載，讓右側渲染新 md
+    st.session_state.enrich_attempted.pop((page_id, dt), None)
+    _load_versions.clear()
+    st.rerun()
 
-    return re.sub(r"!\[([^\]]*)\]\(_images/([^)]+)\)", replacer, md)
 
+# md_path 為 null 且本 session 尚未嘗試過 → 首次點到即 on-demand 觸發
+# （選中版本自己已歸檔則不燒 LLM；新內容版本仍可正常生成）
+if not md_uri and not is_version_archived and (page_id, dt) not in st.session_state.enrich_attempted:
+    _trigger("on_demand")
 
 # ─────────────────────────────────────────
-# GCS blob 路徑
+# 左右對照渲染（白底）
 # ─────────────────────────────────────────
-html_local = page.get("html_path", "")
-md_local = page.get("md_path", "")
-html_blob = local_path_to_gcs_blob(html_local) if html_local else ""
-md_blob = local_path_to_gcs_blob(md_local) if md_local else ""
-section_blob_prefix = "/".join(html_blob.split("/")[:-1]) if html_blob else ""
-
-# 白底渲染用的 wrapper
 _WHITE_FRAME = """
 <html><head><meta charset="utf-8">
 <style>
@@ -397,81 +419,107 @@ _WHITE_FRAME = """
 </head><body>{content}</body></html>
 """
 
-# ─────────────────────────────────────────
-# 並排渲染（白底）
-# ─────────────────────────────────────────
+# 圖片實體存在 bronze raw-notes 的 dt= 分區 _images/ 下；html 與 md 皆以此為準
+img_prefix = html_uri.rsplit("/", 1)[0] if html_uri else ""
+
+
+def _replace_images_in_html(html: str) -> str:
+    def repl(m):
+        data_uri = read_image_base64_by_uri(f"{img_prefix}/_images/{m.group(1)}")
+        return f'src="{data_uri}"' if data_uri else m.group(0)
+
+    return re.sub(r'src="_images/([^"]+)"', repl, html)
+
+
+def _replace_images_in_md(md: str) -> str:
+    def repl(m):
+        data_uri = read_image_base64_by_uri(f"{img_prefix}/_images/{m.group(2)}")
+        return f"![{m.group(1)}]({data_uri})" if data_uri else m.group(0)
+
+    return re.sub(r"!\[([^\]]*)\]\(_images/([^)]+)\)", repl, md)
+
+
 col_html, col_md = st.columns(2)
 
 with col_html:
-    st.markdown(f"#### 原始 HTML　`{page.get('page_title', '')}`")
-    if html_blob:
-        raw_html = read_text(SRC_BUCKET, html_blob)
+    st.markdown(f"#### 原始 HTML　`{selected_title}`")
+    if html_uri:
+        raw_html = read_text_by_uri(html_uri)
         if raw_html:
-            rendered_html = _replace_images_in_html(raw_html, section_blob_prefix)
-            components.html(_WHITE_FRAME.format(content=rendered_html), height=700, scrolling=True)
+            components.html(_WHITE_FRAME.format(content=_replace_images_in_html(raw_html)), height=700, scrolling=True)
         else:
             st.warning("GCS 上找不到 HTML 檔案。")
     else:
-        st.info("此頁面沒有記錄 html_path。")
+        st.info("此版本沒有記錄 html_path。")
 
 with col_md:
-    st.markdown(f"#### Gemini 輸出 Markdown　`{page.get('page_title', '')}`")
-    if md_blob:
-        raw_md = read_text(SRC_BUCKET, md_blob)
+    st.markdown(f"#### Gemini 輸出 Markdown　`{selected_title}`")
+    if md_uri:
+        raw_md = read_text_by_uri(md_uri)
         if raw_md:
-            replaced_md = _replace_images_in_md(raw_md, section_blob_prefix)
-            md_as_html = md_lib.markdown(
-                replaced_md,
-                extensions=["fenced_code", "tables", "nl2br"],
-            )
+            md_as_html = md_lib.markdown(_replace_images_in_md(raw_md), extensions=["fenced_code", "tables", "nl2br"])
             components.html(_WHITE_FRAME.format(content=md_as_html), height=700, scrolling=True)
         else:
             st.warning("GCS 上找不到 MD 檔案。")
     else:
-        st.info("此頁面尚無 md_path（可能 LLM 尚未執行）。")
+        attempted_err = st.session_state.enrich_attempted.get((page_id, dt))
+        if attempted_err:
+            st.error(f"此版本尚未生成 Markdown：{attempted_err}")
+            if st.button("🔄 重試生成", key="vr_retry"):
+                st.session_state.enrich_attempted.pop((page_id, dt), None)
+                st.rerun()
+        else:
+            st.info("此版本尚無 md_path。")
 
 st.divider()
 
 # ─────────────────────────────────────────
-# Approve / Reject 按鈕
+# 審查操作按鈕（regenerate 走 Silver；approve/reject 走 Gold 端點）
 # ─────────────────────────────────────────
-ARCHIVE_URL = os.getenv("ARCHIVE_ENDPOINT_URL", "")
-is_archived = status == "archived"
-
-st.markdown("#### 審核確認")
-if is_archived:
-    st.info("此頁面已歸檔，按鈕已停用。")
-
-btn_col1, btn_col2, _ = st.columns([1, 1, 4])
 
 
-def _call_archive(action: str):
-    if not ARCHIVE_URL:
-        st.error("ARCHIVE_ENDPOINT_URL 未設定，無法呼叫 Archive 端點。")
+def _call_gold(action: str) -> None:
+    """POST Gold 端點執行 approve 歸檔 / reject 標記；成功清快取重載。"""
+    if not GOLD_URL:
+        st.error("GOLD_ENDPOINT_URL 未設定，無法呼叫 Gold 端點。")
         return
-    try:
-        resp = requests.post(
-            ARCHIVE_URL,
-            json={"page_id": page_id, "role": st.session_state.role, "action": action},
-            timeout=120,
-        )
-        if resp.ok:
-            _load_pages.clear()
-            st.rerun()
-        else:
-            st.error(f"端點回應錯誤：{resp.status_code} — {resp.text[:200]}")
-    except requests.exceptions.ReadTimeout:
-        st.error("Archive 端點回應逾時（GCS 操作耗時，請稍後重新整理頁面確認是否已歸檔）。")
-    except requests.exceptions.ConnectionError:
-        st.error("無法連線至 Archive 端點，請確認服務是否啟動。")
-    except Exception as e:
-        st.error(f"呼叫 Archive 端點時發生錯誤：{e}")
+    with st.spinner("Gold 歸檔處理中…"):
+        try:
+            resp = requests.post(
+                GOLD_URL,
+                json={"page_id": page_id, "dt": dt, "role": st.session_state.role, "action": action},
+                timeout=180,
+            )
+        except requests.exceptions.ReadTimeout:
+            st.error("Gold 端點回應逾時（GCS 複製耗時，請稍後重新整理確認是否已歸檔）。")
+            return
+        except requests.exceptions.ConnectionError:
+            st.error("無法連線至 Gold 端點，請確認服務是否啟動。")
+            return
+        except Exception as e:  # noqa: BLE001
+            st.error(f"呼叫 Gold 端點時發生錯誤：{e}")
+            return
+
+    data = resp.json() if resp.content else {}
+    if not resp.ok:
+        st.error(data.get("error", f"端點回應錯誤：{resp.status_code}"))
+        return
+    _load_versions.clear()
+    st.rerun()
 
 
-with btn_col1:
-    if st.button("✅ Approve", disabled=is_archived, use_container_width=True):
-        _call_archive("approved")
+st.markdown("#### 審查操作")
+_btns_disabled = (not md_uri) or is_version_archived
+b1, b2, b3, _ = st.columns([1, 1, 1, 3])
 
-with btn_col2:
-    if st.button("❌ Reject", disabled=is_archived, use_container_width=True):
-        _call_archive("rejected")
+with b1:
+    if st.button("🔁 Regenerate", use_container_width=True, disabled=_btns_disabled):
+        _trigger("regenerate")
+
+with b2:
+    if st.button("✅ Approve", use_container_width=True, disabled=_btns_disabled):
+        _call_gold("approved")
+
+with b3:
+    if st.button("❌ Reject", use_container_width=True, disabled=_btns_disabled):
+        _call_gold("rejected")
