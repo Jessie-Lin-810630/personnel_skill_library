@@ -13,7 +13,7 @@
 ## 3. gold_service 取代 archive_service
 
 - [x] 3.1 確認無程式 import `archive_service`（僅原審查頁 `ARCHIVE_ENDPOINT_URL`，於任務 4 移除）
-- [ ] 3.2 **（人工刪除）** 移除 `archive_service/` 整個資料夾
+- [x] 3.2 **（人工刪除）** 移除 `archive_service/` 整個資料夾
 
 ## 4. 合併審查頁
 
@@ -29,5 +29,5 @@
 
 - [x] 6.1 CLAUDE.md：結構、常用指令、ETL 表、l_* 說明、去除「兩版並存」註記，改為「變體勝出、四執行環境」
 - [x] 6.2 `poetry run python -m unittest`（silver/gold/v02）全綠、ruff 全過、合併頁與服務 py_compile 通過
-- [ ] 6.3 **（人工刪除）** 移除 `openspec/specs/archive-endpoint/`（原版能力退役）
-- [ ] 6.4 手動驗證（使用者執行）：起三服務 + Streamlit，合併後 `onenote_review.py` 登入 hero 正常、多版本審查 + silver/gold 端點皆可運作
+- [x] 6.3 **（人工刪除）** 移除 `openspec/specs/archive-endpoint/`（原版能力退役）
+- [x] 6.4 手動驗證（使用者執行）：起三服務 + Streamlit，合併後 `onenote_review.py` 登入 hero 正常、多版本審查 + silver/gold 端點皆可運作

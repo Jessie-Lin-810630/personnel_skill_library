@@ -1,87 +1,68 @@
-## ADDED Requirements
+# onenote-review-page Specification
 
+## Purpose
+TBD - normalized from legacy archived delta format.
+## Requirements
 ### Requirement: Demo login gate
-未通過驗證的使用者 SHALL 看到密碼輸入框；密碼與 `REVIEW_PAGE_PASSWORD` 環境變數比對，不符則頁面停止渲染。通過後 `st.session_state.authenticated = True` 並保持整個 session 有效。
+未通過驗證的使用者 SHALL 看到 hero 版面與帳號／密碼登入表單；帳密與 `ROLE_ML_*` / `ROLE_OWNER_*` /
+`ROLE_SENIOR_*` 環境變數比對，命中則以對應角色登入（`st.session_state.authenticated=True`、
+`st.session_state.role=<角色>`），不符則顯示錯誤且頁面停止渲染。角色由登入帳密決定，不再另設角色下拉。
 
-#### Scenario: Correct password unlocks the page
-- **WHEN** 使用者輸入正確密碼並送出
-- **THEN** 頁面顯示完整審核介面，密碼框消失
+#### Scenario: Correct credential unlocks the page
+- **WHEN** 使用者輸入與某角色相符的帳號密碼並送出
+- **THEN** 頁面顯示完整多版本審查介面，`st.session_state.role` 設為對應角色
 
-#### Scenario: Wrong password blocks page
-- **WHEN** 使用者輸入錯誤密碼
-- **THEN** 顯示「密碼錯誤」提示，頁面停止渲染
-
----
-
-### Requirement: Role selector
-通過登入後，頁面頂部 SHALL 提供角色選擇（ML/DL Engineer、Note Owner、Dept. Senior Specialist）。所選角色存入 `st.session_state.role`，並在觸發 Archive 時一併帶出。
-
-#### Scenario: Role persists during session
-- **WHEN** 使用者選擇角色並切換到不同頁面後返回
-- **THEN** 角色選擇保持原選項不重置
-
----
+#### Scenario: Wrong credential blocks page
+- **WHEN** 使用者輸入不存在的帳號或錯誤密碼
+- **THEN** 顯示「帳號或密碼錯誤」提示，頁面停止渲染
 
 ### Requirement: Three-level note selector
-頁面上方 SHALL 提供筆記本 → 章節 → 頁面三層下拉選擇器，資料來源為 `onenote_page_metadata` collection。切換筆記本時章節清單重新篩選，切換章節時頁面清單重新篩選。
+頁面上方 SHALL 提供筆記本 → 章節 → 頁面三層下拉選擇器，資料來源改為 `onenote_note_metadata`
+collection（透過 aggregation 過濾 `review_result=rejected` 並僅保留 `dt≥最後歸檔日` 的可審閱版本）。
+選定頁面後 SHALL 以 `dt=` 圓鈕列出同名筆記的多個版本供切換（依 `html_downloaded_at` 排序）。
 
-#### Scenario: Notebook selection filters sections
-- **WHEN** 使用者選擇一個筆記本
-- **THEN** 章節下拉只顯示該筆記本下的章節
+#### Scenario: Notebook/section/page filters cascade
+- **WHEN** 使用者依序選擇筆記本與章節
+- **THEN** 章節、頁面下拉逐層篩選；選定頁面後顯示該頁可審閱的 `dt=` 版本圓鈕
 
-#### Scenario: Section selection filters pages
-- **WHEN** 使用者選擇一個章節
-- **THEN** 頁面下拉只顯示該章節下的頁面
-
----
+#### Scenario: Rejected and superseded versions hidden
+- **WHEN** 某版本 `review_result=rejected`，或其 `dt` 早於該頁最後歸檔日
+- **THEN** 該版本不出現在版本清單
 
 ### Requirement: Status badge at top
-選定頁面後，頁面頂部 SHALL 顯示當前 `status` 的狀態標籤（pending_review / archived / 其他）。
+選定版本後，頁面 SHALL 依「該選定版本自己」的狀態呈現；當選定版本 `status=archived` 時顯示唯讀提示並
+停用其操作按鈕，不因同名另一版已歸檔而影響本版。
 
-#### Scenario: Pending review badge shown
-- **WHEN** 選定頁面的 `status` 為 `pending_review`
-- **THEN** 顯示「待審核」狀態標籤（黃色/橘色）
-
-#### Scenario: Archived badge shown
-- **WHEN** 選定頁面的 `status` 為 `archived`
-- **THEN** 顯示「已歸檔」橫幅（綠色），並標示 `reviewed_at`
-
----
+#### Scenario: Archived version is read-only
+- **WHEN** 選定版本 `status=archived`
+- **THEN** 顯示「此版本已歸檔」提示，該版 approve/reject/regenerate 停用；同名其他可審閱版本按鈕維持可用
 
 ### Requirement: Side-by-side HTML and MD view
-選定頁面後，頁面 SHALL 以左右兩欄並排顯示：
-- 左欄：原始 HTML（從 GCS `onenote-vaults/{帳號}/{筆記本}/{章節}/{頁名}.html` 讀取），以 `st.components.v1.html()` 渲染，HTML 內嵌圖片以 base64 data URI 替換 `_images/` 路徑
-- 右欄：轉換後的 MD（從 GCS `onenote-vaults/{帳號}/{筆記本}/{章節}/{頁名}.md` 讀取），以 `st.markdown()` 渲染，MD 內 `![](\_images/foo.png)` 同樣以 base64 data URI 替換
+選定版本後，頁面 SHALL 左欄渲染 bronze html、右欄渲染 silver md，兩者皆自 `gs://` URI（`html_path`、
+`md_path`）讀取，內嵌圖片以 base64 data URI 替換 `_images/` 路徑。當選定版本 `md_path=null` 時，頁面
+SHALL `POST` 呼叫 Silver enrich 端點（`SILVER_ENDPOINT_URL`）即時生成 md 後渲染；已生成則直接讀 GCS。
 
-#### Scenario: HTML renders with embedded images
-- **WHEN** 使用者選定一個含圖片的頁面
-- **THEN** 左欄 HTML 中的圖片正確顯示，不出現破圖
+#### Scenario: On-demand generate when md missing
+- **WHEN** 使用者切到一個 `md_path=null` 的版本
+- **THEN** 頁面呼叫 Silver 端點生成 md，成功後渲染右欄；端點失敗/斷路時顯示提示且左欄 html 仍正常
 
-#### Scenario: MD renders with embedded images
-- **WHEN** 使用者選定一個含圖片的頁面
-- **THEN** 右欄 MD 中的圖片正確顯示，不出現破圖
-
-#### Scenario: GCS blob not found
-- **WHEN** GCS 上找不到對應的 HTML 或 MD blob
-- **THEN** 該欄顯示「找不到檔案」提示，不 crash 頁面
-
----
+#### Scenario: Cache hit on generated version
+- **WHEN** 選定版本 `md_path != null`
+- **THEN** 直接讀 GCS 既有 md 渲染，不呼叫端點
 
 ### Requirement: Approve and Reject buttons
-頁面底部 SHALL 提供「✅ Approve」與「❌ Reject」按鈕。按下後以 `POST {ARCHIVE_ENDPOINT_URL}` 帶上 `page_id` 與 `role`，並在頁面顯示呼叫結果（成功 / 失敗訊息）。
+頁面底部 SHALL 提供「Approve」「Reject」「Regenerate」按鈕。Approve/Reject 以 `POST {GOLD_ENDPOINT_URL}`
+帶 `{page_id, dt, role, action}`（approve 歸檔、reject 標記 review_closed 並回寫 md_frontmatter）；
+Regenerate 以 `POST {SILVER_ENDPOINT_URL}` 帶 `trigger=regenerate`（受 quota）。成功後清版本清單快取並重載。
 
-#### Scenario: Approve triggers archive endpoint
-- **WHEN** 使用者按下「✅ Approve」
-- **THEN** 送出 `POST /archive` 帶 `{page_id, role, action: "approved"}`，顯示「送出成功」訊息
+#### Scenario: Approve triggers gold endpoint
+- **WHEN** 使用者對已生成 md 的版本按下 Approve
+- **THEN** 送出 `POST /archive` 帶 `action="approved"`，成功後該版翻為已歸檔
 
-#### Scenario: Reject triggers archive endpoint
-- **WHEN** 使用者按下「❌ Reject」
-- **THEN** 送出 `POST /archive` 帶 `{page_id, role, action: "rejected"}`，顯示「送出成功」訊息
+#### Scenario: Reject triggers gold endpoint
+- **WHEN** 使用者按下 Reject
+- **THEN** 送出 `POST /archive` 帶 `action="rejected"`，該版標記 review_closed 並從版本清單消失
 
-#### Scenario: Archive endpoint unreachable
-- **WHEN** `ARCHIVE_ENDPOINT_URL` 未設定或端點無回應
-- **THEN** 顯示連線錯誤訊息，頁面不 crash
-
-#### Scenario: Archived page disables buttons
-- **WHEN** 選定頁面的 `status` 為 `archived`
-- **THEN** Approve / Reject 按鈕皆為停用狀態（`disabled=True`）
+#### Scenario: Regenerate triggers silver endpoint
+- **WHEN** 使用者對品質不佳的版本按下 Regenerate
+- **THEN** 送出 `POST /enrich` 帶 `trigger="regenerate"`，未達 quota 上限時重生 md 並重渲染
