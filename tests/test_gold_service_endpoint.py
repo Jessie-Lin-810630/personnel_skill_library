@@ -13,8 +13,8 @@ from unittest.mock import patch
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
 
-from gold_service import app as gold_app  # noqa: E402
-from task07_onenote_to_markdown_lazy_loading import l_archive_note as la  # noqa: E402
+from task07_gold_service import app as gold_app  # noqa: E402
+from task07_gold_service import l_archive_note as la  # noqa: E402
 
 
 class TestArchiveEndpoint(unittest.TestCase):

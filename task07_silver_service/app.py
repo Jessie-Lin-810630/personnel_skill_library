@@ -8,7 +8,7 @@
     3. Streamlit 審查頁維持對 GCS 唯讀，無權呼叫 ETL 對 GCS 寫入，只能透過此端點觸發 enrich。
 
 Usage:
-    poetry run python -m silver_service.app
+    poetry run python -m task07_silver_service.app
 
 Required .env keys:
     MONGO_ALTAS_URI                MongoDB Atlas connection URI.
@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from loguru import logger
 
-from task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown import t_enrich_html_to_markdown
+from task07_silver_service.t_enrich_html_to_markdown import t_enrich_html_to_markdown
 
 load_dotenv()
 
@@ -67,5 +67,5 @@ def enrich():
 
 
 if __name__ == "__main__":
-    # localhost:8002（與 archive_service 的 8001 錯開）
+    # localhost:8002（與 gold_service 8003 錯開）
     app.run(port=8002, debug=True)

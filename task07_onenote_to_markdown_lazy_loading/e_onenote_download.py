@@ -32,14 +32,14 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from loguru import logger
 
-from .utils import gcs  # GCS 相關互動模組
-from .utils.audit_log import (  # 回傳現在 UTC 時間
+from task07_common import gcs  # GCS 相關互動模組
+from task07_common.audit_log import (  # 回傳現在 UTC 時間
     _now_utc,
     get_latest_version_meta,  # 取出每份筆記頁 (page) 的最新一筆 html_hash 值
     log_api_call,  # Insert request log to OneNote Graph API
     upsert_version_meta,  # Upsert data lineage between html to md
 )
-from .utils.hashing import html_source_hash  # 計算 html_hash 用
+from task07_common.hashing import html_source_hash  # 計算 html_hash 用
 
 load_dotenv()
 

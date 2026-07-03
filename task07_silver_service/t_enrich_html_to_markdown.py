@@ -28,15 +28,16 @@ from google.genai import types
 from google.oauth2.service_account import Credentials
 from loguru import logger
 
-from .l_save_markdown import save_enriched_md
-from .utils import gcs
-from .utils.audit_log import (
+from task07_common import gcs
+from task07_common.audit_log import (
     count_regenerate,
     find_cached_md_by_hash,
     get_version_meta,
     log_enrichment_call,
     upsert_version_meta,
 )
+
+from .l_save_markdown import save_enriched_md
 
 load_dotenv()
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
 
-from silver_service import app as silver_app  # noqa: E402
+from task07_silver_service import app as silver_app  # noqa: E402
 
 
 class TestEnrichEndpoint(unittest.TestCase):

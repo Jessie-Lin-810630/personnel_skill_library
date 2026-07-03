@@ -32,8 +32,8 @@ from pathlib import PurePosixPath
 import frontmatter
 from loguru import logger
 
-from .utils import gcs
-from .utils.audit_log import (
+from task07_common import gcs
+from task07_common.audit_log import (
     _now_utc,
     get_latest_archived_version,
     get_version_meta,

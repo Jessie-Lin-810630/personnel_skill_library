@@ -11,7 +11,7 @@
     4. Streamlit 審查頁維持唯讀，只透過此端點觸發。
 
 Usage:
-    poetry run python -m gold_service.app
+    poetry run python -m task07_gold_service.app
 
 Required .env keys:
     MONGO_ALTAS_URI     MongoDB Atlas connection URI.
@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from loguru import logger
 
-from task07_onenote_to_markdown_lazy_loading.l_archive_note import archive_note, reject_note
+from task07_gold_service.l_archive_note import archive_note, reject_note
 
 load_dotenv()
 
@@ -82,5 +82,5 @@ def archive():
 
 
 if __name__ == "__main__":
-    # localhost:8003（與 silver_service 8002 / archive_service 8001 錯開）
+    # localhost:8003（與 silver_service 8002 錯開）
     app.run(port=8003, debug=True)
