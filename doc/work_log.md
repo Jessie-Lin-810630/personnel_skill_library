@@ -1664,5 +1664,5 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     - t_enrich_html_to_markdown.py 的 convert_img_tag_to_md_str() 在改寫 alt 圖釋時如果 alt 本來就有 `]` 符號，會在 convert to markdown string 時無法正常顯示圖片，因為 markdown 的圖片連結語法是`![替代文字](圖片相對路徑)`，如果替代文字中有`]`，解析器會看到`![替代]文字](圖片相對路徑)`，多出來的`]`會造成圖片顯示失敗，因此，需要修改此函式，把 `]` 同 alt 取代掉。此外，經實測，`!`、`[`、`%`等特殊符號夾在替代文字中不會影響，所以不需要特別處理。
     - 但即使如此，convert_img_tag_to_md_str() 執行後的 markdown string 會傳入 LLM call，這裡會有一個風險是，LLM 回傳的 enriched document `![](圖片相對路徑)` 有可能跟送進去之前的 markdown string 不太一致，例如："(0-02abd90`c`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)" 會變成 "(0-02abd90`b`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)"，而 `regenerate` 又換成另一張圖，例如："(0-4c3f19486a09451db`58f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209.png)"
     變成了 "(0-4c3f19486a09451db`8f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209")"，此為模型隨機性，透過提示工程修改 system prompt 可以較為緩解。
-    > 除了修改 system prompt，也新增 `md_frontmatter` 欄位 在 metadata 中，追蹤有效圖片數量，作為評估資料品質的依據，未來可以搭配視覺化工具來擴展前端圖表。
+    > 除了修改 system prompt，也已在 `onenote_note_metadata` 新增了 `md_frontmatter` 欄位，查核追蹤有效圖片數量，作為評估資料品質的依據，未來可以搭配視覺化工具來擴展前端圖表。
     > `md_frontmatter` 在 archive 與 reject 觸發後都會寫入，以評估好 md 與壞 md 的特性。(例如：哪類別的筆記容易被退件、歸檔的筆記是不是存在人工審查疏漏沒發現破圖)。
