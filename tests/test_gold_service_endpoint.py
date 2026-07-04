@@ -170,6 +170,49 @@ class TestArchiveNoteGuard(unittest.TestCase):
         self.assertEqual(r["status"], "archived_conflict")
 
 
+class TestArchiveRetiresSiblings(unittest.TestCase):
+    """archive_note 歸檔後，退役同頁其他 pending_review 版本（overwritten / rejected）。"""
+
+    def test_siblings_retired_by_hash(self):
+        meta = {
+            "status": "pending_review",
+            "md_path": "gs://b/processed-notes/dt=2026-06-22/n.md",
+            "html_hash": "H2",
+            "onenote_user_id": "u1",
+            "notebook": "nb",
+            "section": "sec",
+            "img_path": [],
+        }
+        siblings = [
+            {"page_id": "p1", "dt": "2026-06-08", "html_hash": "H2"},  # 同 hash → overwritten
+            {"page_id": "p1", "dt": "2026-06-15", "html_hash": "H3"},  # 不同 hash → rejected
+        ]
+        with (
+            patch.object(la, "get_version_meta", return_value=meta),
+            patch.object(la, "get_latest_archived_version", return_value={}),
+            patch.object(la.gcs, "archived_note_prefix", return_value="archived-notes/u1/nb/sec/dt=2026-06-22"),
+            patch.object(la.gcs, "copy_blob", return_value="md5"),
+            patch.object(la.gcs, "gs_uri", side_effect=lambda b: f"gs://b/{b}"),
+            patch.object(la.gcs, "download_text", return_value="---\ntype: x\n---\n\nbody"),
+            patch.object(la, "get_sibling_pending_versions", return_value=siblings),
+            patch.object(la, "upsert_version_meta") as up,
+        ):
+            r = la.archive_note("p1", "2026-06-22", "ML")
+
+        self.assertEqual(r["status"], "archived")
+        # 收集所有退役兄弟版本的 upsert（status=review_closed）
+        retired = {
+            c.args[1]: c.kwargs["set_fields"]
+            for c in up.call_args_list
+            if c.kwargs["set_fields"].get("status") == "review_closed"
+        }
+        self.assertEqual(retired["2026-06-08"]["review_result"], "overwritten")
+        self.assertEqual(retired["2026-06-15"]["review_result"], "rejected")
+        # 退役版本不寫 reviewed_by_role（非逐一人工審閱）
+        self.assertNotIn("reviewed_by_role", retired["2026-06-08"])
+        self.assertNotIn("reviewed_by_role", retired["2026-06-15"])
+
+
 class TestRejectNote(unittest.TestCase):
     """reject_note：翻 C3 + 背景寫 md_frontmatter，不寫 GCS。"""
 
