@@ -21,6 +21,27 @@ TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose
 - **WHEN** 呼叫端 approve 一個 `md_path=null` 的版本
 - **THEN** 端點不歸檔，回傳可辨識錯誤（該版本尚無 silver md 可歸檔），C3 不翻 `archived`
 
+### Requirement: 歸檔連帶退役同頁其他候選版本
+
+當 `action=approved` 歸檔成功後，Gold Load MUST 退役同頁（同 `page_id`）其他仍在審閱
+（`status=pending_review`）的版本：以同主鍵 upsert C3 翻為 `status=review_closed`，並依
+`html_hash` 判定 `review_result`——與歸檔版 `html_hash` 相同者標 `overwritten`（內容等同已被採納）、
+不同者標 `rejected`。退役版本 MUST 記 `reviewed_at`，MUST NOT 寫 `reviewed_by_role`
+（非逐一人工審閱，僅因同頁擇一歸檔而連帶結束審閱期）。`status != pending_review` 的版本
+（如未進審閱的 `bronze_stored`）MUST NOT 被退役。
+
+#### Scenario: 同 hash 的候選版本標 overwritten
+- **WHEN** approve 某版本歸檔成功，同頁另有 `pending_review` 版本其 `html_hash` 與歸檔版相同
+- **THEN** 該版本被 upsert 為 `status=review_closed`、`review_result=overwritten`，記 `reviewed_at`、不記 `reviewed_by_role`
+
+#### Scenario: 不同 hash 的候選版本標 rejected
+- **WHEN** approve 某版本歸檔成功，同頁另有 `pending_review` 版本其 `html_hash` 與歸檔版不同
+- **THEN** 該版本被 upsert 為 `status=review_closed`、`review_result=rejected`，記 `reviewed_at`、不記 `reviewed_by_role`
+
+#### Scenario: 未進審閱的版本不受退役影響
+- **WHEN** approve 某版本歸檔成功，同頁另有 `status=bronze_stored`（`md_path=null`、從未進審閱）的版本
+- **THEN** 該 `bronze_stored` 版本狀態不變，不被翻為 `review_closed`
+
 ### Requirement: 歸檔後萃取 frontmatter metadata
 
 Gold Load 在歸檔完成後 MUST 讀回 `archived-notes/` 那份剛歸檔的 md，組出一個內嵌 Object
@@ -46,14 +67,15 @@ MUST 含 5 個欄位：`tags`、`date`、`type`、`alias`（取自 frontmatter�
 
 ### Requirement: 可審閱版本篩選
 
-審查頁（呼叫端）SHALL 只呈現「可審閱」的版本：查 C3 時 MUST 濾掉 `review_result=rejected`
-的版本；並依每個 `page_id` 算出 `lastArchivedAt = max(dateTrunc(archived_at, day))`，只保留
-`dt >= lastArchivedAt` 的版本（尚無歸檔時全留）。此使歸檔後的新內容（更新的 `dt`）能重新進入
-審閱與歸檔，而已退件與比最後歸檔日更舊的版本自動退出審查佇列。
+審查頁（呼叫端）SHALL 只呈現「可審閱」的版本：查 C3 時 MUST 濾掉 `status=review_closed`
+的版本（含 `review_result=rejected` 與 `overwritten`，不論 `dt`）；並依每個 `page_id` 算出
+`lastArchivedAt = max(dateTrunc(archived_at, day))`，只保留 `dt >= lastArchivedAt` 的版本
+（尚無歸檔時全留）。此使歸檔後的新內容（更新的 `dt`）能重新進入審閱與歸檔，而已退役與比最後
+歸檔日更舊的版本自動退出審查佇列。
 
-#### Scenario: rejected 版本不再出現
-- **WHEN** 某版本 `review_result=rejected`
-- **THEN** 該版本不出現在審查頁的版本清單；同名其他非 rejected 版本不受影響
+#### Scenario: 已退役版本不再出現
+- **WHEN** 某版本 `status=review_closed`（`review_result=rejected` 或 `overwritten`）
+- **THEN** 該版本不出現在審查頁的版本清單（不論其 `dt`）；同名其他非 review_closed 版本不受影響
 
 #### Scenario: 歸檔後新內容可重走 Silver→Gold
 - **WHEN** 某 `page_id` 已有一版歸檔，之後 bronze 下載到更新內容（更新的 `dt`）

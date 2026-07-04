@@ -18,7 +18,7 @@ TBD - normalized from legacy archived delta format.
 
 ### Requirement: Three-level note selector
 頁面上方 SHALL 提供筆記本 → 章節 → 頁面三層下拉選擇器，資料來源改為 `onenote_note_metadata`
-collection（透過 aggregation 過濾 `review_result=rejected` 並僅保留 `dt≥最後歸檔日` 的可審閱版本）。
+collection（透過 aggregation 過濾 `status=review_closed`（含 rejected 與 overwritten）並僅保留 `dt≥最後歸檔日` 的可審閱版本）。
 選定頁面後 SHALL 以 `dt=` 圓鈕列出同名筆記的多個版本供切換（依 `html_downloaded_at` 排序）。
 
 #### Scenario: Notebook/section/page filters cascade
@@ -26,7 +26,7 @@ collection（透過 aggregation 過濾 `review_result=rejected` 並僅保留 `dt
 - **THEN** 章節、頁面下拉逐層篩選；選定頁面後顯示該頁可審閱的 `dt=` 版本圓鈕
 
 #### Scenario: Rejected and superseded versions hidden
-- **WHEN** 某版本 `review_result=rejected`，或其 `dt` 早於該頁最後歸檔日
+- **WHEN** 某版本 `status=review_closed`（`review_result=rejected` 或 `overwritten`），或其 `dt` 早於該頁最後歸檔日
 - **THEN** 該版本不出現在版本清單
 
 ### Requirement: Status badge at top
