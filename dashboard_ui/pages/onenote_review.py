@@ -334,7 +334,7 @@ md_uri = version.get("md_path")
 status = version.get("status", "")
 
 # 逐版本判斷：只有選中版本自己已歸檔時，該版唯讀、按鈕失效（不影響其他版本）。
-# rejected 版本已由 get_onenote_versioned_pages 過濾掉、不會出現在此。
+# review_closed（rejected/overwritten）版本已由 get_onenote_versioned_pages 過濾掉、不會出現在此。
 is_version_archived = status == "archived"
 if is_version_archived:
     st.success(

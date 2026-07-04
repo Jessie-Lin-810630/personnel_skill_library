@@ -7,6 +7,7 @@
     → 把關是否早有同名已歸檔筆記。
     → 複製 md (processed-notes) 與 png (raw-notes) 到 archived-notes/。
     → upsert Collection onenote_note_metadata (status=archived、歸檔路徑、審核欄位)。
+    → 退役同頁其他 pending_review 版本 (status=review_closed、同 hash 標 overwritten 否則 rejected)。
     → 讀回歸檔 md ，萃取 frontmatter 並統計 valid_img。
     → 以內嵌 Object md_frontmatter upsert Collection onenote_note_metadata。
     2. reject (reject_note): 取 Collection onenote_note_metadata 取得筆記 metadata 資料
@@ -36,6 +37,7 @@ from task07_common import gcs
 from task07_common.audit_log import (
     _now_utc,
     get_latest_archived_version,
+    get_sibling_pending_versions,
     get_version_meta,
     upsert_version_meta,
 )
@@ -258,6 +260,21 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             "error_msg": None,
         },
     )
+
+    # 4b. 退役同頁其他仍在審閱的候選版本：本輪已擇一歸檔，其餘連帶結束審閱期。
+    #     html_hash 與歸檔版相同者標 overwritten（內容等同已被採納），不同者 rejected。
+    archived_hash = meta.get("html_hash")
+    for sib in get_sibling_pending_versions(page_id, dt):
+        retired_result = "overwritten" if sib.get("html_hash") == archived_hash else "rejected"
+        upsert_version_meta(
+            sib["page_id"],
+            sib["dt"],
+            set_fields={
+                "status": "review_closed",
+                "review_result": retired_result,
+                "reviewed_at": now,
+            },
+        )
 
     # 5. 後台運作：讀回歸檔完成的 md、萃取 frontmatter，
     # 以內嵌 Object upsert Collection onenote_note_metadata

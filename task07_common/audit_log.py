@@ -239,6 +239,19 @@ def get_latest_archived_version(page_id: str) -> dict:
         return {}
 
 
+def get_sibling_pending_versions(page_id: str, exclude_dt: str) -> list[dict]:
+    """取同頁其他仍在審閱 (status=pending_review) 的版本，供歸檔時一併退役；無則 []。
+
+    只鎖 pending_review，故從未進審閱的 bronze_stored 舊版不會被誤退役。
+    """
+    try:
+        cursor = _get_db()[C3].find({"page_id": page_id, "status": "pending_review", "dt": {"$ne": exclude_dt}})
+        return list(cursor)
+    except Exception as e:
+        logger.warning(f"[audit] Failed to query sibling pending versions ({page_id}): {e}")
+        return []
+
+
 def upsert_version_meta(
     page_id: str,
     dt: str,

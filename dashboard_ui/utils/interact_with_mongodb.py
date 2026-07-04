@@ -190,7 +190,7 @@ def get_onenote_versioned_pages(db) -> list[dict]:
 
     同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為主鍵鎖定筆記版本。
     以 aggregation 做兩層篩選，讓前端只看到需要審閱的版本：
-    - 濾掉 review_result=rejected 的版本（已退件，不再出現）。
+    - 濾掉 status=review_closed 的版本（已退役，含 rejected 與 overwritten，不論 dt 皆不再出現）。
     - 每個 page_id 算出 lastArchivedAt = max(dateTrunc(archived_at, day))，只保留 dt≥最後歸檔日
       的版本（尚無歸檔時全留）；使歸檔後的新內容（新 dt）能重新進入審閱，舊版自動退場。
 
@@ -202,7 +202,7 @@ def get_onenote_versioned_pages(db) -> list[dict]:
     """
     coll = db["onenote_note_metadata"]
     pipeline = [
-        {"$match": {"review_result": {"$ne": "rejected"}}},
+        {"$match": {"status": {"$ne": "review_closed"}}},
         {"$addFields": {"dt_n": {"$convert": {"input": "$dt", "to": "date", "onError": None, "onNull": None}}}},
         {
             "$setWindowFields": {
