@@ -21,11 +21,16 @@ def get_db():
     return client[db_name]
 
 
+_atlas_db: Database | None = None
+
+
 def get_db_atlas() -> Database:
-    """連線 MongoDB Atlas，回傳指定資料庫物件。
+    """連線 MongoDB Atlas，回傳指定資料庫物件（module-level 單例，跨頁共用一份 client）。
 
     從環境變數讀取 MONGO_ALTAS_URI 與 MONGO_DB_NAME 建立連線，
     為 agent / chat_history / vector_search 等線上查詢的資料來源。
+    MongoClient 自帶連線池且 thread-safe，故只在首次呼叫時建立、之後重用，
+    避免各頁反覆 new client 撐爆 Atlas 連線上限。
 
     Returns:
         pymongo Database 物件（對應 MONGO_DB_NAME 指定的資料庫）。
@@ -33,6 +38,10 @@ def get_db_atlas() -> Database:
     Raises:
         EnvironmentError: 缺少 MONGO_ALTAS_URI 或 MONGO_DB_NAME 時拋出。
     """
+    global _atlas_db
+    if _atlas_db is not None:
+        return _atlas_db
+
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
@@ -40,8 +49,8 @@ def get_db_atlas() -> Database:
         logger.error("請確認 .env 或 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
         raise EnvironmentError("請確認 .env 或 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
 
-    client = MongoClient(mongo_uri)
-    return client[db_name]
+    _atlas_db = MongoClient(mongo_uri)[db_name]
+    return _atlas_db
 
 
 def get_radar_summary_df(db, collection: str) -> pd.DataFrame:
