@@ -23,7 +23,6 @@ import re
 import markdown as md_lib
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 from dotenv import load_dotenv
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
 from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages
@@ -36,21 +35,12 @@ SILVER_URL = os.getenv("SILVER_ENDPOINT_URL", "")
 GOLD_URL = os.getenv("GOLD_ENDPOINT_URL", "")
 
 st.set_page_config(
-    page_title="AI 協作知識平台: OneNote 多版本對照審查",
+    page_title="RAG 檢索資料庫協作平台",
     page_icon="🗂️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 _render_side_bar()
-
-st.markdown(
-    """
-    <style>
-    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # ─────────────────────────────────────────
 # Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）
@@ -66,19 +56,18 @@ if not st.session_state.get("authenticated"):
     st.markdown(
         f"""
 <div style="
-    background: linear-gradient(135deg, #0d1526 0%, #0f2040 60%, #1a1040 100%);
-    border-radius: 20px;
-    padding: 3rem 3.5rem 2.5rem;
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
+    border-radius: 16px;
+    padding: 2rem 3rem;
     margin-bottom: 1.8rem;
     border: 1px solid #2a3550;
     text-align: center;
 ">
-    <div style="font-size:2.8rem; margin-bottom:0.6rem;">🧠</div>
-    <h1 style="color:{color_map["FONT_CLR"]}; font-size:1.9rem; font-weight:800;
-        margin:0 0 0.6rem 0; line-height:1.35;">
-        歡迎來到 AI 知識協作平台
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; font-weight:800;
+        margin:0 0 0.6rem 0; line-height:1.1;">
+        🧠 RAG 檢索資料庫協作平台
     </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1.05rem; margin:0; letter-spacing:0.5px; font-weight:500;">
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
         從日常筆記到企業智慧的關鍵一步
     </p>
 </div>
@@ -181,7 +170,7 @@ if not st.session_state.get("authenticated"):
     padding: 2rem 2rem 1.5rem;
 ">
     <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
-        🔐 知識守護者登入
+        🔐 知識把關者登入
     </p>
 """,
             unsafe_allow_html=True,
@@ -190,7 +179,7 @@ if not st.session_state.get("authenticated"):
         username = st.text_input("帳號", key="login_user", placeholder="輸入您的帳號")
         password = st.text_input("密碼", type="password", key="login_pwd", placeholder="輸入您的密碼")
 
-        if st.button("登入", use_container_width=True, type="primary"):
+        if st.button("登入", width="stretch", type="primary"):
             if not username or not password:
                 st.warning("請輸入帳號與密碼。")
             else:
@@ -223,25 +212,40 @@ if not st.session_state.get("authenticated"):
 st.markdown(
     f"""
 <div style="
-    background: linear-gradient(135deg, #0d1526 0%, #1a2a4a 100%);
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
     border-radius: 16px; padding: 2rem 3rem; margin-bottom: 1.2rem;
     border: 1px solid #2a3550; text-align: center;">
     <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
-        🗂️ OneNote 多版本對照審查
+        🗂️ 以生成式模型擴充 OneNote Notes 語意之結果審查系統
     </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
-        切換同名筆記各 dt= 版本 — 點到未處理版本即時 on-demand 生成 Markdown
+    <p style="color:{color_map["TEAL"]};text-align: left; font-size:0.9rem; margin:0; letter-spacing:1px;">
+        步驟1: 從下拉式清單中依序選擇 筆記本 -> 章節 -> 頁面，以打開待審閱的筆記內容。<br>
+        步驟2: 系統會自動跳出最新版本的筆記頁面，經由 LLM
+        擴寫語意的結果，呈現於下方，左側為原始筆記、右側為語義擴充後新筆記。<br>
+        步驟3: 若希望查看舊版的筆記內容，請於下方圓鈕切換版本，版本號以上傳 OneNote 到資料湖的日期為命名。<br>
+        步驟4: 檢視右側筆記內容，評估模型生成之準確、可靠、隱私安全是否符合預期後，點選審查操作輸入您的審查結果。<br>
+    </p>
+    <p style="color:{color_map["PINK"]};text-align: center; font-size:0.9rem; margin:0; letter-spacing:1px;">
+        💡 提醒: 生成式大語言模型的輸出帶有隨機性，若不滿意生成之內容，可點選「重新生成」，
+        系統將以更強大的模型重新擴寫，<br>
+        然而企業導入 AI 過程中，需紀錄與控管導入成本 (如: tokens)，每篇筆記最多重新生成 2 次為上限，敬請珍惜使用。<br>
+        <br>
+        🚄  受核可的筆記將推送到向量資料庫，作為知識庫檢索能力提升的泉源！
     </p>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-role_col, logout_col = st.columns([8, 1])
+# 左側留白把「角色 + 登出」推到右上角並貼近，減少視覺跨度；vertical center 讓文字與按鈕同高
+_spacer, role_col, logout_col = st.columns([7, 2, 1], vertical_alignment="center")
 with role_col:
-    st.markdown(f"目前角色：**{st.session_state.role}**")
+    st.markdown(
+        f"<div style='text-align:right;'>目前角色：<b>{st.session_state.role}</b></div>",
+        unsafe_allow_html=True,
+    )
 with logout_col:
-    if st.button("登出", use_container_width=True):
+    if st.button("登出", width="stretch"):
         st.session_state.pop("authenticated", None)
         st.session_state.pop("role", None)
         st.rerun()
@@ -272,7 +276,7 @@ notebooks_opts = [PLACEHOLDER] + sorted({v["notebook"] for v in versions_all if 
 col_nb, col_sec, col_pg = st.columns(3)
 
 with col_nb:
-    selected_nb = st.selectbox("📓 筆記本", notebooks_opts, key="vr_notebook")
+    selected_nb = st.selectbox(f"📓 筆記本 ({len(notebooks_opts) - 1}份待審中)", notebooks_opts, key="vr_notebook")
 
 sections_raw = (
     sorted({v["section"] for v in versions_all if v.get("notebook") == selected_nb and v.get("section")})
@@ -280,7 +284,9 @@ sections_raw = (
     else []
 )
 with col_sec:
-    selected_sec = st.selectbox("📂 章節", [PLACEHOLDER] + sections_raw, key=f"vr_section_{selected_nb}")
+    selected_sec = st.selectbox(
+        f"📂 章節 ({len(sections_raw)}篇待審中)", [PLACEHOLDER] + sections_raw, key=f"vr_section_{selected_nb}"
+    )
 
 titles_raw = (
     sorted(
@@ -294,11 +300,15 @@ titles_raw = (
     else []
 )
 with col_pg:
-    selected_title = st.selectbox("📄 頁面", [PLACEHOLDER] + titles_raw, key=f"vr_page_{selected_nb}_{selected_sec}")
+    selected_title = st.selectbox(
+        f"📄 頁面 ({len(titles_raw)}頁待審中)",
+        [PLACEHOLDER] + titles_raw,
+        key=f"vr_page_{selected_nb}_{selected_sec}",
+    )
 
 all_selected = selected_nb != PLACEHOLDER and selected_sec != PLACEHOLDER and selected_title != PLACEHOLDER
 if not all_selected:
-    st.info("請由上方依序選擇筆記本 / 章節 / 頁面，以載入該頁的多版本對照。")
+    st.info("請由上方依序選擇筆記本 / 章節 / 頁面，以載入該頁的所有版本對照。")
     st.stop()
 
 # ─────────────────────────────────────────
@@ -315,13 +325,12 @@ page_versions.sort(key=lambda v: str(v.get("html_downloaded_at", "")), reverse=T
 def _version_label(v: dict) -> str:
     """圓鈕顯示文字：dt + 下載時間 + 是否已生成 md。"""
     dt = v.get("dt", "?")
-    ts = str(v.get("html_downloaded_at", ""))[:19]
-    mark = "✅ 已生成" if v.get("md_path") else "🟠 未生成"
-    return f"dt={dt}　({ts})　{mark}"
+    mark = "✅ 已生成，可審閱" if v.get("md_path") else "🟠 尚未生成，切換版本後觸發生成即可開始審閱"
+    return f"{dt}　{mark}"
 
 
 selected_idx = st.radio(
-    "🕘 版本（同名筆記的各 dt= 分區）",
+    "💡 切換查看之版本號 (版本號：即筆記上傳日期)：",
     options=list(range(len(page_versions))),
     format_func=lambda i: _version_label(page_versions[i]),
     key=f"vr_ver_{selected_nb}_{selected_sec}_{selected_title}",
@@ -362,11 +371,11 @@ def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
             timeout=180,
         )
     except requests.exceptions.ReadTimeout:
-        return None, "Silver 端點回應逾時（LLM 生成耗時，請稍後重新整理確認）。"
+        return None, "端點回應逾時（LLM 生成耗時，請稍後重新整理確認）。"
     except requests.exceptions.ConnectionError:
-        return None, "無法連線至 Silver 端點，請確認服務是否啟動。"
+        return None, "無法連線至端點，請確認服務是否啟動。"
     except Exception as e:  # noqa: BLE001
-        return None, f"呼叫 Silver 端點時發生錯誤：{e}"
+        return None, f"呼叫端點時發生錯誤：{e}"
 
     data = resp.json() if resp.content else {}
     if resp.status_code == 404:
@@ -378,14 +387,14 @@ def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
 
 def _trigger(trigger: str) -> None:
     """呼叫端點、依結果更新 UI 狀態；成功產出 md 則清快取重載。"""
-    with st.spinner("Silver enrichment 進行中（首次生成需呼叫 LLM）…"):
+    with st.spinner("重新生成中，請稍後，Document Enrichment 進行中..."):
         data, err = _call_silver(trigger)
     if err:
         st.session_state.enrich_attempted[(page_id, dt)] = err
         st.error(err)
         return
     if data.get("circuit_open"):
-        msg = "Silver 服務暫停中（LLM 連續失敗觸發斷路器），請稍後再試。"
+        msg = "LLM 連續失敗，服務已暫停，請稍後再試。"
         st.session_state.enrich_attempted[(page_id, dt)] = msg
         st.warning(msg)
         return
@@ -409,8 +418,9 @@ if not md_uri and not is_version_archived and (page_id, dt) not in st.session_st
 _WHITE_FRAME = """
 <html><head><meta charset="utf-8">
 <style>
-  body {{ margin:0; background:#ffffff; color:#111; font-family:sans-serif;
-         font-size:14px; line-height:1.6; padding:1rem; }}
+  html, body {{ margin:0; min-height:100vh; box-sizing:border-box;
+             background:#ffffff; color:#111; font-family:sans-serif;
+             font-size:14px; line-height:1.6; padding:0.5rem; overflow-y:auto; }}
   img {{ max-width:100%; }}
   pre, code {{ background:#f3f4f6; border-radius:4px; padding:2px 6px; }}
   table {{ border-collapse:collapse; width:100%; }}
@@ -421,6 +431,26 @@ _WHITE_FRAME = """
 
 # 圖片實體存在 bronze raw-notes 的 dt= 分區 _images/ 下；html 與 md 皆以此為準
 img_prefix = html_uri.rsplit("/", 1)[0] if html_uri else ""
+
+
+def _flatten_onenote_html(html: str) -> str:
+    """從 OneNote html 中移除絕對定位。
+
+    _replace_images_in_html() 回傳值仍然是一份完整的 HTML 文件，但是因為
+    `<body>` 內層包了 `<div style="position:absolute...>` 絕對定位。
+    這會造成定位高度隨文件流而浮動，無法讓父層的整個白底區域高度固定下來，有時長有時短，
+    所以要取出 `<body>` 內層，並移除絕對定位。
+
+    """
+    # 只取 body 內層
+    m = re.search(r"<body[^>]*>(.*?)</body>", html, re.S | re.I)
+    inner = m.group(1) if m else html
+
+    # 移除絕對定位與固定寬度，讓內容回到正常流、能撐開高度
+    inner = re.sub(r"position\s*:\s*absolute\s*;?", "", inner, flags=re.I)
+    inner = re.sub(r"(left|top)\s*:\s*[\d.]+px\s*;?", "", inner, flags=re.I)
+    inner = re.sub(r"width\s*:\s*1210px\s*;?", "", inner, flags=re.I)
+    return inner
 
 
 def _replace_images_in_html(html: str) -> str:
@@ -439,39 +469,40 @@ def _replace_images_in_md(md: str) -> str:
     return re.sub(r"!\[([^\]]*)\]\(_images/([^)]+)\)", repl, md)
 
 
-col_html, col_md = st.columns(2)
+col_html, col_md = st.columns(2, gap="xsmall")
 
 with col_html:
-    st.markdown(f"#### 原始 HTML　`{selected_title}`")
+    st.markdown(f"#### 原始筆記\n筆記標題：`{selected_title}`")
     if html_uri:
         raw_html = read_text_by_uri(html_uri)
         if raw_html:
-            components.html(_WHITE_FRAME.format(content=_replace_images_in_html(raw_html)), height=700, scrolling=True)
+            inner = _flatten_onenote_html(_replace_images_in_html(raw_html))
+            st.iframe(_WHITE_FRAME.format(content=inner), height=620)
         else:
-            st.warning("GCS 上找不到 HTML 檔案。")
+            # 有路徑但讀不到
+            st.warning("找不到原始筆記。")
     else:
-        st.info("此版本沒有記錄 html_path。")
+        st.info("此版本沒有記錄對應的筆記路徑。")
 
 with col_md:
-    st.markdown(f"#### Gemini 輸出 Markdown　`{selected_title}`")
+    st.markdown(f"#### LLM 擴寫增強生成後\n筆記標題：`{selected_title}`")
     if md_uri:
         raw_md = read_text_by_uri(md_uri)
         if raw_md:
             md_as_html = md_lib.markdown(_replace_images_in_md(raw_md), extensions=["fenced_code", "tables", "nl2br"])
-            components.html(_WHITE_FRAME.format(content=md_as_html), height=700, scrolling=True)
+            st.iframe(_WHITE_FRAME.format(content=md_as_html), height=620)
         else:
-            st.warning("GCS 上找不到 MD 檔案。")
+            # 有路徑但讀不到
+            st.warning("找不到擴寫版。")
     else:
         attempted_err = st.session_state.enrich_attempted.get((page_id, dt))
         if attempted_err:
-            st.error(f"此版本尚未生成 Markdown：{attempted_err}")
+            st.error(f"此版本尚未生成 LLM 擴寫版：{attempted_err}")
             if st.button("🔄 重試生成", key="vr_retry"):
                 st.session_state.enrich_attempted.pop((page_id, dt), None)
                 st.rerun()
         else:
-            st.info("此版本尚無 md_path。")
-
-st.divider()
+            st.info("此版本沒有記錄對應的筆記路徑。")
 
 # ─────────────────────────────────────────
 # 審查操作按鈕（regenerate 走 Silver；approve/reject 走 Gold 端點）
@@ -481,9 +512,9 @@ st.divider()
 def _call_gold(action: str) -> None:
     """POST Gold 端點執行 approve 歸檔 / reject 標記；成功清快取重載。"""
     if not GOLD_URL:
-        st.error("GOLD_ENDPOINT_URL 未設定，無法呼叫 Gold 端點。")
+        st.error("找不到GOLD URL！")
         return
-    with st.spinner("Gold 歸檔處理中…"):
+    with st.spinner(f"{action} 任務執行中..."):
         try:
             resp = requests.post(
                 GOLD_URL,
@@ -491,13 +522,13 @@ def _call_gold(action: str) -> None:
                 timeout=180,
             )
         except requests.exceptions.ReadTimeout:
-            st.error("Gold 端點回應逾時（GCS 複製耗時，請稍後重新整理確認是否已歸檔）。")
+            st.error("回應逾時 (GCS 複製耗時，請聯繫客服，重新整理確認是否已歸檔)。")
             return
         except requests.exceptions.ConnectionError:
-            st.error("無法連線至 Gold 端點，請確認服務是否啟動。")
+            st.error("無法連線至端點，請確認服務是否啟動。")
             return
         except Exception as e:  # noqa: BLE001
-            st.error(f"呼叫 Gold 端點時發生錯誤：{e}")
+            st.error(f"呼叫端點時發生錯誤：{e}")
             return
 
     data = resp.json() if resp.content else {}
@@ -508,18 +539,18 @@ def _call_gold(action: str) -> None:
     st.rerun()
 
 
-st.markdown("#### 審查操作")
+st.markdown("#### 針對語義增強筆記 (右側筆記)，請點選審核結果：", text_alignment="center")
 _btns_disabled = (not md_uri) or is_version_archived
-b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+_, b1, b2, b3, _ = st.columns([1, 2, 2, 2, 1])
 
 with b1:
-    if st.button("🔁 Regenerate", use_container_width=True, disabled=_btns_disabled):
+    if st.button("重試生成 (Regenerate)", icon="🔁", width="stretch", disabled=_btns_disabled):
         _trigger("regenerate")
 
 with b2:
-    if st.button("✅ Approve", use_container_width=True, disabled=_btns_disabled):
+    if st.button("核可 (Approve)", icon="✅", width="stretch", disabled=_btns_disabled):
         _call_gold("approved")
 
 with b3:
-    if st.button("❌ Reject", use_container_width=True, disabled=_btns_disabled):
+    if st.button("退件 (Reject)", icon="❌", width="stretch", disabled=_btns_disabled):
         _call_gold("rejected")

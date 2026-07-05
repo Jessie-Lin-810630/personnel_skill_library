@@ -13,7 +13,7 @@ from agent_tools.query_rewriter import _load_alias_to_tags_map, _load_known_tags
 from agents import planning_agent, rag_agent
 from agents.intent_router_agent import route
 from utils.interact_with_mongodb import get_db_atlas
-from utils.ui_elements import _render_side_bar
+from utils.ui_elements import _render_side_bar, color_map
 
 # TODO: st.login() Google OAuth
 # 當 GCP Console 上建立好 OAuth 2.0 Client ID 與 Client Secret 後：
@@ -62,7 +62,7 @@ if "alias_tag_pairs" not in st.session_state:
 with st.sidebar:
     st.divider()
     st.caption(f"LLM 呼叫：{st.session_state['api_call_count']} / {RATE_LIMIT}")
-    if st.button("🔄 開新對話", use_container_width=True):
+    if st.button("🔄 開新對話", width="stretch"):
         st.session_state["session_id"] = str(uuid.uuid4())
         st.session_state["messages"] = []
         st.session_state["api_call_count"] = 0
@@ -70,8 +70,26 @@ with st.sidebar:
         st.rerun()
 
 # ── Page heading ─────────────────────────────────────────────────────────────
-st.title("🤖 AI Knowledge Agent")
-st.caption("筆記語意查詢 · 摘要 · 個人化學習路徑規劃")
+st.markdown(
+    f"""
+<div style="
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
+    border-radius: 16px;
+    padding: 2rem 3rem;
+    margin-bottom: 1.8rem;
+    border: 1px solid #2a3550;
+    text-align: center;
+">
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.6rem 0; font-weight:800;">
+        🤖 AI Knowledge Agent
+    </h1>
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
+        筆記語意查詢 · 摘要 · 個人化學習路徑規劃
+    </p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ── Helper：來源清單渲染 ──────────────────────────────────────────────────────

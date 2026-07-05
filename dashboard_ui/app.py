@@ -12,18 +12,10 @@ from utils.precomputing import (
     _radar_tasks_from_df,
     _show_updated_at,
 )
-from utils.ui_elements import _render_side_bar, _render_task_detail, color_map, make_radar
+from utils.ui_elements import _render_side_bar, _render_task_selectbox, _render_task_table, color_map, make_radar
 
-
-# 用 st.cache_resource 儲存連線物件在快取層，避免反覆建立連線
-@st.cache_resource
-def get_mongo_db():
-    from utils.interact_with_mongodb import get_db
-
-    return get_db()
-
-
-db = get_mongo_db()
+# get_db_atlas() 內部已是 module-level 單例（client 只建立一次、跨頁共用連線池）
+db = mongo_utils.get_db_atlas()
 
 # ─────────────────────────────────────────
 # 讀取 MongoDB 資料
@@ -127,30 +119,31 @@ plotly_layout_base = dict(
 st.markdown(
     f"""
 <div style="
-    background: linear-gradient(135deg, #0d1526 0%, #1a2a4a 100%);
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
     border-radius: 16px;
-    padding: 2.5rem 3rem;
-    margin-bottom: 1.5rem;
+    padding: 2rem 3rem;
+    margin-bottom: 1.2rem;
     border: 1px solid #2a3550;
     text-align: center;
 ">
     <p style="color:#7a9cc0; font-size:0.95rem; margin:0 0 0.3rem 0; letter-spacing:3px;">
         PERSONAL SKILLS DASHBOARD
     </p>
-    <h1 style="color:#e0e8f8; font-size:2.6rem; margin:0 0 0.5rem 0; font-weight:800;">
+    <h1 style="color:#e0e8f8; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
         Jessie Lin 生技製藥 x 資料工程雙棲夢
     </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
-        我是 Jessie，一個沈浸8年生技製藥產業，領悟對數據的熱忱，並且在未來10年追求極致有效率的資料治理工程的化工人。<br>
-        這裡紀錄著我的學習歷程、工作產出，與知識庫。
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
+        我是 Jessie，一個沈浸 8 年生技製藥產業，領悟對數據的熱忱，並且在未來
+        10 年追求極致有效率的資料治理工程的化工人。<br>
+        這裡紀錄著我的學習歷程、實作產出，與知識庫問答機器。
     </p>
-    <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
         <a href="https://github.com/Jessie-Lin-810630"
         target="_blank"
         style="color:#90c2ff; text-decoration:none;">
         Github
         </a>
-        <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+        <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130"
         target="_blank"
         style="color:#90c2ff; text-decoration:none;">
           |  LinkedIn
@@ -199,7 +192,7 @@ with biotech_col:
     _show_updated_at(biotech_updated_at)
     biotech_radar_event = st.plotly_chart(
         make_radar(biotech_labels, biotech_values, color_map["TEAL"], "", biotech_tasks),
-        use_container_width=True,
+        width="stretch",
         key="biotech_radar_chart",
         on_select="rerun",
         selection_mode="points",
@@ -209,167 +202,36 @@ with de_col:
     _show_updated_at(de_updated_at)
     de_radar_event = st.plotly_chart(
         make_radar(de_labels, de_values, color_map["PURPLE"], "", de_tasks),
-        use_container_width=True,
+        width="stretch",
         key="de_radar_chart",
         on_select="rerun",
         selection_mode="points",
     )
 
-detail_biotech_col, detail_de_col = st.columns(2)
+detail_biotech_col, detail_de_col = st.columns([1, 1], gap="small")
 with detail_biotech_col:
-    _render_task_detail("💊 生技製藥任務明細", biotech_labels, biotech_tasks, biotech_radar_event, "biotech")
+    col1, col2 = st.columns([1.5, 2], gap=None)
+    with col1:
+        st.markdown("##### 💊 生技製藥任務明細")
+    with col2:
+        selected_axis_biotech, tasks_dict_biotech = _render_task_selectbox(
+            biotech_labels, biotech_tasks, biotech_radar_event, "biotech"
+        )
+
+    _render_task_table(selected_axis_biotech, tasks_dict_biotech)
+
 with detail_de_col:
-    _render_task_detail("💻 資料工程任務明細", de_labels, de_tasks, de_radar_event, "de")
+    col1, col2 = st.columns([1.5, 2], gap=None)
+    with col1:
+        st.markdown("##### 💻 資料工程任務明細")
+    with col2:
+        selected_axis_de, tasks_dict_de = _render_task_selectbox(de_labels, de_tasks, de_radar_event, "de")
 
+    _render_task_table(selected_axis_de, tasks_dict_de)
+
+st.divider()
 # ─────────────────────────────────────────
-# (c) KPI 卡片 — 四格
-# ─────────────────────────────────────────
-st.markdown("### 📊 KPI 總覽")
-k1, k2, k3, k4 = st.columns(4)
-
-with k1:
-    st.metric("📓 個人知識庫節點", obsidian_total, obsidian_delta)
-with k2:
-    st.metric("🐙 GitHub 專案", github_total, github_delta)
-with k3:
-    st.metric("👖 LeetCode SQL", leetcode_sql, leetcode_sql_delta)
-with k4:
-    st.metric("💻 LeetCode Python", leetcode_python, leetcode_python_delta)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────
-# SECTION 2 — Obsidian 技術主題橫向 bar chart
-# ─────────────────────────────────────────
-col_obs, col_lc = st.columns([3, 2])
-
-with col_obs:
-    df_obs = pd.DataFrame({"topic": list(obsidian_topics.keys()), "count": list(obsidian_topics.values())}).sort_values(
-        "count"
-    )
-
-    colors = [color_map["PINK"] if c == df_obs["count"].max() else color_map["PURPLE"] for c in df_obs["count"]]
-
-    fig_bar = go.Figure(
-        go.Bar(
-            x=df_obs["count"],
-            y=df_obs["topic"],
-            orientation="h",
-            marker_color=colors,
-            text=df_obs["count"],
-            textposition="outside",
-            textfont=dict(color=color_map["FONT_CLR"]),
-        )
-    )
-    fig_bar.update_layout(
-        **plotly_layout_base,
-        title=dict(text="📚 知識文檔技術主題分佈", font=dict(size=18, color=color_map["FONT_CLR"]), x=0),
-        xaxis=dict(showgrid=False, zeroline=False, tickfont=dict(color="#4a6a8a")),
-        yaxis=dict(showgrid=False, tickfont=dict(color=color_map["FONT_CLR"])),
-        height=320,
-    )
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-# ─────────────────────────────────────────
-# SECTION 3 — 刷題三相 Donut
-# ─────────────────────────────────────────
-with col_lc:
-    total_problems = sum(donut_values)
-    fig_donut = go.Figure(
-        go.Pie(
-            labels=donut_labels,
-            values=donut_values,
-            hole=0.55,
-            marker=dict(colors=[color_map["TEAL"], color_map["PURPLE"], color_map["ORANGE"]]),
-            textfont=dict(color=color_map["WHITE"], size=12),
-            hovertemplate="%{label}<br>%{value} 題 (%{percent})<extra></extra>",
-        )
-    )
-    fig_donut.update_layout(
-        **plotly_layout_base,
-        title=dict(text="🏆 刷題三相分佈", font=dict(size=18, color=color_map["FONT_CLR"]), x=0),
-        annotations=[
-            dict(
-                text=f"<b>{total_problems}</b><br>總題數",
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-                font=dict(size=15, color=color_map["FONT_CLR"]),
-            )
-        ],
-        showlegend=True,
-        legend=dict(font=dict(color=color_map["FONT_CLR"]), orientation="h", y=-0.15),
-        height=340,
-    )
-
-    st.plotly_chart(fig_donut, use_container_width=True, key="donut_chart")
-
-# ─────────────────────────────────────────
-# SECTION 4 — 題目特徵明細（下拉選單切換）
-# ─────────────────────────────────────────
-st.markdown("#### 🔍 題目特徵明細")
-
-selected = st.selectbox(
-    "選擇查看哪一刷題平台的題型分佈",
-    options=donut_labels,
-    index=0,
-    key="phase_select",
-)
-
-badge_color = dict(zip(donut_labels, [color_map["TEAL"], color_map["PURPLE"], color_map["ORANGE"]]))[selected]
-phase_total = dict(zip(donut_labels, donut_values))[selected]
-st.markdown(
-    f'<span style="background:{badge_color};color:#fff;border-radius:6px;'
-    f'padding:3px 14px;font-size:0.9rem;font-weight:700;">{selected}</span>'
-    f"　共 <b>{phase_total}</b> 題",
-    unsafe_allow_html=True,
-)
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 建立 DataFrame
-feat_data = topic_features[selected]
-df_feat = (
-    pd.DataFrame(feat_data.items(), columns=["題目特徵", "題數"])
-    .sort_values("題數", ascending=False)
-    .reset_index(drop=True)
-)
-df_feat.index += 1  # 排名從 1 開始
-total_feat = df_feat["題數"].sum()
-df_feat["佔比 (%)"] = (df_feat["題數"] / total_feat * 100).round(1)
-
-# 顯示範圍切換
-view_mode = st.radio(
-    "顯示範圍",
-    options=["Top 1 - 5", "Top 5 - 10", "All"],
-    index=0,
-    horizontal=True,
-    key="view_mode_radio",
-)
-
-if view_mode == "Top 1 - 5":
-    df_show = df_feat.head(5)
-elif view_mode == "Top 5 - 10":
-    df_show = df_feat.tail(5)
-else:
-    df_show = df_feat
-
-st.dataframe(
-    df_show,
-    use_container_width=True,
-    column_config={
-        "題數": st.column_config.ProgressColumn(
-            "題數",
-            min_value=0,
-            max_value=int(df_feat["題數"].max()),
-            format="%d 題",
-        ),
-        "佔比 (%)": st.column_config.NumberColumn("佔比 (%)", format="%.1f %%"),
-    },
-    hide_index=False,
-)
-
-# ─────────────────────────────────────────
-# SECTION 5 - GitHub 最近三個專案卡片
+# SECTION 2 - GitHub 最近三個專案卡片
 # ─────────────────────────────────────────
 st.markdown("### 🐙 GitHub 最近專案")
 st.caption("左右滑動查看")
@@ -426,20 +288,169 @@ for repo in recent_repos:
 cards_html += "</div>"
 st.markdown(cards_html, unsafe_allow_html=True)
 
+st.divider()
+# ─────────────────────────────────────────
+# SECTION 3 - KPI 卡片 — 四格
+# ─────────────────────────────────────────
+st.markdown("### 📊 KPI 總覽")
+k1, k2, k3, k4 = st.columns(4)
+
+with k1:
+    st.metric("📓 個人知識庫節點", obsidian_total, obsidian_delta)
+with k2:
+    st.metric("🐙 GitHub 專案", github_total, github_delta)
+with k3:
+    st.metric("👖 LeetCode SQL", leetcode_sql, leetcode_sql_delta)
+with k4:
+    st.metric("💻 LeetCode Python", leetcode_python, leetcode_python_delta)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────
+# SECTION 4-1 — Obsidian 技術主題橫向 bar chart
+# ─────────────────────────────────────────
+col_obs, col_lc = st.columns([3, 2])
+
+with col_obs:
+    df_obs = pd.DataFrame({"topic": list(obsidian_topics.keys()), "count": list(obsidian_topics.values())}).sort_values(
+        "count"
+    )
+
+    colors = [color_map["PINK"] if c == df_obs["count"].max() else color_map["PURPLE"] for c in df_obs["count"]]
+
+    fig_bar = go.Figure(
+        go.Bar(
+            x=df_obs["count"],
+            y=df_obs["topic"],
+            orientation="h",
+            marker_color=colors,
+            text=df_obs["count"],
+            textposition="outside",
+            textfont=dict(color=color_map["FONT_CLR"]),
+        )
+    )
+    fig_bar.update_layout(
+        **plotly_layout_base,
+        title=dict(text="📚 知識文檔技術主題分佈", font=dict(size=18, color=color_map["FONT_CLR"]), x=0),
+        xaxis=dict(showgrid=False, zeroline=False, tickfont=dict(color="#4a6a8a")),
+        yaxis=dict(showgrid=False, tickfont=dict(color=color_map["FONT_CLR"])),
+        height=320,
+    )
+    st.plotly_chart(fig_bar, width="stretch")
+
+# ─────────────────────────────────────────
+# SECTION 4-2 — 刷題三相 Donut
+# ─────────────────────────────────────────
+with col_lc:
+    total_problems = sum(donut_values)
+    fig_donut = go.Figure(
+        go.Pie(
+            labels=donut_labels,
+            values=donut_values,
+            hole=0.55,
+            marker=dict(colors=[color_map["TEAL"], color_map["PURPLE"], color_map["ORANGE"]]),
+            textfont=dict(color=color_map["WHITE"], size=12),
+            hovertemplate="%{label}<br>%{value} 題 (%{percent})<extra></extra>",
+        )
+    )
+    fig_donut.update_layout(
+        **plotly_layout_base,
+        title=dict(text="🏆 刷題三相分佈", font=dict(size=18, color=color_map["FONT_CLR"]), x=0),
+        annotations=[
+            dict(
+                text=f"<b>{total_problems}</b><br>總題數",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=15, color=color_map["FONT_CLR"]),
+            )
+        ],
+        showlegend=True,
+        legend=dict(font=dict(color=color_map["FONT_CLR"]), orientation="h", y=-0.15),
+        height=340,
+    )
+
+    st.plotly_chart(fig_donut, width="stretch", key="donut_chart")
+
+# ─────────────────────────────────────────
+# SECTION 5 — 題目特徵明細（下拉選單切換）
+# ─────────────────────────────────────────
+st.markdown("#### 🔍 題目特徵明細")
+
+selected = st.selectbox(
+    "選擇查看哪一刷題平台的題型分佈",
+    options=donut_labels,
+    index=0,
+    key="phase_select",
+)
+
+badge_color = dict(zip(donut_labels, [color_map["TEAL"], color_map["PURPLE"], color_map["ORANGE"]]))[selected]
+phase_total = dict(zip(donut_labels, donut_values))[selected]
+st.markdown(
+    f'<span style="background:{badge_color};color:#fff;border-radius:6px;'
+    f'padding:3px 14px;font-size:0.9rem;font-weight:700;">{selected}</span>'
+    f"　共 <b>{phase_total}</b> 題",
+    unsafe_allow_html=True,
+)
+st.markdown("<br>", unsafe_allow_html=True)
+
+# 建立 DataFrame
+feat_data = topic_features[selected]
+df_feat = (
+    pd.DataFrame(feat_data.items(), columns=["題目特徵", "題數"])
+    .sort_values("題數", ascending=False)
+    .reset_index(drop=True)
+)
+df_feat.index += 1  # 排名從 1 開始
+total_feat = df_feat["題數"].sum()
+df_feat["佔比 (%)"] = (df_feat["題數"] / total_feat * 100).round(1)
+
+# 顯示範圍切換
+view_mode = st.radio(
+    "顯示範圍",
+    options=["Top 1 - 5", "Top 5 - 10", "All"],
+    index=0,
+    horizontal=True,
+    key="view_mode_radio",
+)
+
+if view_mode == "Top 1 - 5":
+    df_show = df_feat.head(5)
+elif view_mode == "Top 5 - 10":
+    df_show = df_feat.tail(5)
+else:
+    df_show = df_feat
+
+st.dataframe(
+    df_show,
+    width="stretch",
+    column_config={
+        "題數": st.column_config.ProgressColumn(
+            "題數",
+            min_value=0,
+            max_value=int(df_feat["題數"].max()),
+            format="%d 題",
+        ),
+        "佔比 (%)": st.column_config.NumberColumn("佔比 (%)", format="%.1f %%"),
+    },
+    hide_index=False,
+)
+
+
 # ─────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────
-st.markdown("<br>", unsafe_allow_html=True)
+st.divider()
 st.markdown(
     """
-<div style="text-align:center; color:#e0e8f8; font-size:1.1rem; padding:1rem 0;">
+<div style="text-align:center; color:#e0e8f8; font-size:1.1rem; padding:0rem 0;">
     Sources from Leetcode.com |
     <a href="https://github.com/Jessie-Lin-810630"
        target="_blank"
        style="color:#90c2ff; text-decoration:none;">
        Github
     </a> | Personal Obsidian Vault | ccClub.io 💗 Feel free to reach out me on
-    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+    <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130"
        target="_blank"
        style="color:#90c2ff; text-decoration:none;">
        LinkedIn

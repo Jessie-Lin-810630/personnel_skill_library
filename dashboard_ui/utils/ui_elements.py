@@ -87,32 +87,40 @@ def _selected_axis_from_event(event):
     return _normalize_radar_label(customdata or theta)
 
 
-def _render_task_detail(title, labels, tasks_dict, chart_event, key_prefix):
+def _render_task_selectbox(labels, tasks_dict, chart_event, key_prefix):
     axis_options = _radar_axis_options(labels)
     selected_from_chart = _selected_axis_from_event(chart_event)
-    default_axis = selected_from_chart if selected_from_chart in axis_options else axis_options[0]
 
-    st.markdown(f"##### {title}")
     fallback_axis = st.selectbox(
-        "點擊下拉式選單決定軸向：",
+        "點擊下拉式選單決定軸向",
         options=axis_options,
-        index=axis_options.index(default_axis),
+        index=None,
+        placeholder="點擊下拉式選單決定軸向",
+        label_visibility="collapsed",
         key=f"{key_prefix}_axis_select",
     )
     selected_axis = selected_from_chart if selected_from_chart in axis_options else fallback_axis
+    return selected_axis, tasks_dict
+
+
+def _render_task_table(selected_axis, tasks_dict):
     task_df = _task_dataframe(selected_axis, tasks_dict)
-    st.dataframe(
-        task_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "經手任務": st.column_config.TextColumn(
-                "經手任務",
-                width="large",
+    with st.expander("收合/展開", expanded=True, type="compact"):
+        if task_df.empty:
+            st.info("點擊上方的下拉式選單決定軸向")
+        else:
+            st.dataframe(
+                task_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "經手任務": st.column_config.TextColumn(
+                        "經手任務",
+                        width="large",
+                    )
+                },
+                row_height=80,
             )
-        },
-        row_height=80,
-    )
 
 
 def make_radar(labels, values, color, title, tasks_dict):

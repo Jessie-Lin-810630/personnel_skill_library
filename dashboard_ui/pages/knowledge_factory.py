@@ -12,16 +12,6 @@ st.set_page_config(
 )
 _render_side_bar()
 
-# ── 最小化 CSS：只設定背景色、字體、少量卡片樣式 ──
-st.markdown(
-    """
-            <style>
-            /* 移除 Streamlit 預設上方留白 */
-            .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-            </style>
-            """,
-    unsafe_allow_html=True,
-)
 
 plotly_layout_base = dict(
     paper_bgcolor="rgba(0,0,0,0)",  # 代表完全透明 (Alpha = 0)
@@ -37,26 +27,27 @@ plotly_layout_base = dict(
 st.markdown(
     f"""
 <div style="
-    background: linear-gradient(135deg, #0d1526 0%, #1a2a4a 100%);
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
     border-radius: 16px;
-    padding: 2.5rem 3rem;
-    margin-bottom: 1.5rem;
+    padding: 2rem 3rem;
+    margin-bottom: 1.8rem;
     border: 1px solid #2a3550;
     text-align: center;
 ">
-    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.6rem; margin:0 0 0.5rem 0; font-weight:800;">
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; font-weight:800;
+        margin:0 0 0.6rem 0; line-height:1.1;">
         Knowledge Factory
     </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
         專案架構 — 不斷演進、不斷學習
     </p>
-    <p style="color:{color_map["TEAL"]}; font-size:1.1rem; margin:0 0 1.5rem 0; letter-spacing:1px;">
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
         <a href="https://github.com/Jessie-Lin-810630"
         target="_blank"
         style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
         Github
         </a>
-        <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+        <a href="https:www.linkedin.com/in/shu-jyuan-lin-6195b8130"
         target="_blank"
         style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
           |  LinkedIn
@@ -345,12 +336,12 @@ with col_atlas:
 # ─────────────────────────────────────────
 # Footer
 # ─────────────────────────────────────────
-st.markdown("<br>", unsafe_allow_html=True)
+st.divider()
 st.markdown(
     f"""
-<div style="text-align:center; color:{color_map["FONT_CLR"]} font-size:1.1rem; padding:1rem 0;">
+<div style="text-align:center; color:{color_map["FONT_CLR"]} font-size:1.1rem; padding:0rem 0;">
     💗 Feel free to reach out me on
-    <a href="www.linkedin.com/in/shu-jyuan-lin-6195b8130"
+    <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130"
        target="_blank"
        style="color:#90c2ff; text-decoration:none;">
        LinkedIn
