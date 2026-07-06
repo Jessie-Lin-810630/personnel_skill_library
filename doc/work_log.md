@@ -1623,6 +1623,11 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         `st.components.v1.html` will be removed after 2026-06-01.
         2026-07-02 16:00:45.280 Please replace `st.components.v1.html` with `st.iframe`.
         ```
+        - st.components.v1.html 在 Streamlit 1.56.0 已 deprecated
+        - 這個方法原本是用於在 iframe 中嵌入 html string，根據[官方文件](https://docs.streamlit.io/develop/api-reference/custom-components/st.components.v1.html)，v1.html 已經 deprecated，如果不想使用 iframe，則使用 st.html 方法，但如想繼續使用 iframe，應使用 [st.iframe](https://docs.streamlit.io/develop/api-reference/custom-components/st.components.v1.iframe)。
+        - 通常官方對純 HTML 字串的通用建議是 st.html，但這個方法是行內渲染、無 iframe 沙箱、且不支援 height/scrolling。
+        - 我們的[頁面設計所渲染](../dashboard_ui/pages/onenote_review.py)的是完整 `<html><head><style>... 文件（_WHITE_FRAME）加 base64 圖片`，需要沙箱隔離避免筆記 CSS 滲入整個 dashboard，也需要固定高度捲動框。
+        > 已改成 st.iframe，接受 HTML 字串、沙箱 iframe、支援 height，並已經解決此 warning。
     - 前端頁面設計修改為：
         - 圓點切換設計改成下拉式選單放在頁面旁邊，選單標題命名為`版號(dt)`，後面跟著提示可審閱版本數量，可審閱的版本數量意思是 `上次 archived"後到現在有多少份筆記是沒有被 rejected，現在可以開放審閱`。
         - 歸檔後 tag 分佈、note_type 分佈 ()
@@ -1666,3 +1671,49 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     變成了 "(0-4c3f19486a09451db`8f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209")"，此為模型隨機性，透過提示工程修改 system prompt 可以較為緩解。
     > 除了修改 system prompt，也已在 `onenote_note_metadata` 新增了 `md_frontmatter` 欄位，查核追蹤有效圖片數量，作為評估資料品質的依據，未來可以搭配視覺化工具來擴展前端圖表。
     > `md_frontmatter` 在 archive 與 reject 觸發後都會寫入，以評估好 md 與壞 md 的特性。(例如：哪類別的筆記容易被退件、歸檔的筆記是不是存在人工審查疏漏沒發現破圖)。
+
+## 20260705 Work log
+
+- MongoDB Atlas 連線結構優化：從「每次查詢都 new 一個 MongoClient」收斂成 module-level 單例
+    ```python
+    """學到的重點：
+    1. MongoClient 本身就設計成「長生命週期的單例」——它內建連線池 (connection pool) 且 thread-safe，
+       正確用法是整個程式共用一個，而不是每次查詢都 new 一個。
+    2. Streamlit 的 @st.cache_resource 是「跨 page、跨 session 全域共用」的快取，適合放連線這種資源；
+       但它「定義在哪個 module 就綁在哪」，A 頁定義的 cache_resource 函式，B 頁不能靠 import A 來重用
+       (import 會把 A 整頁 script 從頭重跑一遍)。
+    3. @st.cache_data 快取的是「回傳值 (資料)」，不是連線物件。把 get_db_atlas() 藏在 cache_data 函式裡，
+       TTL 到期或 .clear() 之後就會再 new 一個 client，舊的沒關、連線池殘留，長期累積逼近 Atlas 連線上限。
+    """
+    ```
+    - **情境**：dashboard 有四頁 (HOME / knowledge_factory / ai_knowledge_agent / onenote_review) 加上 agent_tools，全都要連同一個 Atlas cluster。原本 `get_db_atlas()` 每被呼叫一次就 `MongoClient(uri)` 建一個新 client。HOME 頁用 `@st.cache_resource` 包了一層還好，但 onenote_review 把它藏在 `@st.cache_data(ttl=60)` 的 `_load_versions()` 裡，每 60 秒 TTL 到、或每次 enrich 成功呼叫 `_load_versions.clear()`，就會再開一個新連線池。
+    - **優化前**：`get_db_atlas()` 無狀態，每次呼叫都建立新連線。
+        ```python
+        def get_db_atlas() -> Database:
+            mongo_uri = os.getenv("MONGO_ALTAS_URI")
+            db_name = os.getenv("MONGO_DB_NAME")
+            ...
+            client = MongoClient(mongo_uri)   # ← 每呼叫一次 new 一個，各自帶一整個連線池
+            return client[db_name]
+        ```
+        > 盲點：MongoClient 預設連線池最多 100 條連線，多頁 × 多次 cache miss 各開一個 client，舊 client 不會馬上被 GC 關閉、連線池殘留佔用，長時間跑會逼近 Atlas 低階 tier 的連線數上限 (如 M0 = 500) 而報 connection limit exceeded。app.py 那層 `@st.cache_resource` 只擋得住自己這頁的重複，那份快取是「app.py module 私有」的，其他頁 import 不到，等於各頁各自為政。
+    - **優化後**：把「取 client」收斂成 module-level lazy 單例，首次建立、之後所有 caller 重用同一份。
+        ```python
+        _atlas_db: Database | None = None
+
+        def get_db_atlas() -> Database:
+            global _atlas_db
+            if _atlas_db is not None:      # 已建立過 → 直接重用，不再 new client
+                return _atlas_db
+            mongo_uri = os.getenv("MONGO_ALTAS_URI")
+            db_name = os.getenv("MONGO_DB_NAME")
+            ...
+            _atlas_db = MongoClient(mongo_uri)[db_name]
+            return _atlas_db
+        ```
+        > 差異：現在四頁 + agent_tools 全部共用同一個 MongoClient 與同一個連線池，不管誰在哪頁、cache 命不命中，連線只建立一次。app.py 那層多餘的 `@st.cache_resource get_mongo_db()` 包裝也可以直接拿掉，改成 `db = mongo_utils.get_db_atlas()`。
+    - **為什麼要優化**：
+        - (a) **連線數**：避免「每次查詢就 new 一個 client」把 Atlas 連線池撐爆——在低階 tier 會直接報 connection limit exceeded。
+        - (b) **效能**：建立 MongoClient 要做 TLS handshake + cluster topology discovery，不便宜；重用單例省掉每次查詢的建連成本。
+        - (c) **語意正確**：MongoClient 官方就建議當單例用，「每次查詢開一個」是反模式 (anti-pattern)。
+        - (d) **為什麼用 module-level 單例而非 @st.cache_resource**：get_db_atlas() 也被 agent_tools (非純 page context) 呼叫，module 級單例不綁 Streamlit runtime、任何 caller 都能共用；`@st.cache_resource` 需要 script run context，通用性較差。
