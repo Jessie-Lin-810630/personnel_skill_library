@@ -153,7 +153,7 @@
     ---
     # Phase II 部署工作啟動前提
     ## 專案背景
-    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB Altas + GCP）
+    **專案名稱**：個人技能儀表板與知識庫訓練（Streamlit + MongoDB local/MongoDB atlas + GCP）
     **開發者**：Jessie Lin（生技製藥工程師、研究員，轉資料工程師）
     **目前狀態**：Phase I 已完成，進入 Phase II 雲端部署階段
 
@@ -197,7 +197,7 @@
 |初次全量建立 5,000 篇| ~4M tokens |$0.08（約 2.5 台幣）|
 |每週增量（50 篇新筆記| 50 篇~40K tokens|$0.0008（幾乎免費）|
 
-### Evaluate the loading on Vector database, MongoDB Altas.
+### Evaluate the loading on Vector database, MongoDB atlas.
 1. It is better to do data chunking because the content of each .md file are long-text which might occassionally exceeded the limit of context window of the furture LLM model or the limit of tokens of embedding model.
 2. The dimensions of vectors for the model `text-embedding-3-small` are `1536`, while for `Gemini embedding 2` are `3072`.
 
@@ -216,7 +216,7 @@
 
     假設你有 1,000 篇筆記，則 108 MB
     ```
-> `MongoDB Altas M0 Free Tier up to 512 MB, far from 108 MB`
+> `MongoDB atlas M0 Free Tier up to 512 MB, far from 108 MB`
 
 
 ## 20260526 Work log
@@ -228,8 +228,8 @@
     - 費用：$0.02 / 1M tokens（2025 年定價）
 2. Went to https://platform.openai.com/api-keys to create an API secret key (and set billing detail which needed credit card). Keep it in .env and secret managers.
 3. Created the scripts `task06/t_chunk_embed.py` and `task06_obsidian_embed_etl/l_upsert_vectors.py`. Successfully practiced chuncking and embedding the long text in three markdown files.
-4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on Altas.
-5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB Altas.
+4. Created the script `task06_obsidian_embed_etl/main.py`, to successfully insert the docs with embedded chunks to new collection `Obsidian_vectors` on atlas.
+5. Created the index for vector search by following the [hand-over](./task06_vctr_srch_idx_hand_over.md). The resulted collection `Obsidian_vectors` that contained the embedded chunks from the long texts in 63 .md files, took about 410 KB in MongoDB atlas.
 6.
 
 > Until 20260527, some questions might be solved or optimized:
@@ -237,7 +237,7 @@
     舊的 chunk_index 4、5 不會自動被刪除。
     目前資料量小，影響不大；若未來需要清理孤立 chunk，
     可在 upsert 前先 delete_many({"file_path": file_path})，再重新 insert。
-> 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 Altas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
+> 2. 根據這篇新聞(https://www.ithome.com.tw/news/173423)，發現 atlas 為 MongoDB 提供 Voyage embedding model，可以在使用 MongoDB 雲端資料庫時使用自動 embedding 功能，後續再考慮補上選型評估。
 
 ## 20260528 Work log
 1. Evaluated which AI agents are suitable for this project. Then exported to [report](./ai-agent-evaluation-report.md).
@@ -468,7 +468,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     > All the development since then will follows this hand-over to create the other spec. docs(if needed) and scripts.
 
 3. Created [python scripts](../task07_onenote_to_markdown/) for entire task07 pipeline.
-    > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB Altas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB Altas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
+    > The srcipt establishment also solved the issue on lack of audit logs in the processes of fetching OneNote, extracting by LLM and uploading to GCS. They are loaded to MongoDB atlas. Meanwhile, the metadata of linkage between original notes from OneNote and transformed notes by LLM are also created. Finally, three collections were established on MongoDB atlas as planned in the [hand-over doc](./task07_html_to_md_hand_over.md).
 
 ## 20260616 Work log
 1. Refactored `t_html_to_markdown()` to **save each page immediately** after LLM conversion (instead of accumulating all results in memory and flushing at the end), so that successfully converted notes are written to disk even if the pipeline stalls on a later page.
@@ -502,7 +502,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 3. By combining the [hand-over created by myself](task07_html_to_md_hand_over.md) and spec-driven development (SDD) tool OpenSpec, established the [`Note Reviewer` streamlit page](./../dashboard_ui/pages/onenote_review.py) and created the [archive endpoint](./../archive_service/) via python Flask.
 
 4. Summarized what has learned from the result of 1 & 2.
-    - gcs_archiver.py: Most of python function design followed the logistic of my hand-over, especially, how to get the markdown path, html path, image path correctly from the single-truth, MongoDB Altas `onenote_page_metadata`.
+    - gcs_archiver.py: Most of python function design followed the logistic of my hand-over, especially, how to get the markdown path, html path, image path correctly from the single-truth, MongoDB atlas `onenote_page_metadata`.
     - gcs_archiver.py: Commons downloading methods of blobs from GCS by python SDK:
 
         | 方法                     | 回傳型別        | 適用場景            |     行為         |
@@ -618,7 +618,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
 
             # Step 3A: 全庫 tag 字典字串比對
@@ -713,7 +713,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
 
             # Step 3A: alias 模糊比對，用來反查 tags，專治 tags 沒有正確標示、但是筆記名稱本身有符合查詢語意的時候
@@ -885,7 +885,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         search_optimize_method = None
 
         if agent_target == "rag_agent":
-            db = get_db_altas()
+            db = get_db_atlas()
             known_tags = _load_known_tags(db, "obsidian_vectors")
             alias_tag_pairs = _load_alias_to_tags_map(db, "obsidian_notes")
 
@@ -928,7 +928,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
     | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
     | 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `_extract_filter_tags()` 找到 MySQL 筆記 tag，包含： {'alias': 'MySQL資料型態', 'tags': ['MongoDB', 'MySQL', 'data-type', 'BSON'], 'score': 62.5} 與 {'alias': 'MySQL Window Function', 'tags': ['MySQL', 'SQL', 'window-function'], 'score': 95.23809523809523} 這兩份筆記，引導 rag agent 的 `vector search()` |
-    | 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，關於 partition_clause 的說明如下：<br>partition_clause 是資料表中的分區方式。在套用 Window Function 時，MySQL 會針對 partition_clause 分區後的每一個區塊，分別......您提供的其他筆記片段（來源 1、3、5）主要在討論資料庫的分片 (Sharding) 和分割 (Partitioning) 機制，以及 SQL 與 NoSQL 的比較，這些內容與 MySQL Window Function 中的 partition_clause 的具體用法關聯性較小。 | ⚠️ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次 filter tags ('MongoDB', 'MySQL', 'data-type', 'BSON', 'SQL')，最後 Window function parition clause 留在 LLM 的回覆參考中，但因為 vector search 是由 rag agent 繼承 tags 與追問 query 後重新計算相似度，造成此時混入新的筆記來源與追問語意較相似但是跟上一輪語意較遠，最後造成 rag agent 仍有部分上下文污染。在這輪測試中發現來源筆記變成了 |
+    | 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，關於 partition_clause 的說明如下：<br>partition_clause 是資料表中的分區方式。在套用 Window Function 時，MySQL 會針對 partition_clause 分區後的每一個區塊，分別......您提供的其他筆記片段（來源 1、3、5）主要在討論資料庫的分片 (Sharding) 和分割 (Partitioning) 機制，以及 SQL 與 NoSQL 的比較，這些內容與 MySQL Window Function 中的 partition_clause 的具體用法關聯性較小。 | ⚠️ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次 filter tags ('MongoDB', 'MySQL', 'data-type', 'BSON', 'SQL')，最後 Window function parition clause 留在 LLM 的回覆參考中，但因為 vector search 是由 rag agent 繼承 tags 與追問 query 後重新計算相似度，造成此時混入新的筆記來源與追問語意較相似但是跟上一輪語意較遠，最後造成 rag agent 仍有部分上下文污染。在這輪測試中發現來源筆記變成了 MongoDB 筆記 |
     | 3 | 追問 partition_clause 就好，不想知道分片機制。 | ⚠️ 回覆結果幾乎同上一輪，只是把分片機制刪掉而已。 |
     | 4 | 我只想知道 window function 用於「計算每個部門的平均薪資，您可以使用 PARTITION BY department，這樣平均薪資的計算就會在每個部門內部獨立進行，而不是對整個公司的薪資進行平均。」這個案例。 | rag | 供的筆記片段中，關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ⚠️ router agent 不知道這屬於追問，但靠著 user query 中不刻意提及非主題相關性的詞彙，router 會執行 `_extract_tags_via_alias()` 找到['MySQL', 'SQL', 'window-function'] 筆記 tag，正確回覆給使用者 |
 
@@ -982,7 +982,7 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 3. Refactored the pipeline of task06 to fit the required prompt format of `Gemini-embedding-2`.
 
-4. Meanwhile, fixed the pending defection of `upsert` behavior to MongoDB Altas collection which might leave silo, broken, and obsoleted data chunks if the length of chunks had been shorten after re-embedding a revised text. As the [resulted script](../task06_obsidian_embed_etl/l_load_to_mongodb.py), `deleteMany and insert` behavior replaced `upsert`.The doc of `all` the embedded chunks pointed to the same note file path would be deleted from the collection `obsidian_vectors_multimodal` first. Then new chunks were inserted. This should prevent the broken chunks left in the vector database after multiple rounds of embedding tasks to a note text.
+4. Meanwhile, fixed the pending defection of `upsert` behavior to MongoDB atlas collection which might leave silo, broken, and obsoleted data chunks if the length of chunks had been shorten after re-embedding a revised text. As the [resulted script](../task06_obsidian_embed_etl/l_load_to_mongodb.py), `deleteMany and insert` behavior replaced `upsert`.The doc of `all` the embedded chunks pointed to the same note file path would be deleted from the collection `obsidian_vectors_multimodal` first. Then new chunks were inserted. This should prevent the broken chunks left in the vector database after multiple rounds of embedding tasks to a note text.
 
 5. To save the requests to vertex AI API, [data capture change (CDC) approach](../task06_obsidian_embed_etl/l_load_to_mongodb.py) was implemented in refactoring. Only when the file on GCS was changed and the its embedding status in the collection `obsidian_notes` was not done (`embedding_done`=false) yet, the requests to Vertex AI API for embedding the text of the file would be performed. Otherwise, the requests would be skipped.
 
@@ -991,3 +991,729 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 7. Installed the linter and formattor via `pre-commit` and `ruff`.
 
 8. Updated the [hand-over of index creation](./task06_vctr_srch_idx_hand_over.md) to align the model type.
+
+## 20260625 Work log
+1. After changed the embedding model to multimodal models and migrate the collection of vector database from `obsidian_vectors` to `obsidian_vectors_multimodal`, the router and rag agents were tested again. This time key word search method was changed from `tags of note` to `file path of note` to avoid the context contamination in the follow-up questions in a session that was resulted by the less relevant tags of function `_extract_filter_tags()` inherited from the last question in the same session ([See Test case 2](#20260621-work-log)). In this change, inherited items was `file path of note from the last question`, I hope this could pinning the retreival scope in multi-run conversations with router,/rag agent. The testing materials included the `case 2 and case 3 ever used in 20260621 Work log` and one new case. The testing results were explained as follows.
+
+| Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+| ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+| 1 | 查詢MySQL的Window function | rag | 根據您提供的筆記片段，以下是關於 MySQL Window Function 的資訊：<br>架構：<br>Window function 的架構主要包含： | ✅ router agent 執行 `extract_file_paths_via_alias` 找到兩份筆記：["MongoDB 與 MySQL 資料型態彙整兼比較.md", "MySQL Window Function.md"]，引導 rag agent 的 `vector search()`，這一輪回答同前面測試結果、能夠聚焦在 Window function 的解釋 |
+| 2 | partition_clause 能否再講多一點  | rag | 根據您提供的筆記片段，以下是關於 `partition_clause` 的詳細說明.....`partition_clause` 的作用是定義資料表中的分區方式。當您指定了 `partition_clause` 後，MySQL 會將資料表分割成不同的區塊（或稱為「分區」）。接著，Window Function 會針對每一個獨立的分區， | ✅ router agent `_looks_like_followup()` 判斷屬於追問，繼承前次的兩份筆記，最後 Window function parition clause 留在 LLM 的回覆參考中，這一次 rag agent 的 `vector_search()` 計算後，取得的 top 5 chunk 都來自的 Window function 筆記，回答並無失焦、且無上下文污染。 |
+| 3 | 有用到partition的範例 | rag | 您提供的筆記片段主要是在說明 Kafka 的 Partition 概念，而不是 MySQL 的  | ⚠️ router agent 不認為是追問，所以執行了`extract_file_paths_via_alias()`，重新搜索跟 query 相似的筆記，結果歪樓找到 Kafka 的 partition 主題筆記，導致 rag agent 的檢索範圍再度被新筆記 "Kafka - Partition、Replication、Segment、Cleanup.md" 污染|
+| 4 | 你找看看 window function 的 cte 範例中是否有提過 partition | rag | 關於 MySQL Window Function 的 partition_clause，其作用是「資料表中的分區方式，分區完成後，MySQL 會針對分區後的每區塊，分別套用 window_function_name() 做運算。 | ❌ router agent 不知道這屬於追問，但靠著 user query 重新正面表述是 Window function 的 partition ，router 會執行 `02_knowledge_bases/MySQL Window Function.md` 找到精準筆記給 rag，但這樣正面表述法並不是每次都很符合人類的對話習慣。 |
+
+- Testing case 3 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | 容器化技術的核心在於隔離應用程式及其依賴，.... | ✅ router agent 執行 `_r_hyde_rewrite()` 重寫查詢語句，且一併回傳'docker' tag 給 rag agent，接著 rag agent 基於 tag 但不侷限 note file path (因為是 router agent 程式邏輯導致)，找到了筆記["Docker - 專有名詞與概念.md"]，從而開始聚焦在 docker |
+    | 2 | 找dev container  | rag | 根據您提供的筆記片段，以下是關於 Dev Container 的資訊...<br>定義與目的：... | ⚠️ router agent 不知道這屬於追問，直接執行 `extract_file_paths_via_alias` 找到兩份筆記["20260105 在 VS code 啟動Dev Container.md", "建置開發環境 - 使用 Dev container 與 Poetry 的差異.md"]，引導 rag agent 的 `vector search()` |
+    | 3 | 進一步詢問怎麼開啟 Dev Container 使用 Claude Code | rag | 根根據您提供的筆記片段，目前沒有直接說明如何「開啟 Dev Container 使用 Claude Code」的具體步驟... | ❌ router agent 執行 `_extract_filter_path_via_alias()`找到兩份筆記["Claude Code 基本組成.md", "Claude Code Prompt 相關核心思維.md"]，提供給 rag agent 的 `vector search()`，`但問題是這兩份筆記不是正確來源`，所以 rag agent 拿到錯誤命中的資料且又被限縮只能在這兩份筆記中做搜尋。 rag agent 應該要檢索到 ["20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md"] 這份筆記，然而這份筆記不論是file path 還是 tag 都沒有 dev container/container 的語意。 |
+
+> Conclusion:
+> 不論是 0621 還是 0625 用 file path 或 note tags 來作為 vector search 執行前的 prefilter，prefilter 本身就是雙面刃，雖然它在精準命中時能大幅提升回答品質、多輪對話中不會失焦，但在初始命中錯誤或漏掉時反而會把正確答案排除在外。
+
+2. Changed previous the RAG flow:
+    ```
+    # 舊版:
+    query
+    │
+    ├─ Router: intent 分類 (R1/R2)
+    │    └─ 如果 rag_agent → 啟動 tag 抽取流程:
+    │         ├─ Step A: _extract_filter_tags() ← 全庫 tag 字串比對
+    │         ├─ Step 2A: _extract_tags_via_alias() ← alias 模糊比對
+    │         ├─ Step 2B: _r_hyde_rewrite() ← HyDE + tag 推薦
+    │         ├─ _looks_like_followup() + 繼承上輪 filter_tags/file_paths
+    │         └─ Step 2C: 退化全庫搜索
+    │
+    ├─ vector_search(filter_tags=..., top_k=5) ← prefilter 硬排除
+    │
+    └─ LLM 生成回答
+
+    # 5 層 tag 抽取邏輯互相干擾，debug 困難
+    # prefilter 是 boolean 邏輯，tag/file_path 沒命中就把正確答案排除
+    # 追問繼承機制傳遞錯誤 → 後續每輪都歪
+    # 程式碼複雜度高（~350 行 router 邏輯）
+    ```
+
+    ```
+    # 新版
+    query + chat_history
+        │
+        ├─ Router: intent 分類 (R1/R2)  ← 職責單一化
+        │
+        └─ rag_query() 內部:
+            │
+            ├─ Step 3: Query Rewrite (帶 history)
+            │    ├─ rewritten_query  → 獨立問句（給 reranker）
+            │    ├─ expanded_query   → rewritten + tags（給 vector_search）
+            │    └─ recommended_tags → 純記錄用
+            │
+            ├─ Step 4: vector_search(expanded_query, 無 prefilter, top_k=10)
+            │
+            ├─ Step 5: Cohere rerank(rewritten_query, top_n=5)
+            │
+            └─ Step 6: LLM 生成回答
+    # 預期優勢：
+    # Router 只做 intent，rag_agent 封裝所有 retrieval 邏輯
+    # 不做 prefilter → 標籤缺失不會排除正確答案
+    # Query expansion → 軟性增強語意信號（而非硬排除）
+    # Reranker (cross-encoder) → 精準度遠高於 bi-encoder 向量距離
+    # 追問自動處理 → rewrite 看 history 就能補全指代
+    ```
+3. RAG agent 新版整體流程
+    ```
+    query + chat_history (最近3輪)
+            │
+            ▼
+    ┌──────────────────┐
+    │  Query Rewrite   │  ← 一次 LLM call，看著 history 改寫成獨立問句
+    │  (帶 history)     │     + 推薦 3-5 個 tags 做 query expansion（不做 prefilter）
+    └──────────────────┘
+            │
+            ▼ expanded_query（改寫句 + tag 關鍵字）
+    ┌──────────────────┐
+    │  Vector Search   │  ← 不加 filter，top_k=10~15
+    │  (無 prefilter)   │     讓向量語意自由匹配
+    └──────────────────┘
+            │
+            ▼ 10~15 candidate chunks
+    ┌──────────────────┐
+    │  Cohere Rerank   │  ← cross-encoder 精排
+    │                  │     用原始 query（不是 expanded），取 top 5
+    └──────────────────┘
+            │
+            ▼ top 5 reranked chunks
+    ┌──────────────────┐
+    │  RAG Agent LLM   │  ← 生成最終回答
+    │  (+ chat_history) │
+    └──────────────────┘
+    ```
+4. Testing result:
+
+- Testing case 1 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 幫我找NoSQL的CAP | rag | NoSQL 的 CAP 理論探討分散式架構下的三項權衡議題：Consistency... | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `幫我找CAP理論在分散式架構下的應用。` 推薦三個 tags，三個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | 找尋CAP  | rag | CAP理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning Tolerance (分區容忍)。這三者不可能兼顧，最多只能滿足其中兩種。... | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | CAP理論 | rag | 同上 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 1 | 找尋cap理論筆記然後摘要理論的主張。 | rag | CAP理論主張，在分散式架構下，一致性（Consistency）、可用性（Availability）和分區容忍（Partitioning Tolerance）這三者不可能同時兼顧，最多只能同時滿足其中兩種。  | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `找CAP理論的相關筆記` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。  |
+    | 1 | find the note about 'cap-theorem' | rag | CAP 理論探討分散式架構下的三項權衡議題，包含：Consistency (一致性)、Availability (可用性)、Partitioning tolerance (分區容忍)。這三者不可能兼顧，之間只能滿足其中二種。 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `find the note about 'cap-theorem'` 推薦兩個 tags，兩個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+
+- Testing case 2 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 查詢MySQL的Window function | rag | MySQL 的 Window function 架構主要包含 window_function_name(expression) OVER ([partition_clause], [order_clause], [frame_clause]) [new_column_name]。 | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢MySQL的Window function...` 推薦4個 tags，4個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 2 | partition_clause 能否再講多一點  | rag | partition_clause 用於資料表的分區方式，分區完成後，MySQL 會針對每個分區分別套用 window function 進行運算。 | ✅ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢MySQL的Window function...` 推薦9個 tags，9個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 3 | 我想要知道他的範例程式碼 | rag | 以下是關於 MySQL Window Function 的範例程式碼：範例 1：使用 DENSE_RANK() 進行排名，並透過 CTE 過濾出每個部門薪水前三名的員工 | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `MySQL Window function 的 partition_clause 的範例程式碼` 推薦9個 tags，9個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+
+- Testing case 3 for note querying and summarizing:
+
+    | Run number in one session | User Query | Route to which Agent | Agent's response |  Why unexpected |
+    | ------------------------- | ---------- | ---------------- | ---------------- | --------------- |
+    | 1 | 我想要找容器化技術 | rag | Dev Container 是由微軟提供的 VS code 插件，它使用 Docker 容器化技術來定義一個標準化的開發環境，並讓 VS code IDE 直接在該環境中工作。 (來源 1)... | ⚠️ router agent 執行  `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `容器化技術` 推薦4個 tags，4個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案，但是回得有點狹隘，原因是資料庫對於 docker/k8s 這類通識型的的筆記量少於 dev container。 |
+    | 2 | 進一步詢問怎麼開啟 Dev Container 使用 Claude Code | rag | 根據目前的筆記內容，無法提供詳細的步驟說明如何在 Dev Container 中開啟並使用 Claude Code。... | ✅ router agent 執行 `__r2_llm_classify()` 導向 rag agent， rag rewrite 後 `進一步詢問怎麼開啟 Dev Container 使用 Claude Code` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，鑑別出最具查詢意圖的答案。 |
+    | 3 | 那繼續找 ，改找 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md這份筆記中是否有claude code 投用於 dev container的章節 | rag | 在「20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md」這份筆記中，有提到如何讓 AI 參考 OpenSpec 來實作專案功能，其中包含「啟動 Claude Code」的步驟，但沒有直接說明將 Claude Code 投用於 Dev Container 的章節...不過，在另一份筆記「20260105 在 VS code 啟動Dev Container.md」中，有提到「在 Dev Container 中任意使用 Claude Code」，並參照「使用 Dev container 建置 Node 環境然後使用 Claude Code」。 (來源 5) 這兩份筆記片段可能暗示了將 Claude Code 與 Dev Container 結合使用的可能性，但具體的實作步驟或專門的章節在您提供的片段中並未出現。 | ✅ router agent 執行 `_r1_keyword_match()` 導向 rag agent， rag rewrite 後 `查詢 20260607 規格驅動開發 (SDD) - 用 Agent Skills 讓 AI 照著規格精準建置系統.md 這份筆記中是否有關於 Claude Code 應用於 Dev Container 的章節` 推薦16個 tags，16個 tags 都是真實存在的 tags。 `vector search()` 後 `rerank` 語意相關度差距拉大，但最高只有 0.7，不過模型仍給出一些可能的探索空間，所以可再追問一次。 |
+    | 4 | 原來如此，那如果找「使用 Dev container 建置 Node 環境然後使用 Claude Code 」這個章節呢? 這章節裡面提到什麼全部列給我看 | rag | 根據您提供的筆記片段，關於「使用 Dev container 建置 Node 環境然後使用 Claude Code」這個主題，可以整理出以下資訊：<br>核心概念: 這部分內容是關於如何在 Dev Container 中建立 Node.js 開發環境，並能夠自由使用 Claude Code。 (來源 1, 來源 2)<br>參考資料: 提供了一個 GitHub 連結作為參考教材：https://github.com/deancourse/claude-code-docker-container-demo#。 (來源 3)<br>相關筆記: 提到了「20260105 在 VS code 啟動Dev Container」這份筆記。 (來源 1, 來源 2)...<br>目前提供的筆記片段中，沒有更詳細的步驟或內容說明具體如何在 Dev Container 中建置 Node.js 環境並使用 Claude Code，僅提及了這個主題、一個參考連結以及相關的筆記名稱。 | ✅ rag agent 這次回答得十分貼近筆記內文真實的面貌，測試通過。 |
+
+## 20260701 Work log
+1. Initiate the task07 with lazy loading in the branch `feature/html-to-markdown` based on the requirement changes description in [task07_onenote_versioned_etl_hand_over_v2](./task07_onenote_versioned_etl_hand_over_v2.md). New goal in the task07 was "implementation of the incremental loads for the raw notes of OneNote app and keeping the historical versions available", and "open the LLM call for document enrichment being triggered on demand to reduce the waste of token".
+> In previous task07, the historical versions of note from OneNote cannot be accessible unless using GCS versioning control; However, the latter one could not be easily read and check directly on GCP console. So, the [variants](../task07_onenote_to_markdown_lazy_loading/) of original task07 was created in this branch.
+
+2. To meet the new goals, the schema of collections in this task07 was also revised to carefully make sure the data lineage and datalogs. New schema definition also referred to [task07_onenote_versioned_etl_hand_over_v2](./task07_onenote_versioned_etl_hand_over_v2.md).
+
+3. Start to implement the codes against the hand-over, the learning notes from this part was written as follows.
+
+- MSAL module
+    ```python
+    """Procedure:
+    1. 連線應用程式中心後，優先嘗試自動更新 (用 Refresh Token 換新的 Access Token)
+    2. 失敗時才提示登入（Device Flow）取得新 Token。
+    3. 最後存檔將 Token 持久化，以利下次能自動更新。
+    """
+    import msal
+    from pathlib import Path
+
+    def _build_msal_app() -> tuple[msal.PublicClientApplication,
+                                    msal.SerializableTokenCache]:
+        """建立可快取物件 cache 與 Microsoft 應用程式物件 app。不回傳 token。
+
+        此函式會自動檢查全域變數 CACHE_PATH (Path 物件) 是否存在，
+        若存在則會讀取並載入先前的快取紀錄。
+
+        **Notes**:
+            此函式本身不會將更新後的快取寫回硬碟，呼叫端需自行負責後續儲存。
+
+        Returns:
+            tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
+                傳回設定好的 MSAL 應用程式實例與 Token 快取物件。
+        """
+        # 建立可被序列化（也就是能轉成文字存成檔案）的快取物件 cache
+        cache = msal.SerializableTokenCache()
+        # 檢查指定的路徑（CACHE_PATH, Path 物件）下有沒有先前存好的快取檔案
+        # 本機測試可以考慮把 CACHE_PATH 建在 ~/.config/ 下
+        if CACHE_PATH.exists():
+            # 用 .deserialize() 把裡面的文字資料讀進記憶體的快取物件
+            cache.deserialize(CACHE_PATH.read_text())
+
+        # 建立 PublicClientApplication 物件
+        # CLIENT_ID 為應用程式註冊識別碼，AUTHORITY 為微軟的身分驗證中心網址
+        app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
+        return app, cache
+
+    def get_token() -> tuple[str,
+                            msal.PublicClientApplication,
+                            msal.SerializableTokenCache]:
+        """Acquire access token; triggers device-flow login when no cached token exists."""
+
+        # 1. 建立應用程式物件、快取物件
+        app, cache = _build_msal_app()
+
+        # 2. 從應用程式的快取中尋找是否有記錄著使用者帳號
+        accounts = app.get_accounts()
+
+        # 3. 嘗試在背景自動取得 Token。若有快取帳號且 Access Token 已過期，會自動用 Refresh Token 刷新。
+        result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
+
+        # 4. 如果無法在背景靜態取得 Token（無帳號或快取提前失效），則觸發互動式登入
+        if not result:
+
+            # 啟動裝置驗證流程 (Device Flow)
+            # initiate_device_flow() 跟 acquire_token_by_device_flow() 配合使用
+            flow = app.initiate_device_flow(scopes=SCOPES)
+            if "user_code" not in flow:
+                logger.error(f"Device flow initiation failed: {flow}")
+                sys.exit(1)
+            print("\n" + flow["message"])
+            print("等待瀏覽器授權完成...")
+            result = app.acquire_token_by_device_flow(flow)
+
+        # 5. 將最新的快取狀態序列化，寫回硬碟檔案中（確保下次能靜態自動更新）
+        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CACHE_PATH.write_text(cache.serialize())
+
+        # 6. 若最後仍未成功取得 access_token，終止程式並記錄錯誤訊息
+        if "access_token" not in result:
+            logger.error(f"Auth failed: {result.get('error_description', result)}")
+            sys.exit(1)
+
+        return result["access_token"], app, cache
+    ```
+    > 可思考的是，這2支函式每次執行都只能在地端 CLI 手動觸發跑，如果需要設計成 Web 服務讓使用者到彈出式瀏覽器打開做第一次登入授權，然後第二次開始都自動化啟動函式且更新 token，則這 2 個函式的授權策略與金鑰存放地點需要改動。
+    > 但是 OneNote Graph API 自 2025 年起已經不支持採用 Client Credentials flow 驗證機制的 app-only authentication。需由人做 delegated authentication。
+- Slide Window 演算法做 API Ratelimiter
+    ```python
+    """核心設計：
+    1. 閱讀官方說明確認 rate-limit rule
+    2. 設計 rate buffer 空間
+    3. 用 deque() 管理一段時間窗口內實際發生的請求時間點，失效的時間點不納入佇列
+    4. Sliding-window 計算要等多久來達到重置時間點。
+    5. 用 time.sleep() 暫停請求，直到跨過重置時間點。
+    """
+    class RateLimiter:
+    """Sliding-window (滑動窗口演算法) limiter enforcing OneNote API caps (120/min, 400/hour)."""
+
+    def __init__(self, per_minute: int = 115, per_hour: int = 380):
+        self.per_minute = per_minute
+        self.per_hour = per_hour
+        self._min_q = deque()  # 紀錄一分鐘內的請求時間
+        self._hour_q = deque()  # 紀錄一小時內的請求時間
+
+    def acquire(self):
+        while True:
+            now = time.time()
+            while self._min_q and now - self._min_q[0] > 60:
+                self._min_q.popleft()
+            while self._hour_q and now - self._hour_q[0] > 3600:
+                self._hour_q.popleft()
+            wait = 0
+            if len(self._min_q) >= self.per_minute:
+                # 預測下一次重置請求量的時間點，且扣除現在時間點，即可得到還要等多久才能觸達重置時間點。
+                wait = max(wait, self._min_q[0] + 60 - now)
+            if len(self._hour_q) >= self.per_hour:
+                wait = max(wait, self._hour_q[0] + 3600 - now)
+            if wait <= 0:
+                break
+            logger.info(f"[rate limiter] waiting {wait:.1f}s "
+                        f"(min={len(self._min_q)}/115, hour={len(self._hour_q)}/380)")
+            # time.sleep() 實際表現出來的睡眠時間長度會有浮點數誤差，+0.05 以確保迴圈下一輪一定可以走到 break
+            time.sleep(wait + 0.05)
+        now = time.time()
+        self._min_q.append(now)
+        self._hour_q.append(now)
+    ```
+- `api_get()` 的錯誤處理：從「先成功、再看 status_code」改為 try/except 分層 + timeout，並釐清 onenote_graph_api_logs 的 log 寫入責任
+    ```python
+    """學到的重點：
+    1. requests.get() 若沒設 timeout，遇到伺服器 hang 住不回應時會「無限等待」，
+       連 requests.exceptions.Timeout 都不會被拋出——所以 timeout 是讓後續捕捉能生效的前提。
+    2. 「有回應但狀態碼不好 (401/429/5xx)」和「連請求都送不出去 (連線逾時、DNS 失敗、
+       連線被 reset、endpoint 壞掉)」是兩種不同層次的錯誤，要分開接。
+    3. 4xx 裡除了 401/429 之外 (如 400/403/404) 屬於非暫時性錯誤，重試 10 次也不會變好，
+       應寫一筆 log 後直接往上拋，不浪費配額。
+    4. log 寫在哪一層要想清楚：同一次失敗如果內層 (api_get) 與外層 (download_notebooks)
+       都各寫一次 onenote_graph_api_logs，會產生重複列，且外層用 status_code=0 反而蓋掉內層真實的狀態碼。
+    """
+    ```
+    - **修改前**：先 `r = requests.get(...)` 拿到回應物件，再用一連串 `if r.status_code == 401 / 429 / >=500` 判斷。
+        ```python
+        r = requests.get(url, headers=headers, stream=binary)   # ← 沒有 timeout
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        if r.status_code == 401 and not token_refreshed: ...
+        if r.status_code == 429: ...
+        if r.status_code >= 500: ...
+        r.raise_for_status()
+        return r
+        ```
+        > 盲點：只要 `requests.get()` 這一行本身在傳輸層就噴例外 (Timeout / ConnectionError / DNS 解析失敗 / endpoint 壞掉)，程式根本走不到後面的 `r.status_code`，例外會直接穿透整個 `for attempt in range(1, 11)` 重試迴圈往上拋，**既不重試、也不留 log**。再加上沒設 timeout，伺服器 hang 住時會卡死。
+    - **修改後**：把 `requests.get()` 包進 `try`，並加 `timeout=REQUEST_TIMEOUT`；用 `r.raise_for_status()` 把非 2xx 統一轉成 `HTTPError`，再分兩層 `except` 接。
+        ```python
+        REQUEST_TIMEOUT = (10, 60)  # (connect, read) 秒
+
+        for attempt in range(1, 11):
+            try:
+                r = requests.get(url, headers=headers, stream=binary, timeout=REQUEST_TIMEOUT)
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                r.raise_for_status()          # 非 2xx → 拋 HTTPError
+                return r
+            except requests.exceptions.HTTPError as e:
+                r = e.response                # 從例外物件取回 response
+                status_code = r.status_code
+                if status_code == 401 and not token_refreshed: ...   # 換 token 重試
+                elif status_code == 429: ...                          # 退避重試
+                elif status_code >= 500: ...                          # 退避重試
+                else:                                                 # 其他 4xx
+                    log_api_call(..., status_code=status_code, ...)
+                    raise                     # 不重試，直接拋
+            except requests.exceptions.RequestException as e:
+                # Timeout / ConnectionError / DNS 失敗等傳輸層錯誤
+                log_api_call(..., status_code=0, error_msg=str(e))    # status_code=0 代表沒拿到回應
+                time.sleep(2 ** attempt * 5)  # 指數退避後重試
+                continue
+
+        # retry 耗盡：補一筆「收尾列」再拋 RuntimeError，讓 api_get 成為 onenote_graph_api_logs 的完整單一來源
+        log_api_call(..., status_code=0, error_msg=f"Request failed after 10 retries: {url}")
+        raise RuntimeError(f"Request failed after 10 retries: {url}")
+        ```
+        > 差異總結：(1) `HTTPError` 是 `RequestException` 的子類別，所以 `except HTTPError` 一定要放在 `except RequestException` 前面，否則傳輸層以外的 HTTP 錯誤會被前者攔截後就進不到分流；(2) 傳輸層錯誤時可能連 `r` 都沒有，log 用 `status_code=0` 標記「沒有回應」，並把 `latency_ms` 重算到出錯當下；(3) 只有 401/429/5xx 與傳輸層錯誤會 `continue` 重試，其餘 4xx 直接 `raise`。
+    - **踩到的坑：重複的 log**。`download_notebooks()` 呼叫 page content 那一支 `api_get()` 時用 `try/except Exception` 包住。原本 except 裡「又」寫了一筆 `log_api_call(..., status_code=0)`，於是一次 4xx 失敗會在 onenote_graph_api_logs 產生 **2 筆**：內層 api_get 已寫過正確 `status_code` (如 404)，外層再寫一筆 `status_code=0`，反而把真實狀態碼蓋掉、也誤導判讀。
+        ```python
+        # download_notebooks() 內：只保留 onenote_graph_api_logs (page 層狀態)，不再寫 onenote_graph_api_logs
+        try:
+            raw_html = api_get(..., page_id=page_id).text
+        except Exception as e:
+            # C1 request 層 log 已由 api_get() 內部 (逐次 attempt + 收尾列) 完整寫過，
+            # 這裡只記 onenote_graph_api_logs 的 page 層狀態，避免重複寫 C1、也避免 status_code=0 蓋掉真實碼
+            upsert_version_meta(page_id, dt,
+                                set_fields={..., "status": "fetched_failed", "error_msg": str(e)})
+            continue
+        ```
+        > 職責分離結論：**C1 (request 層稽核) 全歸 `api_get()`**——逐次 attempt 失敗 + 4xx/retry 耗盡的收尾列都在這寫；**C3 (page 層生命週期) 全歸 `download_notebooks()`**——只記 `status=fetched_failed`。這樣同一次失敗在 C1 不再重複，「這頁最終失敗」在 C1 (收尾列) 與 C3 (fetched_failed) 各有對應、可交叉追溯。
+- `request_id` 該由誰生成：注入 (往下傳) 而非回傳 (往上拿)
+    ```python
+    """學到的重點：
+    1. request_id 的語意是「同一個邏輯請求 (含其 retry) 共用一個 ID」，
+       用來把 C1 裡分散的多筆列 join 回同一次請求。
+    2. api_get() 內部的「失敗 attempt log」是在『執行中、還沒 return 之前』就寫進 C1 的，
+       所以 request_id 必須在『進入 api_get 的當下』就已確定——這是選型的決定性條件。
+    3. api_get() 會 raise (4xx / retry 耗盡 / token 刷新失敗)，raise 時沒有回傳值。
+    """
+    ```
+    - **情境**：`download_notebooks()` 在 `api_get()` 成功拿到 `raw_html` 後，還會在外面補寫「hash 未變動跳過」或「新版本已存」的結果列。這些結果列與 api_get 內部的失敗 attempt 列，本質上都是「同一次請求」的衍生，理應共用同一個 request_id 才能 join。
+    - **為何不用「回傳式」`return response, request_id` 讓外部 unpack**：
+        - (a) **raise 死穴**：api_get 一旦 raise 就沒有回傳值，呼叫端在**失敗時拿不到** request_id；但要關聯 log 最需要 ID 的時機恰恰是失敗時。要補救得自訂例外把 id 塞進 exception 帶出，machinery 變多、職責更糊。
+        - (b) **時序兜不起來**：失敗 attempt 列是 mid-call 當下就寫的，若等 api_get 結束才回傳 id，那些列早已用某個 id 寫進去、呼叫端事後才知道，順序上對不上 (何況失敗根本 return 不到)。
+        - (c) **破壞 fluent 串接**：現在各處是 `api_get(...).text` / `.json()` / `.content` 直接鏈；改回傳 tuple 後連 listing、圖片這些不在乎 id 的呼叫都被迫 `resp, rid = api_get(...)`。
+    - **採用「注入式」**：request_id 由呼叫端 (= 一個 page 的邏輯操作範圍) 先生成，再傳進 api_get 共用；api_get 只是**繼承**這個 context，不是它的擁有者。它預設仍自己生成 (`request_id = request_id or uuid.uuid4().hex[:12]`)，只有「結果要在 api_get 外面被補記 log」的 page content 呼叫才注入。
+        ```python
+        # api_get(): 省略則自生成；呼叫端有傳就共用
+        def api_get(..., request_id: str | None = None):
+            request_id = request_id or uuid.uuid4().hex[:12]
+
+        # download_notebooks(): page 層先生成，注入 content 呼叫，結果列共用同一 id
+        request_id = uuid.uuid4().hex[:12]
+        raw_html = api_get(..., page_id=page_id, request_id=request_id).text
+        ...
+        log_api_call(..., request_id=request_id, status="success", downloaded=False)  # 掛同一 id
+        ```
+        > 這就是 dependency injection 的味道：把「上下文」往下傳、而不是往上回傳。反面案例 (listing、`_store_images` 的圖片呼叫) 各自是獨立邏輯請求，本來就該有自己的 id，所以**不注入**、讓 api_get 自生成——「不同 url endpoint 不同 request_id」正是預期行為。
+
+- `PurePosixPath()` vs. `Path()` 解析 URI 字串
+    - Path() 下面有兩個子類別 PosixPath() 與 WindowsPath()，建立 Path() 物件時，會自動根據機器的文件系統來建立出 PosixPath 類別或 WindowsPath，像是 Mac 系統就會建成 PosixPath 類別:
+    ```python
+        from pathlib import Path
+        print(type(Path.home()))
+        # 在 Mac 上執行的話就會出現 <class 'pathlib.PosixPath'>
+    ```
+    - PurePosixPath() 則是一律用 Posix 規則來解析傳入的路徑字串，不會因為作業系統差異而解析不同。底層運作也不涉及任何文件檔案系統 (不會調用 resolve 等)，純粹是解析字串。當要解析的字串本身是帶有冒號之類的路徑字串時，例如: URI 字串，PurePosixPath() 不隨作業系統而有解析差異。
+    ```python
+        from pathlib import Path
+        Path("s3://bucket/key.jpg").suffix # 輸出 '.jpg'  在 Linux/Mac 上没问题，但在 Windows 可能會把 s3: 理解為盤符。
+        PurePosixPath("s3://bucket/key.jpg")  # 就沒有差異了，不論什麼系統都用 Posix 解析，而 URI 本身也是遵循 Posix 規則。
+    ```
+4. Established the ETL scripts of task07 with lazy loading, named as [`task07_onenote_to_markdown_lazy_loading`](../task07_onenote_to_markdown_lazy_loading/) to distinguish from the previous task07. Since T and L task would be triggered on demand in frontend UI, their python scripts will be delivered to the `branch feature/dashboard-ui` for integration.
+
+## 20260702 Work log
+1. Switched to the branch feature/dashboard-ui and established the new page [`onenote_versioned_review`](../dashboard_ui/pages/onenote_versioned_review.py) using python streamlit module. The web page utilized [`silver_service`](../silver_service/app.py) endpoint using python flask module to realize the document enrichment by LLM call on-demand.
+
+2. Questions when practing 1. were noted down as follows. Some of them were not actually faced problems but predicted by myself.
+
+- What will happen if user logged in the web page and selected one of notes to started human review process but in the meanwhile the bronze layer task (downloading the latest html note from OneNote graph API) ran as scheduled? What is the impact on the collection `onenote_note_metadata` in MongoDB Atlas database when reading (to render frontend) and writting (to save metadata of new downloaded note)?
+
+- Timeout in regeneraton step may happen if the image size is larger.
+```bash
+2026-07-02 14:50:50.520 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:387 - [enrich failed] Untitled: No JSON in response: None
+
+2026-07-02 14:50:50.523 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-b43f9de7dc534591aefa34e1f6fb45b7!1-A5F7F5395D4FB9F!209, dt=2026-07-02, trigger=regenerate → enrich_failed
+```
+
+- Guard of LLM call quota work normally.
+```bash
+127.0.0.1 - - [02/Jul/2026 14:58:07] "POST /enrich HTTP/1.1" 200 -
+2026-07-02 15:00:23.330 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:305 - [regenerate] html_hash=e32f98dc 已達上限 2 次
+
+2026-07-02 15:00:23.330 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-0849dd0b84ac43de85e1707f7dcdaaf6!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+```
+
+- 針對"生技製劑筆記本/General Technical Knowledge/Saline"筆記測試:
+1. 下拉式清單點選該筆記後，頁面成功顯示這份筆記屬於哪個分區 (=哪一天透過 bronze 上傳到GCS的)，且顯示尚未LLM 生成筆記 ("🟠 未生成")。
+2. 接著網頁確實自動 calling LLM，成功生成後，四處地點的顯示結果如下：
+    - terminal logger
+    ```bash
+    2026-07-02 15:06:45.710 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+    2026-07-02 15:06:45.728 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（5726 tokens）
+
+    2026-07-02 15:06:45.729 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=on_demand → pending_review
+    ```
+
+    - Streamlit 網頁跳出 LLM 生成的 Markdown ，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        {
+        "_id" : ObjectId("6a460e05a007164164223750"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:06:45.605+0000"), // 確實是生成日的 UTC 時間
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "on_demand",
+        "status" : "success",
+        "latency_ms" : NumberInt(21107),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(948),
+        "total_tokens" : NumberInt(5726),
+        "environment" : "local",
+        "error_msg" : null
+    }
+    ```
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:06:45.711+0000"), // 確實排在 LLM 回應給 silver_serivce 後。
+        "md_md5" : "Whtn34q7R+K2s+mU+lhHVg==",  // 如實寫入
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+3. 故意點選 `regenerate` 觸發再生成後，上面提及的四個地點變成:
+
+    - terminal logger
+    ```bash
+        2026-07-02 15:33:33.463 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+        2026-07-02 15:33:33.482 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（6459 tokens）
+
+        2026-07-02 15:33:33.484 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+    - Streamlit 網頁自動刷新為 LLM 再版的 Markdown，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第一筆尚在
+        // 新增第二筆如下：
+        {
+        "_id" : ObjectId("6a46144da007164164223751"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:33:33.353+0000"),
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "regenerate",
+        "status" : "success",
+        "latency_ms" : NumberInt(22884),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(843),
+        "total_tokens" : NumberInt(6459),
+        "environment" : "local",
+        "error_msg" : null
+        }
+    ```
+
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:33:33.463+0000"), // 刷新了，上一版的被覆蓋
+        "md_md5" : "I04xzLBR9j0ryj9COqVdCQ==", // 刷新了，上一版的被覆蓋
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確，但也導致上一版的被覆蓋
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+
+4. 第二次故意點選 `regenerate` 觸發再生成後，上面提及的四個地點:
+
+    - terminal logger
+    ```bash
+    2026-07-02 15:47:16.594 | INFO     | task07_onenote_to_markdown_lazy_loading.l_save_markdown:save_enriched_md:24 - 💾 Silver md 已存 → gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md
+
+    2026-07-02 15:47:16.610 | SUCCESS  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:408 - enriched Saline（6161 tokens）
+
+    2026-07-02 15:47:16.612 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+    - Streamlit 網頁自動刷新為 LLM 再版的 Markdown，狀態改為
+    ```plaintext
+    版本（同名筆記的各 dt= 分區）
+    dt=2026-07-01　(2026-07-01 08:11:49)　✅ 已生成
+    ```
+
+    - MongoDB Atlas Collection 'multimodal_llm_enrichment_logs':
+    ```json
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第一筆尚在
+        // {"_id" : ObjectId("6a460e05a007164164223750"),....} 第二筆尚在
+        // 新增第三筆如下：
+        {
+        "_id" : ObjectId("6a461784a007164164223752"),
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "timestamp" : ISODate("2026-07-02T07:47:16.488+0000"),
+        "event_type" : "llm_enrichment_call",
+        "model" : "gemini-2.5-flash",
+        "cache_hit" : false,
+        "trigger" : "regenerate",
+        "status" : "success",
+        "latency_ms" : NumberInt(20751),
+        "input_tokens" : NumberInt(2636),
+        "output_tokens" : NumberInt(982),
+        "total_tokens" : NumberInt(6161),
+        "environment" : "local",
+        "error_msg" : null
+        }
+    ```
+
+    - MongoDB Atlas Collection 'onenote_note_metadata':
+    ```json
+        {
+        "_id" : ObjectId("6a44cbc5bf6e2cc35fab29a5"),
+        "dt" : "2026-07-01",
+        "page_id" : "0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209",
+        "archived_at" : null,
+        "embedded_status" : false,
+        "error_msg" : null,
+        "html_downloaded_at" : ISODate("2026-07-01T08:11:49.956+0000"), // 時間與前端網頁顯示時間相同
+        "html_hash" : "5d33e85769205d10ef099ac4a5b65a989248aa06ea572b5a3f716e0974ee8479",
+        "html_md5" : "YP6j+D7gFLTq300UF+q31g==",
+        "html_path" : "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.html",
+        "img_archive_path" : null,
+        "img_md5" : [
+            "eAgL7P1I8PpfbM4Dtpqc0g=="
+        ],
+        "img_path" : [
+            "gs://onenote-vaults/raw-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/_images/0-d90534f90272456eb72715e96c0d6d80!1-A5F7F5395D4FB9F!209.png"
+        ],
+        "md_archive_path" : null,
+        "md_exported_at" : ISODate("2026-07-02T07:47:16.595+0000"), // 刷新了，再次被覆蓋
+        "md_md5" : "teDegRXTRtwy/E55hLVrSA==", // 刷新了，上一版的被覆蓋
+        "md_path" : "gs://onenote-vaults/processed-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-01/Saline.md",  // 路徑正確，但也導致上一版的被覆蓋
+        "notebook" : "生技製劑筆記本",
+        "onenote_user_id" : "lucky460721",
+        "page_title" : "Saline",
+        "review_result" : null,
+        "reviewed_at" : null,
+        "reviewed_by_role" : null,
+        "section" : "General technical knowledge",
+        "status" : "pending_review"  // 生成後進入 review 關卡
+        }
+    ```
+
+5. 第三次故意點選 `regenerate` ，跳出 `regenerate quota exceeded`，正確擋下 regenerate 需求。
+    - 故意切到其他筆記後再點選一次 `regenerate`，仍然正確地擋下 regenerate 需求。
+    - 重新整理頁面，再登入一次後，點選 `regenerate`，仍然正確地擋下 regenerate 需求。
+    - Terminal logger 輸出如下:
+
+    ```bash
+        2026-07-02 16:00:45.443 | WARNING  | task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown:t_enrich_html_to_markdown:305 - [regenerate] html_hash=5d33e857 已達上限 2 次
+
+        2026-07-02 16:00:45.443 | INFO     | __main__:enrich:61 - [silver] enrich: page_id=0-83a74cd3c68a48f284ac9ea148398247!1-A5F7F5395D4FB9F!209, dt=2026-07-01, trigger=regenerate → pending_review
+    ```
+
+6. 針對初步測試總結似乎可以優化的地方：
+    - 大檔案的 `regenerate` 會 timeout 失敗
+    - LLM 生成時所套的 tags 是基於他的訓練資料來生成，長遠來看，客製化的向量資料庫是不是應該要餵給他 tags references set，以確保他可以為 enriched content 挑 tags 時，有一定的比例是符合企業文化的關鍵字、另外比例則是仰賴生成技術為企業潛在的資訊/知識冰山做紀錄。
+    > 跟 CLAUDE Opus 4.8 CHAT 討論後:
+    > 第一: rewriter model 的工作流目前是每一輪都要「看著整份 tag 清單」來挑推薦與重寫查詢語句。清單就是它的 per-query 輸入，如果 tags 基數爆炸，trade-off 就是每輪 token 變貴、嚴重者 attention 被稀釋，要從幾千個 tag (其中可能有一堆只出現一次的噪音) 裡挑出對的幾個，讓查詢品質掉。
+    > 第二: 語意漂移會稀釋 tag 本來要給的「集中效應」。 tag 之所以能拉高 recall,靠的是同一概念被一致地、重複地標記,把語意質量集中到一個點,讓改寫後的查詢向量能被拉進那一區。一旦 k8s / kubernetes / 容器編排 散成三個,這個「重複」就沒了,推薦哪個都像擲骰子,拉力變弱。注意這裡的傷害形態是recall miss(相關 chunk 沒被撈出來),而不是精度下降。
+
+    - streamlit app 執行時的 warning:
+        ```bash
+        `st.components.v1.html` will be removed after 2026-06-01.
+        2026-07-02 16:00:45.280 Please replace `st.components.v1.html` with `st.iframe`.
+        ```
+        - st.components.v1.html 在 Streamlit 1.56.0 已 deprecated
+        - 這個方法原本是用於在 iframe 中嵌入 html string，根據[官方文件](https://docs.streamlit.io/develop/api-reference/custom-components/st.components.v1.html)，v1.html 已經 deprecated，如果不想使用 iframe，則使用 st.html 方法，但如想繼續使用 iframe，應使用 [st.iframe](https://docs.streamlit.io/develop/api-reference/custom-components/st.components.v1.iframe)。
+        - 通常官方對純 HTML 字串的通用建議是 st.html，但這個方法是行內渲染、無 iframe 沙箱、且不支援 height/scrolling。
+        - 我們的[頁面設計所渲染](../dashboard_ui/pages/onenote_review.py)的是完整 `<html><head><style>... 文件（_WHITE_FRAME）加 base64 圖片`，需要沙箱隔離避免筆記 CSS 滲入整個 dashboard，也需要固定高度捲動框。
+        > 已改成 st.iframe，接受 HTML 字串、沙箱 iframe、支援 height，並已經解決此 warning。
+    - 前端頁面設計修改為：
+        - 圓點切換設計改成下拉式選單放在頁面旁邊，選單標題命名為`版號(dt)`，後面跟著提示可審閱版本數量，可審閱的版本數量意思是 `上次 archived"後到現在有多少份筆記是沒有被 rejected，現在可以開放審閱`。
+        - 歸檔後 tag 分佈、note_type 分佈 ()
+        - Gemini 輸出 markdown <筆記 title> <版本 dt=>
+
+    - 一份筆記某版本在 `rejected` 後，當下應該是`那一版本`的所有按鈕都失效，不能影響其他版本操作，而且再重新整理後不需要出現在前端了，此外，如果下次要在審閱同名筆記的其他版本 (=其他 dt)，則也應該要先過濾掉已經被判為 `rejected` 的筆記，避免使用者疑惑。
+    > 已經修正，現在效果為：
+    > reject 一個版本 → md 消失在頁面、其他版本的按鈕照常可被點。
+
+    -  以 page_id 與 dt 作為主鍵查詢一份筆記的所有版本，並在前端做審閱，approved 觸發歸檔後，`regenerate`、`approved`、`rejected` 確實都已經失效，但這裡可能會有一個不便點在於，如果該 page_id 後續還有加入新內容造成 html_hash 變了然後會被下載到 `/raw-notes/` bronze layer，但是前端由於是以 `page_id` 與 `dt` 來管理按鈕是否生效，所以這時候會遇到新版筆記要歸檔的話將會不可行、沒有按鈕可操作，也沒辦法生成 enriched document。建議改成 page_id 在歸檔後，如果後面的日子有內容變動，新出現的 dt 版的筆記可重回 Silver 層生成文件且進入 gold layer，所以前端在跟使用者互動之前應有篩選機制，如下：
+    ```MongoDB
+        db.onenote_note_metadata.aggregate([{$match: {page_id: "abc123",
+                                                    review_result: {$ne:"rejected"}
+                                                    }
+                                            },
+                                    {$addFields: {dt_n: {$convert: {input: "$dt",
+                                                                    to: "date",
+                                                                    onError: null,
+                                                                    onNull: null }}
+                                                  }
+                                    },
+                                     {$setWindowFields: {
+                                          sortBy: { archived_at: 1 },
+                                          output: {
+                                            lastArchivedAt: {
+                                                      $max: {$dateTrunc: {date: "$archived_at", unit: "day"}},
+                                                      window: { documents: ["unbounded", "unbounded"] }
+                                                      }
+                                                  }
+                                            }
+                                      },
+                                      { $match: { $expr: { $gte: ["$dt_n", "$lastArchivedAt"] } } },
+                                      { $project: {dt_n:0, lastArchivedAt:0}}
+                                   ]);
+    ```
+    > 已經修正，現在效果為：
+    > approve 某版歸檔後，對同 page_id 在 OneNote 加新內容 → 跑 bronze ETL 產生新 dt → 審查頁應出現該新版、可重走 Silver → Gold。
+
+    - t_enrich_html_to_markdown.py 的 convert_img_tag_to_md_str() 在改寫 alt 圖釋時如果 alt 本來就有 `]` 符號，會在 convert to markdown string 時無法正常顯示圖片，因為 markdown 的圖片連結語法是`![替代文字](圖片相對路徑)`，如果替代文字中有`]`，解析器會看到`![替代]文字](圖片相對路徑)`，多出來的`]`會造成圖片顯示失敗，因此，需要修改此函式，把 `]` 同 alt 取代掉。此外，經實測，`!`、`[`、`%`等特殊符號夾在替代文字中不會影響，所以不需要特別處理。
+    - 但即使如此，convert_img_tag_to_md_str() 執行後的 markdown string 會傳入 LLM call，這裡會有一個風險是，LLM 回傳的 enriched document `![](圖片相對路徑)` 有可能跟送進去之前的 markdown string 不太一致，例如："(0-02abd90`c`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)" 會變成 "(0-02abd90`b`7e5c43c7bd33c4405ec5e53f!1-A5F7F5395D4FB9F!209.png)"，而 `regenerate` 又換成另一張圖，例如："(0-4c3f19486a09451db`58f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209.png)"
+    變成了 "(0-4c3f19486a09451db`8f5`a5e93cb62ef!1-A5F7F5395D4FB9F!209")"，此為模型隨機性，透過提示工程修改 system prompt 可以較為緩解。
+    > 除了修改 system prompt，也已在 `onenote_note_metadata` 新增了 `md_frontmatter` 欄位，查核追蹤有效圖片數量，作為評估資料品質的依據，未來可以搭配視覺化工具來擴展前端圖表。
+    > `md_frontmatter` 在 archive 與 reject 觸發後都會寫入，以評估好 md 與壞 md 的特性。(例如：哪類別的筆記容易被退件、歸檔的筆記是不是存在人工審查疏漏沒發現破圖)。
+
+## 20260705 Work log
+
+- MongoDB Atlas 連線結構優化：從「每次查詢都 new 一個 MongoClient」收斂成 module-level 單例
+    ```python
+    """學到的重點：
+    1. MongoClient 本身就設計成「長生命週期的單例」——它內建連線池 (connection pool) 且 thread-safe，
+       正確用法是整個程式共用一個，而不是每次查詢都 new 一個。
+    2. Streamlit 的 @st.cache_resource 是「跨 page、跨 session 全域共用」的快取，適合放連線這種資源；
+       但它「定義在哪個 module 就綁在哪」，A 頁定義的 cache_resource 函式，B 頁不能靠 import A 來重用
+       (import 會把 A 整頁 script 從頭重跑一遍)。
+    3. @st.cache_data 快取的是「回傳值 (資料)」，不是連線物件。把 get_db_atlas() 藏在 cache_data 函式裡，
+       TTL 到期或 .clear() 之後就會再 new 一個 client，舊的沒關、連線池殘留，長期累積逼近 Atlas 連線上限。
+    """
+    ```
+    - **情境**：dashboard 有四頁 (HOME / knowledge_factory / ai_knowledge_agent / onenote_review) 加上 agent_tools，全都要連同一個 Atlas cluster。原本 `get_db_atlas()` 每被呼叫一次就 `MongoClient(uri)` 建一個新 client。HOME 頁用 `@st.cache_resource` 包了一層還好，但 onenote_review 把它藏在 `@st.cache_data(ttl=60)` 的 `_load_versions()` 裡，每 60 秒 TTL 到、或每次 enrich 成功呼叫 `_load_versions.clear()`，就會再開一個新連線池。
+    - **優化前**：`get_db_atlas()` 無狀態，每次呼叫都建立新連線。
+        ```python
+        def get_db_atlas() -> Database:
+            mongo_uri = os.getenv("MONGO_ALTAS_URI")
+            db_name = os.getenv("MONGO_DB_NAME")
+            ...
+            client = MongoClient(mongo_uri)   # ← 每呼叫一次 new 一個，各自帶一整個連線池
+            return client[db_name]
+        ```
+        > 盲點：MongoClient 預設連線池最多 100 條連線，多頁 × 多次 cache miss 各開一個 client，舊 client 不會馬上被 GC 關閉、連線池殘留佔用，長時間跑會逼近 Atlas 低階 tier 的連線數上限 (如 M0 = 500) 而報 connection limit exceeded。app.py 那層 `@st.cache_resource` 只擋得住自己這頁的重複，那份快取是「app.py module 私有」的，其他頁 import 不到，等於各頁各自為政。
+    - **優化後**：把「取 client」收斂成 module-level lazy 單例，首次建立、之後所有 caller 重用同一份。
+        ```python
+        _atlas_db: Database | None = None
+
+        def get_db_atlas() -> Database:
+            global _atlas_db
+            if _atlas_db is not None:      # 已建立過 → 直接重用，不再 new client
+                return _atlas_db
+            mongo_uri = os.getenv("MONGO_ALTAS_URI")
+            db_name = os.getenv("MONGO_DB_NAME")
+            ...
+            _atlas_db = MongoClient(mongo_uri)[db_name]
+            return _atlas_db
+        ```
+        > 差異：現在四頁 + agent_tools 全部共用同一個 MongoClient 與同一個連線池，不管誰在哪頁、cache 命不命中，連線只建立一次。app.py 那層多餘的 `@st.cache_resource get_mongo_db()` 包裝也可以直接拿掉，改成 `db = mongo_utils.get_db_atlas()`。
+    - **為什麼要優化**：
+        - (a) **連線數**：避免「每次查詢就 new 一個 client」把 Atlas 連線池撐爆——在低階 tier 會直接報 connection limit exceeded。
+        - (b) **效能**：建立 MongoClient 要做 TLS handshake + cluster topology discovery，不便宜；重用單例省掉每次查詢的建連成本。
+        - (c) **語意正確**：MongoClient 官方就建議當單例用，「每次查詢開一個」是反模式 (anti-pattern)。
+        - (d) **為什麼用 module-level 單例而非 @st.cache_resource**：get_db_atlas() 也被 agent_tools (非純 page context) 呼叫，module 級單例不綁 Streamlit runtime、任何 caller 都能共用；`@st.cache_resource` 需要 script run context，通用性較差。
