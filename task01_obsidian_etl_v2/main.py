@@ -43,7 +43,13 @@ BUCKET_NAME = "personal-vaults"
 
 
 def run_task01_v2():
+    """task01_v2 的 Silver 與 Gold 入口，串接 CDC gate、清洗、歸檔、軟刪除與每日快照。
 
+    1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
+    2. 掃 raw-notes 取得目標 .md 與圖片 md5，再從 DB 撈既有狀態，經 CDC gate 只留新增或變更的 .md。
+    3. 對每份變更的 .md 下載、清洗、複製到 archived-notes，並 upsert metadata；單筆失敗就記 error 後略過。
+    4. 對 raw 已消失的筆記做軟刪除，最後對現況產出當日快照。
+    """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
     if not all([mongo_uri, db_name]):

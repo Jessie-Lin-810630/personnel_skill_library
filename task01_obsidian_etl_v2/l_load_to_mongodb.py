@@ -25,18 +25,44 @@ NOTES_SUMMARY = "notes_summary"
 
 
 def get_db(mongo_uri: str, db_name: str):
-    """建立 MongoClient 並回傳指定 database。"""
+    """以連線字串建立 MongoClient，回傳指定名稱的 database。
+
+    Args:
+        mongo_uri: MongoDB Atlas 連線字串。
+        db_name: 目標 database 名稱。
+
+    Returns:
+        指定的 pymongo Database 物件。
+    """
     client = MongoClient(mongo_uri)
     return client[db_name]
 
 
 def _archived_name(raw_blob_name: str) -> str:
-    """把 raw-notes/ 前綴換成 archived-notes/，其餘後段路徑不變。"""
+    """把 blob 名稱開頭的 raw-notes/ 前綴換成 archived-notes/，後段路徑保持不變。
+
+    Args:
+        raw_blob_name: raw-notes/ 下的 blob 名稱。
+
+    Returns:
+        對應的 archived-notes/ blob 名稱。
+    """
     return raw_blob_name.replace(RAW_PREFIX, ARCHIVED_PREFIX, 1)
 
 
 def _copy_blob(bucket: Bucket, src_name: str, dest_name: str) -> str:
-    """在同一 bucket 內 copy_blob（覆蓋語意），回傳 archived 端 md5_hash。"""
+    """在同一個 bucket 內把來源 blob 複製到目的名稱，回傳 archived 端的 md5。
+
+    採覆蓋語意，目的已存在就覆寫。複製後若回應沒帶 md5，就重新載入一次 metadata 再取。
+
+    Args:
+        bucket: 來源與目的所在的 GCS Bucket 物件。
+        src_name: 來源 blob 名稱。
+        dest_name: 目的 blob 名稱。
+
+    Returns:
+        目的 blob 的 md5 字串。
+    """
     src_blob = bucket.blob(src_name)
     new_blob = bucket.copy_blob(src_blob, bucket, dest_name)
     if new_blob.md5_hash is None:
@@ -45,16 +71,38 @@ def _copy_blob(bucket: Bucket, src_name: str, dest_name: str) -> str:
 
 
 def blob_name_from_uri(uri: str, bucket_name: str) -> str:
-    """從 gs://bucket/xxx 取回 blob.name（xxx），供 copy_blob 使用（f-string 拼 URI 的反向）。"""
+    """從 gs://bucket/xxx 這樣的完整 URI 取回 blob 名稱 xxx，即拼 URI 的反向操作。
+
+    有帶 gs://<bucket>/ 前綴時才去掉前綴，否則原樣回傳。
+
+    Args:
+        uri: GCS 的完整 gs:// URI，或已是 blob 名稱。
+        bucket_name: 要剝除的 bucket 名稱。
+
+    Returns:
+        blob 名稱字串，供 copy_blob 等操作使用。
+    """
     prefix = f"gs://{bucket_name}/"
     return uri[len(prefix) :] if uri.startswith(prefix) else uri
 
 
 def archive_note(note_doc: dict, bucket: Bucket, bucket_name: str = "personal-vaults") -> dict:
-    """把清洗後 .md 與其引用圖片 copy 到 archived-notes/，回填 archived_* 欄位（冪等覆蓋）。
+    """把清洗後的 .md 與其引用圖片複製到 archived-notes/，並把 archived 端資訊回填進 note_doc。
 
-    note_doc 需含 raw_md_path 與 attached_images（raw 部分）；回傳補上 archived 欄位的同一 dict。
-    任一 _copy_blob 例外時，把訊息寫入 note_doc["error_msg"] 後往外 re-raise（由呼叫端決定略過/落地）。
+    1. 依 raw_md_path 算出 archived 端的 .md 名稱，複製過去並取回 archived md5。
+    2. 逐一把 attached_images 的每張圖複製到對應的 archived _attachment/，回填該圖 archived 端的路徑與 md5。
+    3. 補上 note_doc 的 archived_md_path、archived_md_md5_hash、archived_at，並把 error_msg 清空。
+
+    整段採覆蓋語意，重跑同一版本結果一致。任一次複製失敗時，先把錯誤訊息寫進 note_doc["error_msg"]，
+    再把例外往外拋，由呼叫端決定要略過還是落地記錄。
+
+    Args:
+        note_doc: 待歸檔的 note document，需含 raw_md_path 與 attached_images 的 raw 部分。
+        bucket: 來源與目的所在的 GCS Bucket 物件。
+        bucket_name: bucket 名稱，用來組 archived 端的 gs:// 路徑，預設 "personal-vaults"。
+
+    Returns:
+        補上 archived_* 欄位的同一個 note_doc。
     """
     now = datetime.now(timezone.utc)
     try:
@@ -82,9 +130,14 @@ def archive_note(note_doc: dict, bucket: Bucket, bucket_name: str = "personal-va
 
 
 def upsert_note(db: Database, note_doc: dict) -> None:
-    """以 raw_md_path 為唯一鍵冪等 upsert 到 obsidian_note_metadata。
+    """以 raw_md_path 為唯一鍵，把 note document 冪等 upsert 進 obsidian_note_metadata。
 
-    status=archived、embedded_status 初始 false（僅 insert 時設，避免覆蓋 task06 已翻的值）。
+    1. 一律把 status 設為 archived、更新 updated_at。
+    2. embedded_status 與 created_at 只在第一次 insert 時設定，避免覆蓋 task06 之後翻過的向量化狀態。
+
+    Args:
+        db: pymongo Database 物件。
+        note_doc: archive_note 回傳、已補上 archived_* 欄位的 note document。
     """
     collection = db[NOTE_METADATA]
     now = datetime.now(timezone.utc)
@@ -100,9 +153,15 @@ def upsert_note(db: Database, note_doc: dict) -> None:
 
 
 def mark_note_error(db: Database, raw_md_path: str, error_msg: str) -> None:
-    """清洗/歸檔失敗時，以 raw_md_path 為鍵記一筆 status=error 與 error_msg。
+    """清洗或歸檔失敗時，以 raw_md_path 為鍵記一筆 status=error 與 error_msg，供稽核。
 
-    只寫 status/error_msg/updated_at，上一次歸檔成功而寫入的 archived_* 欄位不更動。
+    只覆寫 status、error_msg 與 updated_at，上一次成功歸檔留下的 archived_* 欄位不動，
+    因此就算某版本歸檔失敗，仍保留上一版可用的向量化來源。這支函式可冪等重跑。
+
+    Args:
+        db: pymongo Database 物件。
+        raw_md_path: 這份筆記的唯一鍵。
+        error_msg: 要記錄的錯誤訊息。
     """
     collection = db[NOTE_METADATA]
     now = datetime.now(timezone.utc)
@@ -117,10 +176,25 @@ def mark_note_error(db: Database, raw_md_path: str, error_msg: str) -> None:
 
 
 def soft_delete_missing(db: Database, present_raw_paths: set[str]) -> int:
-    """raw-notes live listing 已無、但 DB 尚存的筆記標 status=deleted。
+    """把 DB 尚存、但這次 raw-notes live listing 已不見的筆記標成 status=deleted。
 
-    只動尚未 deleted 的文件，故重跑冪等；回傳本次翻成 deleted 的筆數。
+    1. present_raw_paths 為空時視為上游掃描異常，直接跳過並記 warning。
+       因為拿空清單去比對會匹配到整個 collection，反而誤把全部筆記標成 deleted，寧可這輪漏刪、下輪補刪。
+    2. 正常情況下，挑出 raw_md_path 不在 present_raw_paths、且尚未 deleted 的筆記，一次標成 deleted。
+
+    只動尚未 deleted 的文件，所以重跑冪等。
+
+    Args:
+        db: pymongo Database 物件。
+        present_raw_paths: 這次掃描實際存在於 raw-notes/ 的所有 raw_md_path 集合。
+
+    Returns:
+        本次新翻成 deleted 的筆記數。
     """
+    if not present_raw_paths:
+        logger.warning("present_raw_paths 為空，疑似上游掃描異常，跳過軟刪除以免誤刪全表")
+        return 0
+
     collection = db[NOTE_METADATA]
     result = collection.update_many(
         {"raw_md_path": {"$nin": list(present_raw_paths)}, "status": {"$ne": "deleted"}},
@@ -130,7 +204,18 @@ def soft_delete_missing(db: Database, present_raw_paths: set[str]) -> int:
 
 
 def build_and_upsert_summary(db: Database) -> dict:
-    """對 obsidian_note_metadata 現況彙總，以 snapshot_date（截到日）為鍵 upsert notes_summary。"""
+    """對 obsidian_note_metadata 的現況做每日快照，以當天日期為鍵 upsert 進 notes_summary。
+
+    1. 只統計 status 為 archived 的筆記，把 deleted 與 error 排除在進度之外。
+    2. 逐筆累加各 note_type 與各 topic 的計數、總筆數，以及已向量化的筆數。
+    3. 以截到日的 snapshot_date 為鍵 upsert，同一天重跑會覆蓋成最新值。
+
+    Args:
+        db: pymongo Database 物件。
+
+    Returns:
+        本次寫入的快照字典，含 by_type、by_topic、total_notes、embedded_notes。
+    """
     collection = db[NOTE_METADATA]
     by_type: dict[str, int] = defaultdict(int)
     by_topic: dict[str, int] = defaultdict(int)
