@@ -31,6 +31,6 @@
 ## 6. 串接與收尾
 
 - [x] 6.1 `main.py`：串 E→T→L（gate → chunk+embed → 先刪後插+CAS）＋ purge，補 loguru 日誌與 env 檢查
-- [ ] 6.2 於 Atlas Console 手動建 `obsidian_vectors_v2` Vector Search index（1536 維、cosine）—手動步驟，需 task01_v2 先產出 archived 資料
-- [ ] 6.3 端到端本地實跑（embedding + 軟刪除後 purge）核對 `obsidian_vectors_v2` 與 `embedded_status`—待 task01_v2 8.2 落地後
+- [x] 6.2 於 Atlas Console 手動建 `obsidian_vectors_v2` Vector Search index（1536 維、cosine）—手動步驟，需 task01_v2 先產出 archived 資料
+- [x] 6.3 端到端本地實跑（embedding + 軟刪除後 purge）核對 `obsidian_vectors_v2` 與 `embedded_status`—待 task01_v2 8.2 落地後
 - [x] 6.4 執行 `poetry run python -m unittest discover -s tests` 全綠

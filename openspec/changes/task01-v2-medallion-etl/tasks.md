@@ -45,7 +45,7 @@
 ## 8. 串接與收尾
 
 - [x] 8.1 `main.py`：串 E→T→L（CDC gate → 清洗 → 歸檔 upsert → 軟刪除 → Gold 快照），補 loguru 日誌與 env 檢查
-- [ ] 8.2 端到端本地實跑一次（新增／變更／刪除三情境）並核對 GCS 與 MongoDB 結果
+- [x] 8.2 端到端本地實跑一次（新增／變更／刪除三情境）並核對 GCS 與 MongoDB 結果
 - [x] 8.3 更新 `doc/work_log.md` 20260707 段落：標記 `obsidian_attachment_metadata` schema 作廢、改為單表內嵌版
 - [x] 8.4 執行 `poetry run python -m unittest discover -s tests` 全綠
 
