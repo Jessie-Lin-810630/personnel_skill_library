@@ -288,6 +288,33 @@ class SoftDeleteTests(unittest.TestCase):
         n_again = l_load_to_mongodb.soft_delete_missing(db, present)
         self.assertEqual(n_again, 0)
 
+    def test_empty_present_set_skips_and_does_not_mass_delete(self):
+        # 防呆：present 為空（上游掃描異常）時不得把全表標 deleted
+        db = self._db_with_notes()
+        n = l_load_to_mongodb.soft_delete_missing(db, set())
+        self.assertEqual(n, 0)
+        for d in db.collections[l_load_to_mongodb.NOTE_METADATA].docs:
+            self.assertEqual(d["status"], "archived")
+
+
+# --------------------------- 空值 / None 邊界 ---------------------------
+class EmptyInputTests(unittest.TestCase):
+    def test_select_changed_blobs_all_empty(self):
+        self.assertEqual(e_scan_obsidian.select_changed_blobs([], {}, {}, "personal-vaults"), [])
+
+    def test_build_note_document_empty_text(self):
+        blob = FakeBlob("raw-notes/u/nb/01-d/x.md", md5_hash="M")
+        doc = t_clean_obsidian.build_note_document(blob, "", "personal-vaults", {})
+        self.assertEqual(doc["word_count"], 0)
+        self.assertEqual(doc["attached_images"], [])
+
+    def test_build_and_upsert_summary_empty_collection(self):
+        db = FakeDb()
+        summary = l_load_to_mongodb.build_and_upsert_summary(db)
+        self.assertEqual(summary["total_notes"], 0)
+        self.assertEqual(summary["by_type"], {})
+        self.assertEqual(summary["by_topic"], {})
+
 
 # --------------------------- Task 7.2: gold snapshot ---------------------------
 class SummaryTests(unittest.TestCase):
