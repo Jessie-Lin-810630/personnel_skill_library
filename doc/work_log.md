@@ -3,8 +3,8 @@
 - README 與專案結構文件仍需隨任務演進持續修訂，包含各 ETL 任務產出的 MongoDB collection schema 與 Phase IV 部署里程碑。
 - Task03 LeetCode GraphQL API 缺少正式文件，且依賴 `LEECODE_SESSION` 與 CSRF token；cookie 過期會導致 403，雲端部署前需評估自動更新或替代認證流程。
 - Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
-- Phase III 的 Router Agent 追問繼承仍有殘留上下文污染：`_looks_like_followup()` 判定為追問並繼承上輪 `filter_tags` 後，rag agent 仍會以「追問 query」重算向量相似度，導致混入與追問語意相近、但與上一輪主題較遠的筆記來源（如 partition_clause 追問仍混入 Sharding/NoSQL 來源）。後續需評估追問時是否應沿用上一輪 `search_query` 或限制相似度重算範圍。（20260621）
-- Phase III 的 Router Agent 追問判定為啟發式規則（`_looks_like_followup()` 比對追問詞／排他詞），會誤判：同主題的新查詢（如「找 dev container」）未被視為追問而重抽 tag，雖結果正確但邏輯非預期；需評估更穩健的追問判定機制。（20260621）
+- Phase III RAG agent v2 檢索受資料量不均影響：通識型主題（如 docker / k8s）在向量庫中的筆記量少於特定主題（如 dev container），rerank 後雖能命中、但回答易偏狹隘（見 20260625 測試 case 3）。後續需補充通識型筆記或評估針對主題覆蓋度的檢索策略。（20260625）
+- Phase III RAG agent v2 reranker 信心門檻未設：rerank 相對分數偏低（最高僅約 0.7）時模型仍會給出探索性回答，需評估是否設定 rerank 分數門檻或在回答中標示信心程度。（20260625）
 - Task07 長 context 筆記（如大型筆記本頁面）會造成 LLM 回應高延遲，需追蹤並建立監控機制以識別潛在卡頓點。（20260616）
 
 ## ✅ 已解決
@@ -30,6 +30,7 @@
 - Task06 embedding 選型：已從純文字模型 `text-embedding-3-small` 改為多模態 `Gemini-embedding-2`，並重構 task06 pipeline 以符合其 prompt 格式（多模態與未來圖片需求的疑慮已解除）。（20260624）
 - Task06 vector upsert 殘留 chunk：筆記重新切塊後 chunk 數變少時，舊 chunk 不會被 upsert 覆蓋而成為殘缺孤兒資料；已改為先依 `file_path` `deleteMany` 同筆記所有 chunk 再 insert 新 chunk，避免多輪 embedding 後殘留破碎 chunk。（20260624）
 - Task06 API 用量：導入 CDC（data capture change）機制，僅當 GCS 檔案變更且 `obsidian_notes` 中 `embedding_done=false` 時才呼叫 Vertex AI 進行 embedding，否則略過，節省 API 請求。（20260624）
+- Phase III Router/RAG Agent prefilter 雙面刃與跨輪上下文污染：舊版以 tag／file_path 對 vector search 做 boolean prefilter，初始命中錯誤或漏掉時反而把正確答案硬排除，且 `_looks_like_followup()` 追問繼承上輪 filter 易擴大污染、啟發式追問判定又會誤判同主題新查詢。已重構為 RAG agent v2——Router 職責單一化只做 intent 分類，retrieval 全封裝進 `rag_query()`：帶 chat history 的 Query Rewrite（改寫為獨立問句並推薦 tags 做 query expansion，不做 prefilter）→ 無 prefilter 的 vector search（top_k 10~15）→ Cohere cross-encoder rerank（用原始 query 取 top 5）→ LLM 生成。標籤缺失不再排除正確答案，追問由 rewrite 看 history 自動補全指代，多輪測試 case 1/2/3 大多通過（殘留資料量不均問題見改進中）。（20260625）
 
 # Daily Work Log
 ## 20260423 Work log
@@ -1717,3 +1718,81 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         - (b) **效能**：建立 MongoClient 要做 TLS handshake + cluster topology discovery，不便宜；重用單例省掉每次查詢的建連成本。
         - (c) **語意正確**：MongoClient 官方就建議當單例用，「每次查詢開一個」是反模式 (anti-pattern)。
         - (d) **為什麼用 module-level 單例而非 @st.cache_resource**：get_db_atlas() 也被 agent_tools (非純 page context) 呼叫，module 級單例不綁 Streamlit runtime、任何 caller 都能共用；`@st.cache_resource` 需要 script run context，通用性較差。
+
+## 20260707 Work log
+1. New schema of task01
+    ```json
+        // Collection name: obsidian_note_metadata
+        {
+        "_id": "60c72b2f9b1d8b2bad7f0001", // MongoDB 自動生成
+        "note_user_id": "lucky460721", // 筆記使用者，從 GCS blob path 的 "personal-vaults/raw-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md" 解析得到
+        "notebook": "data-engineering", // notebook 名稱，從 GCS blob path 的 "personal-vaults/raw-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md" 解析得到
+        "section": "01-daily-logs",  // section 名稱，從 GCS blob path 的 "personal-vaults/raw-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md" 解析得到
+        "file_name": "20250909 Mac安裝Python.md", // 筆記檔名稱，從 GCS blob path 的 "personal-vaults/raw-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md" 解析得到
+        "raw_md_md5_hash": "7CeqwdfwX3ZJmgek9o0wg==", // 筆記 md5 hash 作為變動比對值，從 blob.md5_hash 取得
+        "raw_md_path": "gs://personal-vaults/raw-notes/.../01-daily-logs/20250909 Mac安裝Python.md", // 即 GCS 路徑，含 (gs://)
+        "raw_md_updated_at": "2026-07-06T12:00:00Z", // blob 更新時間，從 blob.updated 取得
+        "archived_at": "2026-07-06T12:22:00Z",  // 清洗完 raw_md 後存到從 GCS blob path 的 "personal-vaults/archived-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md" 的時間(utc+0)，從 archived-notes 後方開始路徑全部跟 raw-notes 相同
+        "archived_md_md5_hash": "e59cd35b5bab9b311210bc875b1e00aa",  // 存入 archived-notes/ 下的筆記之 md5，從 blob.md5_hash 取得
+        "archived_md_path": "gs://personal-vaults/archived-notes/lucky460721/data-engineering/01-daily-logs/20250909 Mac安裝Python.md",
+        "status": "archived", // 隨 archived_md_path & archived_img_path 寫入時一併翻成 archived，在此之前都是 null
+        "embedded_status": true, // archived_md 被向量化過的狀態標示，初始化為 false，只有在 task06 完成時回來這裡翻成 true，
+        "error_msg": "",  // GCS 讀寫異常時 msg
+        "archived_md_frontmatter": {
+            "archived_md_frontmatter.tags": ["javascript", "async", "guide"],
+            "archived_md_frontmatter.date": "2026-07-06T00:00:00Z",
+            "archived_md_frontmatter.type": "tutorial",
+            "archived_md_frontmatter.alias": ["JS Async", "Asynchronous JS"]  // raw md 的 frontmatter 既有的架構與內容，直接取出來清洗，並在將 md 存到 archive-notes 後一併存入
+        },
+        "attached_images": [ {"raw_image_path": "gs://personal-vaults/raw-notes/.../_attachment/image04.png",
+                              "raw_image_md5": "7Vrwjio3123mgek9o0wg==",
+                              "archived_image_path": "gs://personal-vaults/archived-notes/.../_attachment/image04.png",
+                              "archived_image_md5": "7CYeIJqAqX3ZJmgek9o0wg=="
+                              },
+                              {},
+                              {}
+                            ],
+        "topic": "Programming",  // 從 archived md 的 tag 挑選出來的 topic
+        "word_count": 1250 //  從 archived md 的數出來的文章字數(不含frontmatter)
+        }
+    ```
+
+    - (Bronze) E & L: 從本機走 `glcoud storage rsync` 到 `gs://personal-vaults/raw-notes/lucky460721/.../....`。
+    - (Silver) Transform: 設計兩支主函式，分別處理 md 與 attachment
+        - 處理 attachment 流程：
+            - 從 `gs://personal-vaults/raw-notes/_attachment/` 掃描所有 ext 為 `.png`、`jpeg`等圖像的 blobs，從 blob.md5_hash 洗出 md5_hash 雜湊值，並在 collection `obsidian_attachment_metadata`，以跟上面相同的邏輯查找哪些屬於新增與變更的檔案，也放入待清理列表 list。
+            - 對回傳的 list，逐一取得 blob.md5_hash，針對 `raw_file_path` 做 upsert，寫入 `file_name`, `raw_file_md5_hash`, `raw_file_updated_at`, `status`(初始化為 null)。
+
+        - 處理 md 流程：
+            - 從 `gs://personal-vaults/raw-notes/...` 掃描所有 ext 為 `.md` 的 blobs，以 blob.name，在 collection `obsidian_note_metadata` 找 `raw_md_path` 找匹配的，如果表上沒有匹配的，則 insert 放入待清理列表，如果有匹配則進一步找該列的 `md_md5_hash` 是否跟 GCS 上的 md5_hash 相同，若不同則也放入待清理列表 list。(可以不一定要二階段查詢，可用 $or 條件運算子)。
+            - 對回傳的 list，逐一 `download_as_text()` 做資料轉換，轉換工作包含現行版本的 task01 的：
+                - `_infer_misposition_metadata()`
+                - `_infer_note_type()`
+                - `_infer_topic()`
+                - `_infer_date()`
+                - `extract_attached_images()`
+        > 未來如果這裡希望新增 document enrichment by LLM，則可從這裡加入，然後斟酌淘汰上述五個清理步驟或是挪動修改順序，例如：把 `_infer_misposition_metadata()` 挪到 LLM 生成後面再做，就跟 task07 雷同。此外，清理後建議改先存入 `processed-notes/...` 下方，並經由人工審查或抽撿來檢視是否放行該 folder 到 `archive-notes`，除非是對模型生成品質已有信心，則可直接存入 `archive-notes/...`。由於 `archive-notes` 後續將讓給 task06 定期掃描存入向量化資料庫，所以如果 enriched document 品質不穩定，直接存放在 `archive-notes` 會可能污染到檢索品質。
+
+        清理後直接存入呼叫 `archive-notes/...md` 下，並組裝準備 Upsert `obsidian_note_metadata` 的欄位之 dict，key 包含：`note_user_id`, `notebook`, `section`, `file_name`, `raw_md_md5_hash`,`raw_md_path`, `raw_md_updated_at`, `raw_md_attachment_id`, `status`(為 `archived`), `archived_at`, `archived_md_md5_hash`, `archived_md_path`, `archived_md_attachment_id`, `embedded_status`(初始化為 false), `archived_md_frontmatter`, `topic`, `world_count`。
+
+        其中 `raw_md_attachment_id` 的值，會從 `extract_attached_images()` 解析出來的 GCS URI (=raw_file_path) 到 `obsidian_attachment_metadata` 查找後取出 `_id` 欄位值後，以陣列寫入`raw_md_attachment_id`中，這支函式最後要回傳真正有找到對應 `_id` 的 `raw_file_path` 列表。
+    - (Silver) Load：收尾 attachment。
+        - 走訪 Transform 層回傳的`有用的 raw_file_path` 列表，以 copy_blob() 到 `archive-notes/.../_images/` 下並取得 md5 hash 雜湊值以後，寫入 `obsidian_attachment_metadata`，更新欄位 `status`(翻成 archived), `archived_file_md5_hash`, `archived_file_path`, `archived_at`(datetime.now(tz=timezone.utc))。
+    - (Gold) 對 `obsidian_note_metadata` 做快照，追蹤清理後與向量化進度，分析：
+        ```json
+            // Collection Name: notes_summary
+            {
+            "_id": "60c72b2f9b1d8b2bad7f0001", // MongoDB 自動生成
+            "snapshot_date": ISODate("2026-06-26T00:00:00.000+0000"), // 快照日當天只照一次，故不計時\分\秒
+            "by_type": { "daily-log": 40, "knowledge-base": 32, "project": 15 },  //
+            "by_topic": { "python": 18, "sql": 12, "ml": 8, "cloud": 6, "biotech": 14, "other": 29 },
+            "total_notes": 21,
+            "total_types": 21,
+            "total_tags": 21,
+            "total_singleton_tags": 5,
+            "embedded_notes": 2  // 計數 "obsidian_note_metadata" 中 embed_status=true 有幾筆
+            }
+        ```
+        > 待辦事項：這裡的快照項目需要視希望看task01、task07與task06還有沒有什麼指標想放進來，所以欄位還可能要再多想。
+
+2. Based on the planning above, established the scripts of [task01-v2](../task01_obsidian_etl_v2/).
