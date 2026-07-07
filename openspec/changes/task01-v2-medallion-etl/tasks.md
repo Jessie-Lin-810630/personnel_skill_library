@@ -34,7 +34,7 @@
 ## 6. 軟刪除
 
 - [x] 6.1 `l_*`：撈 DB 全部 `raw_md_path` 與本次 live listing 做差集，差集內文件 `status="deleted"`，保留文件與 archived 副本（不硬刪）
-- [ ] 6.2 確認 task06 可用 `status="deleted" AND embedded_status=true` 查出待 purge；於 spec/design 記錄此契約（task06 實作另 change）
+- [x] 6.2 確認 task06 可用 `status="deleted" AND embedded_status=true` 查出待 purge；於 spec/design 記錄此契約（task06 實作另 change）
 - [x] 6.3 unittest：軟刪除偵測（被刪→deleted、仍存→不動、已 deleted 重跑冪等）
 
 ## 7. Gold：每日快照
