@@ -53,11 +53,13 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 
 ### ETL 命名規則
 
-每個 task 資料夾內的檔名以前綴區分 ETL 階段：
-- `e_*.py` — Extract（資料抓取）
-- `t_*.py` — Transform（清洗、轉換）
-- `l_*.py` — Load（寫入目的地；多數為 MongoDB，task07 寫 GCS 資料湖 `onenote-vaults` 的 `.md`／`.html`／`.png` 與 MongoDB）
+每個 task 資料夾內的檔名以前綴區分 ETL 階段。**前綴依「要處理的資料本體的流向」歸類，不是依「有沒有碰某個資料庫」**：
+- `e_*.py` — Extract（資料本體的 ingestion：抓取來源資料）
+- `t_*.py` — Transform（資料本體的清洗、轉換）
+- `l_*.py` — Load（把資料本體**寫入**目的地 folder／datalake／database；多數為 MongoDB，task07 寫 GCS 資料湖 `onenote-vaults` 的 `.md`／`.html`／`.png` 與 MongoDB）
 - `main.py` — 串接 E → T → L 的入口
+
+> **歸類準則**：判斷依據是「這支函式服務的是哪一段資料本體的流向」，而非「它讀寫哪個系統」。例：CDC 做增量 ingestion 時，需要先讀 MongoDB 撈既有 md5 來決定「哪些 GCS blob 要抓」——這個讀取雖然碰 MongoDB，但回傳值只服務 ingestion 判斷、**不寫入任何 collection**，故歸 `e_` 而非 `l_`。`l_` 只保留「把資料本體載入目的地」的寫入。（範例：`task01_obsidian_etl_v2/e_scan_obsidian.py` 的 `get_existing_md5_map()`。）
 
 ### Module Docstring 規範
 
