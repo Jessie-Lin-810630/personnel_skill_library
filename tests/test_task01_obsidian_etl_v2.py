@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import frontmatter
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -12,25 +14,33 @@ from task01_obsidian_etl_v2 import e_scan_obsidian, l_load_to_mongodb, t_clean_o
 
 # --------------------------- Fakes ---------------------------
 class FakeBlob:
-    def __init__(self, name, md5_hash="MD5", updated=None, text=""):
+    def __init__(self, name, md5_hash="MD5", updated=None, text="", bucket=None):
         self.name = name
         self.md5_hash = md5_hash
         self.updated = updated
         self._text = text
+        self._bucket = bucket
 
     def download_as_text(self, encoding="utf-8"):
         return self._text
+
+    def upload_from_string(self, data, content_type=None):
+        if self._bucket is not None:
+            self._bucket.uploads[self.name] = data
+        self.md5_hash = "ARCH_" + Path(self.name).name
 
     def reload(self):
         pass
 
 
 class FakeBucket:
-    def __init__(self):
+    def __init__(self, texts=None):
         self.copies = []
+        self.uploads = {}  # dest_name -> 上傳的字串內容
+        self._texts = texts or {}  # src_name -> raw .md 內文
 
     def blob(self, name):
-        return FakeBlob(name)
+        return FakeBlob(name, text=self._texts.get(name, ""), bucket=self)
 
     def copy_blob(self, src, dest_bucket, new_name):
         self.copies.append((src.name, new_name))
@@ -185,10 +195,12 @@ class BuildNoteDocumentTests(unittest.TestCase):
 
 # --------------------------- Task 5.x: archive + upsert ---------------------------
 class ArchiveNoteTests(unittest.TestCase):
-    def test_copies_md_and_images_and_fills_archived_fields(self):
+    def test_uploads_md_copies_images_and_fills_archived_fields(self):
+        # md 走 _upload_clean_md（upload_from_string），圖片走 copy_blob
         bucket = FakeBucket()
         note_doc = {
             "raw_md_path": "gs://personal-vaults/raw-notes/u/nb/01-d/x.md",
+            "archived_md_frontmatter": {"tags": ["python"], "type": "daily-log", "date": None, "alias": []},
             "attached_images": [{"raw_image_path": "raw-notes/u/nb/01-d/_attachment/a.png", "raw_image_md5": "A"}],
         }
 
@@ -199,23 +211,78 @@ class ArchiveNoteTests(unittest.TestCase):
         img = out["attached_images"][0]
         self.assertEqual(img["archived_image_path"], "gs://personal-vaults/archived-notes/u/nb/01-d/_attachment/a.png")
         self.assertEqual(img["archived_image_md5"], "ARCH_a.png")
-        self.assertEqual(len(bucket.copies), 2)
+        self.assertEqual(len(bucket.uploads), 1)  # md 上傳一次
+        self.assertEqual(len(bucket.copies), 1)  # 圖片複製一次
         self.assertEqual(out["error_msg"], "")
 
-    def test_copy_exception_sets_error_msg_and_reraises(self):
-        class BoomBucket:
-            def blob(self, name):
-                return FakeBlob(name)
+    def test_upload_exception_sets_error_msg_and_reraises(self):
+        class BoomBlob:
+            name = "x.md"
 
-            def copy_blob(self, src, dest_bucket, new_name):
+            def download_as_text(self, encoding="utf-8"):
+                return "---\ntype: daily\n---\n本文\n"
+
+            def upload_from_string(self, data, content_type=None):
                 raise RuntimeError("boom")
 
-        note_doc = {"raw_md_path": "gs://personal-vaults/raw-notes/u/nb/01-d/x.md", "attached_images": []}
+        class BoomBucket:
+            def blob(self, name):
+                return BoomBlob()
+
+        note_doc = {
+            "raw_md_path": "gs://personal-vaults/raw-notes/u/nb/01-d/x.md",
+            "archived_md_frontmatter": {"type": "daily-log"},
+            "attached_images": [],
+        }
 
         with self.assertRaises(RuntimeError):
             l_load_to_mongodb.archive_note(note_doc, BoomBucket(), "personal-vaults")
 
         self.assertIn("boom", note_doc["error_msg"])
+
+
+class DeleteMispositionMetadataTests(unittest.TestCase):
+    def test_strips_leading_keyvalue_block_before_first_heading(self):
+        # 正文頂端誤植的 frontmatter 區塊在第一個真標題前，應被清掉
+        post = frontmatter.Post(content="tags: python, sql\ndate: 2026-07-06\n# 真標題\n本文內容\n")
+
+        l_load_to_mongodb._delete_misposition_metadata(post)
+
+        self.assertNotIn("tags: python, sql", post.content)
+        self.assertNotIn("date: 2026-07-06", post.content)
+        self.assertIn("# 真標題", post.content)
+        self.assertIn("本文內容", post.content)
+
+    def test_content_starting_with_heading_is_untouched(self):
+        # 正文直接以真標題開頭（無錯位 frontmatter）時內容不動
+        original = "# 標題\n內文有 tags: 這個字\n"
+        post = frontmatter.Post(content=original)
+
+        l_load_to_mongodb._delete_misposition_metadata(post)
+
+        self.assertEqual(post.content, original)
+
+
+class UploadCleanMdTests(unittest.TestCase):
+    def test_overwrites_frontmatter_and_strips_misposition_block(self):
+        # 誤植情境：無正規 --- 區塊，frontmatter 直接漏進正文頂端
+        raw = "tags: python, sql\ndate: 2026-07-06\n# 真標題\n本文內容\n"
+        bucket = FakeBucket(texts={"raw-notes/u/x.md": raw})
+        clean_fm = {"tags": ["python"], "type": "daily-log", "date": None, "alias": []}
+
+        md5 = l_load_to_mongodb._upload_clean_md(bucket, "raw-notes/u/x.md", "archived-notes/u/x.md", clean_fm)
+
+        uploaded = frontmatter.loads(bucket.uploads["archived-notes/u/x.md"])
+        # 乾淨 frontmatter 已覆寫進 metadata
+        self.assertEqual(uploaded["type"], "daily-log")
+        self.assertEqual(uploaded["tags"], ["python"])
+        # 錯位 frontmatter 已從正文刪除，不與乾淨版本並存
+        self.assertNotIn("tags: python, sql", uploaded.content)
+        self.assertNotIn("date: 2026-07-06", uploaded.content)
+        # 真正內容保留
+        self.assertIn("# 真標題", uploaded.content)
+        self.assertIn("本文內容", uploaded.content)
+        self.assertEqual(md5, "ARCH_x.md")
 
 
 class UpsertNoteTests(unittest.TestCase):
