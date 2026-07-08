@@ -20,23 +20,23 @@ os.environ.setdefault("ENVIRONMENT", "local")
 
 import requests  # noqa: E402
 
-from task07_onenote_to_markdown_lazy_loading import e_onenote_download as e  # noqa: E402
-from task07_onenote_to_markdown_lazy_loading import t_enrich_html_to_markdown as t  # noqa: E402
-from task07_onenote_to_markdown_lazy_loading.e_onenote_download import (  # noqa: E402
-    RateLimiter,
-    _extract_user_account,
-    api_get,
-    sanitize,
-)
-from task07_onenote_to_markdown_lazy_loading.utils import gcs  # noqa: E402
-from task07_onenote_to_markdown_lazy_loading.utils.audit_log import (  # noqa: E402
+from task07_common import gcs  # noqa: E402
+from task07_common.audit_log import (  # noqa: E402
     Environment,
     _now_utc,
     log_api_call,
     log_enrichment_call,
     upsert_version_meta,
 )
-from task07_onenote_to_markdown_lazy_loading.utils.hashing import html_source_hash  # noqa: E402
+from task07_common.hashing import html_source_hash  # noqa: E402
+from task07_onenote_to_markdown_lazy_loading import e_onenote_download as e  # noqa: E402
+from task07_onenote_to_markdown_lazy_loading.e_onenote_download import (  # noqa: E402
+    RateLimiter,
+    _extract_user_account,
+    api_get,
+    sanitize,
+)
+from task07_silver_service import t_enrich_html_to_markdown as t  # noqa: E402
 
 # ═════════════════════════════════════════════════════════════════════════════
 # utils/audit_log.py
@@ -60,7 +60,7 @@ class EnvironmentEnumTests(unittest.TestCase):
 
 
 class LogApiCallTests(unittest.TestCase):
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_writes_html_hash_and_downloaded(self, mock_get_db):
         mock_col = MagicMock()
         mock_get_db.return_value = {"onenote_graph_api_logs": mock_col}
@@ -84,7 +84,7 @@ class LogApiCallTests(unittest.TestCase):
         self.assertTrue(doc["downloaded"])
         self.assertEqual(doc["event_type"], "onenote_api_download")
 
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_mongo_failure_does_not_raise(self, mock_get_db):
         mock_col = MagicMock()
         mock_col.insert_one.side_effect = Exception("conn refused")
@@ -106,7 +106,7 @@ class LogApiCallTests(unittest.TestCase):
 
 
 class LogEnrichmentCallTests(unittest.TestCase):
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_cache_hit_zero_tokens(self, mock_get_db):
         mock_col = MagicMock()
         mock_get_db.return_value = {"multimodal_llm_enrichment_logs": mock_col}
@@ -132,7 +132,7 @@ class LogEnrichmentCallTests(unittest.TestCase):
 
 
 class UpsertVersionMetaTests(unittest.TestCase):
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_filter_key_is_page_id_and_dt(self, mock_get_db):
         mock_col = MagicMock()
         mock_get_db.return_value = {"onenote_note_metadata": mock_col}
@@ -142,7 +142,7 @@ class UpsertVersionMetaTests(unittest.TestCase):
         self.assertEqual(update_doc["$set"], {"status": "bronze_stored"})
         self.assertTrue(mock_col.update_one.call_args[1]["upsert"])
 
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_set_on_insert_optional(self, mock_get_db):
         mock_col = MagicMock()
         mock_get_db.return_value = {"onenote_note_metadata": mock_col}
@@ -150,7 +150,7 @@ class UpsertVersionMetaTests(unittest.TestCase):
         _, update_doc = mock_col.update_one.call_args[0]
         self.assertNotIn("$setOnInsert", update_doc)
 
-    @patch("task07_onenote_to_markdown_lazy_loading.utils.audit_log._get_db")
+    @patch("task07_common.audit_log._get_db")
     def test_mongo_failure_does_not_raise(self, mock_get_db):
         mock_col = MagicMock()
         mock_col.update_one.side_effect = Exception("write conflict")
@@ -396,16 +396,16 @@ class EnrichPageTests(unittest.TestCase):
         "html_path": "gs://onenote-vaults/raw-notes/u1/NB/SEC/dt=2026-06-30/Note.html",
     }
 
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.get_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_not_found(self, mock_meta):
         mock_meta.return_value = {}
         result = t.t_enrich_html_to_markdown("p1", "2026-06-30")
         self.assertEqual(result["status"], "not_found")
 
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.upsert_version_meta")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.log_enrichment_call")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.find_cached_md_by_hash")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.get_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.upsert_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.log_enrichment_call")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.find_cached_md_by_hash")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_cache_hit_skips_llm(self, mock_meta, mock_cache, mock_log, mock_upsert):
         mock_meta.return_value = dict(self.BASE_META)
         mock_cache.return_value = {"md_path": "u1/.../Note.md", "md_md5": "m5"}
@@ -416,9 +416,9 @@ class EnrichPageTests(unittest.TestCase):
         self.assertTrue(mock_log.call_args.kwargs["cache_hit"])
         self.assertEqual(mock_log.call_args.kwargs["total_tokens"], 0)
 
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.upsert_version_meta")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.find_cached_md_by_hash")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.get_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.upsert_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.find_cached_md_by_hash")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_circuit_open_keeps_bronze(self, mock_meta, mock_cache, mock_upsert):
         mock_meta.return_value = dict(self.BASE_META, status="bronze_stored")
         mock_cache.return_value = {}
@@ -431,8 +431,8 @@ class EnrichPageTests(unittest.TestCase):
         self.assertTrue(result["circuit_open"])
         self.assertEqual(result["status"], "bronze_stored")
 
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.count_regenerate")
-    @patch("task07_onenote_to_markdown_lazy_loading.t_enrich_html_to_markdown.get_version_meta")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.count_regenerate")
+    @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_regenerate_quota_exceeded(self, mock_meta, mock_count):
         mock_meta.return_value = dict(self.BASE_META, status="pending_review", md_path="u1/.../Note.md")
         mock_count.return_value = t.REGENERATE_QUOTA

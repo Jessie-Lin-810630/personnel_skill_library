@@ -26,6 +26,14 @@ poetry shell
 # 執行 Streamlit dashboard（從專案根目錄）
 poetry run streamlit run dashboard_ui/app.py
 
+# 啟動 Silver enrich 端點（task07 on-demand enrichment 服務，localhost:8002）
+# 供審查頁（pages/onenote_review.py）on-demand 觸發；需與 dashboard 同時啟動
+poetry run python -m task07_silver_service.app
+
+# 啟動 Gold 歸檔/退件端點（task07 核可後歸檔服務，localhost:8003）
+# 審查頁 approve/reject 呼叫；與 dashboard、task07_silver_service 同時啟動
+poetry run python -m task07_gold_service.app
+
 # 執行個別 ETL task（從專案根目錄）
 poetry run python -m task01_obsidian_etl.main
 poetry run python -m task02_github_restapi_etl.main
@@ -41,15 +49,21 @@ poetry run python -m unittest discover -s tests
 poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 ```
 
+## Git commit 慣例
+
+- **環境變數檔一律由人類自行 `git add` / `git commit`。** 當 `git status` 或 `git diff` 出現 `.env`、`.env.example`、`env/` 等敏感檔時，Claude **一律跳過、不要 stage、不要 commit**，並主動提醒使用者自行處理。這是專案刻意設下的限制（有 protect-env pre-commit hook 會擋住 diff／commit），不是臨時狀況——不需要每次等使用者說「.env 我自己來」。
+
 ## 架構說明
 
 ### ETL 命名規則
 
-每個 task 資料夾內的檔名以前綴區分 ETL 階段：
-- `e_*.py` — Extract（資料抓取）
-- `t_*.py` — Transform（清洗、轉換）
-- `l_*.py` — Load（寫入目的地；多數為 MongoDB，task07 同時寫本地 `.md` 檔與 MongoDB）
+每個 task 資料夾內的檔名以前綴區分 ETL 階段。**前綴依「要處理的資料本體的流向」歸類，不是依「有沒有碰某個資料庫」**：
+- `e_*.py` — Extract（資料本體的 ingestion：抓取來源資料）
+- `t_*.py` — Transform（資料本體的清洗、轉換）
+- `l_*.py` — Load（把資料本體**寫入**目的地 folder／datalake／database；多數為 MongoDB，task07 寫 GCS 資料湖 `onenote-vaults` 的 `.md`／`.html`／`.png` 與 MongoDB）
 - `main.py` — 串接 E → T → L 的入口
+
+> **歸類準則**：判斷依據是「這支函式服務的是哪一段資料本體的流向」，而非「它讀寫哪個系統」。例：CDC 做增量 ingestion 時，需要先讀 MongoDB 撈既有 md5 來決定「哪些 GCS blob 要抓」——這個讀取雖然碰 MongoDB，但回傳值只服務 ingestion 判斷、**不寫入任何 collection**，故歸 `e_` 而非 `l_`。`l_` 只保留「把資料本體載入目的地」的寫入。（範例：`task01_obsidian_etl_v2/e_scan_obsidian.py` 的 `get_existing_md5_map()`。）
 
 ### Module Docstring 規範
 
@@ -90,19 +104,20 @@ Optional .env keys:
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
 | task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
-| task07 變體（`task07_onenote_to_markdown_lazy_loading`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`） |
+| task07（`task07_onenote_to_markdown_lazy_loading` + `task07_silver_service` + `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL（`task07_onenote_to_markdown_lazy_loading`）只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 歸檔/退件由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至另一條 pipeline |
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
-> **task07 目前有兩個並存版本**：原版 `task07_onenote_to_markdown/`（本機磁碟輸出、ETL 主動逐頁呼叫 LLM）與變體 `task07_onenote_to_markdown_lazy_loading/`（GCS 資料湖多版本、ETL 只到 Bronze、Silver 純 on-demand）。兩者**尚未定案去留**——需先進入 `feature/dashboard-ui` 分支各自接上審查 UI 做遴選後，由使用者指定「依哪一份 summary 接續開發」，屆時才淘汰另一個。在使用者明確定奪前，兩個版本都保留、不得逕行刪除任一個。
+> **task07 已定案採 lazy_loading 變體、原版退役**：經審查 UI 遴選後，保留 GCS 資料湖多版本 × 純 on-demand 的變體，原版 `task07_onenote_to_markdown/`（本機磁碟、ETL 主動逐頁呼叫 LLM）已淘汰。變體拆成四個獨立執行環境（未來各自部署容器）：
+> - `task07_onenote_to_markdown_lazy_loading/` — Bronze ETL（下載 html、算 hash、存 raw-notes、upsert C3，不呼叫 LLM）。
+> - `task07_silver_service/` — Silver enrich Flask 端點（`POST /enrich`，8002），on-demand 觸發 `t_enrich_html_to_markdown` 生成 md 到 processed-notes。
+> - `task07_gold_service/` — Gold Flask 端點（`POST /archive`，8003），approve 歸檔到 archived-notes、reject 標記；兩者都回寫 `md_frontmatter`。
+> - `task07_common/` — 三者共用的 `gcs.py`、`audit_log.py`、`hashing.py`。
+> Streamlit（`dashboard_ui/`）僅讀 MongoDB＋POST 上述端點，不 import 任何 `task07_*` 套件。
 
 > **需要修改 task01–task06 時**，請先閱讀 [`doc/branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md) 了解各 task 的資料來源、ETL 邏輯與 MongoDB schema。
 >
-> **需要修改 task07 時**，先確認要動的是哪一版：
-> - 原版 `task07_onenote_to_markdown/` → 讀 [`doc/branch_html_to_md_summary.md`](doc/branch_html_to_md_summary.md)（OneNote Graph API 下載、Gemini LLM 轉換、三個 MongoDB collections 的設計與狀態流轉）。
-> - 變體 `task07_onenote_to_markdown_lazy_loading/` → 讀 [`doc/branch_onenote_lazy_loading_summary.md`](doc/branch_onenote_lazy_loading_summary.md)（Bronze/Silver medallion 分層、`html_hash` 冪等快取、on-demand enrichment、LLM 服務級斷路器）。
->
-> 兩版最終在 `feature/dashboard-ui` 分支接上審查 UI 遴選，由使用者依所選 summary 定奪保留哪一個 task07 後，另一版才淘汰。
+> **需要修改 task07 時**，讀 [`doc/branch_onenote_lazy_loading_summary.md`](doc/branch_onenote_lazy_loading_summary.md)（Bronze/Silver/Gold medallion 分層、`html_hash` 冪等快取、on-demand enrichment、LLM 服務級斷路器）；並先確認要動的是 Bronze ETL、`task07_silver_service`、`task07_gold_service` 還是共用的 `task07_common`。
 
 ### Dashboard UI（`dashboard_ui/`）
 
@@ -134,6 +149,8 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 - `ONENOTE_OUTPUT_DIR` — HTML / `.md` 輸出根目錄；實際寫入路徑為 `{ONENOTE_OUTPUT_DIR}/{帳號}/{筆記本}/{章節}/`（task07）
 - `ONENOTE_NOTEBOOK_IDS` — （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇（task07）
 - `ONENOTE_SELECTED_NOTEBOOKS` — （選填）逗號分隔的 notebook 名稱；省略則於終端機互動選擇（task07）
+- `SILVER_ENDPOINT_URL` — task07 lazy_loading 多版本審查頁呼叫 Silver enrich 端點的 URL（本機預設 `http://localhost:8002/enrich`）
+- `GOLD_ENDPOINT_URL` — task07 lazy_loading 多版本審查頁 approve/reject 呼叫 Gold/Archive 端點的 URL（本機預設 `http://localhost:8003/archive`）
 
 ## 部署架構（Phase II+）
 

@@ -1,35 +1,39 @@
 # # Task07 Hand-over：OneNote 多版本保留 × LLM 省呼叫 ETL 開發計畫
 
 > **開發目標**： 延續 Task07 的 OneNote → Markdown → 向量庫 ETL，本分支針對「企業部門公務筆記」場景強化兩個目標：  \
-> 1. **Bronze layer: 允許保留同一份筆記的舊版本 HTML**，讓資料源歷史可追溯、不互相覆蓋，核心手段是「在 GCS 以 `dt=` 日期分區保存多版本 OneNote 的同名筆記，檔型為 html」。  \
-> 2. **Silver & Gold layer: 避免浪費 multimodal LLM 的 enrichment 任務呼叫**，核心手段是「以 `html_hash` 為冪等鍵為 LLM enriched markdown document 建立快取，存在 GCS」、「ETL 階段完全不主動呼叫 LLM，所有 enrichment 改為**純 Lazy Loading（on-demand）**：等到使用者登入審查 UI、點擊某個尚未處理的版本時，才當場觸發 Silver 流程（查快取 → 呼叫 LLM → 存 MD）」、「以 `html_hash` 快取兜底，即使使用者重複點擊同一版本也不會產生額外 token」。  \
-> 相較個人Task01 Obsidian 筆記（流程1，改動少、可全量 eager 處理），Task 07 的 OneNote 公務筆記改動頻繁、且 human-in-loop 審查易塞車。**本企劃刻意不引入背景預熱與跨版本狀態機**：因為改動頻繁時，預先 enrich 出來的中間版多半沒人會選，主動生成只是燒 token；改用 Lazy Loading 後，ETL 與人類審查兩端透過 GCS 既有檔案解耦，架構單向、清晰，且省 token 的效益靠 `html_hash` 快取自然達成，毋須複雜的 superseded 標記與預熱閘門。
+> 1. **Bronze layer - 允許保留同一份筆記的舊版本 HTML**，讓資料源歷史可追溯、不互相覆蓋:\
+核心手段是「在 GCS 以 `dt=` 日期分區保存多版本 OneNote 的同名筆記，檔型為 html」。  \
+> 2. **Silver - 避免浪費 multimodal LLM 的 enrichment 任務呼叫**:\
+核心手段是「ETL 階段完全不主動呼叫 LLM，所有 enrichment 改為**純 Lazy Loading（on-demand）**，也就是等到使用者登入審查 UI、點擊某個尚未處理的版本時，才當場觸發 Silver 流程（查快取 → 呼叫 LLM → 存 MD）」。  \
+查快取的意思是「以筆記的 `html_hash` 為冪等鍵，在 metadata 中尋找這個 `html_hash` 與是否先前已經建立過 LLM enriched markdown document 且已存在 GCS 上的何者路徑，`html_hash`為 key，`md_path`為 value，從 GCS 上尋 `md_path` 來作為資料快取，因此就不需重複 enrich 相同內容筆記。  \
+除非使用者要求 `regenerate` enriched document」。`regenerate` 按鈕實作於後文詳述。
+> 3. **Gold - 加入 `regenerate` 點擊額度限制，避免系統上線初期被惡意狂打 LLM calls**: \
+核心手段是在 LLM_call_logs 增加 `trigger` 欄位紀錄呼叫模型的原因，若 `regenerate` 超過額度則封鎖按鈕，只能 archive 或 reject。
 
 ## 前置條件確認
-**執行環境**：macOS with Web browser / VS Code IDE / pyenv (Python 3.14) / Poetry
-**AI tool**：Claude code + OpenSpec skill
-**資料授權**：本人 Delegated Authorization，員工於瀏覽器登入授權後，呼叫端取得 OneNote Graph API token
-**開發分支**：
-  - `feature/html-to-markdown`：負責開發 Bronze layer（OneNote Graph API 下載 html 至 GCS、以 `dt=` 分區保留多版本、hash 值判定變動）與 Silver layer 的 enrichment **服務本體**（`html.parser` → multimodal LLM → enriched markdown、`html_hash` 冪等快取、LLM 服務級守門）。此 Silver 服務不在 ETL 主動執行，而是**作為可被 UI on-demand 呼叫的模組**對外提供。
-  - existing branch, `feature/dashboard-ui`：負責開發 Gold layer 與 **on-demand 觸發點**——多版本對照審查頁 (圓鈕切換同名筆記 1~5 版)，使用者點擊未處理版本時呼叫 Silver 服務即時生成 md，人工核可後自動化歸檔 (archive endpoint)，同名筆記一次只能認可一份。
-**目的整併至分支**：`develop`
+- **執行環境**：macOS with Web browser / VS Code IDE / pyenv (Python 3.14) / Poetry  \
+- **AI tool**：Claude code + OpenSpec skill  \
+- **資料授權**：本人 Delegated Authorization，員工於瀏覽器登入授權後，呼叫端取得 OneNote Graph API token  \
+- **開發分支**：
+  - New branch `feature/html-to-markdown`：負責開發 Bronze layer，從 OneNote Graph API 判斷是否下載 html 至 GCS 並執行下載。
+  - existing branch, `feature/dashboard-ui`：
+    - 負責開發多版本對照審查頁。
+    - 負責開發 Silver layer 的 enrichment 服務本體，生成 enriched document markdown。
+    - 負責開發 Gold layer 的歸檔 (`archive`) 與退件 (`rejected`) 按鈕，且在觸發後登記筆記特性數據到 metadata，作為 LLM 生成之資料品質的驗證指標。
+- **目的整併至分支**：`feature/html-to-markdown` 整併至 `feature/dashboard-ui`，`feature/dashboard-ui` 再隨雲端部署時整併到 `develop`
 
 ---
 
 ## 專案資料夾結構
 
 ```
-feature/onenote-versioned-etl/
+分支 feature/html-to-markdown
+<project root workdir>/
 ├── .env
 ├── poetry.lock
 ├── pyproject.toml
 │
-├── .claude/
-│   ├── commands/
-│   ├── hooks/
-│   └── skills/
-│
-├── task07_onenote_versioned_etl/
+├── task07_onenote_to_markdown_lazy_loading/
 │   ├── e_onenote_download.py     # Bronze layer - Extract：人工確認 endpoints、下載 html，
 │   │                             # 算 html_hash、與 metadata 最新 hash 值判定變動
 │   ├── t_html_to_markdown.py     # Silver layer - Transform：html.parser → multimodal LLM 做出
@@ -44,9 +48,49 @@ feature/onenote-versioned-etl/
 └── tests/
 ```
 
+```
+分支 feature/dashboard-ui
+<project root workdir>/
+├── .env
+├── poetry.lock
+├── pyproject.toml
+│
+├── dashboard_ui/
+│   └── app.py                               # 網頁入口，主頁面
+│       ├── pages/
+│       │    └── onenote_review.py           # 頁面3 - silver & gold 層服務入口
+│       └── utils/
+│            ├── gcs_reader.py               # 讀取 GCS 物件，無法寫入。
+│            ├── interact_with_mongodb.py    # 與 MongoDB 連線，透過各 collection 查詢函式取得文檔資料
+│            └── ui_elements.py              # 共用 UI 元件：sidebar、雷達圖、任務明細表、色票設定，
+│                                            # 供 app.py 與 pages/ 使用
+│
+│
+├── task07_onenote_to_markdown_lazy_loading/
+│   ├── e_onenote_download.py     # Bronze layer - Extract：人工確認 endpoints、下載 html，
+│   │                             # 算 html_hash、與 metadata 最新 hash 值判定變動
+│   ├── main.py                   # Bronze ETL 入口
+│
+├── task07_silver_service/
+│   ├── t_enrich_html_to_markdown.py  # Silver layer - Transform：html.parser → multimodal LLM 做出
+│   │                                 # enriched document mardown，enrichment 以 html_hash 冪等快取；
+│   ├── l_save_markdown.py            # Silver layer - Load：enriched document md 存 GCS
+│   └── app.py                        # Silver 服務主體，串聯 t & l
+│
+├── task07_gold_service/
+│   ├── l_archive_note.py             # Gold layer - 處理歸檔或退件，並寫入資料品質指標。
+│   └── app.py                        # Gold 服務主體
+│
+├── task07_common/                    # task07 三層共用函式庫
+│   ├── gcs.py                        # 下載或是上傳物件到 gcs
+│   ├── hashing.py                    # html 原始碼 hash、GCS 物件 md5
+│   └── audit_log.py                  # Append log to MongoDB
+└── tests/
+```
+
 ---
 
-## Task 07 — OneNote 多版本 ETL
+## Task 07 — OneNote 多版本下載、彙整、審查 ETL 流程描述
 
 ### 資料來源
 Microsoft OneNote Graph API（Delegated Authorization）
@@ -58,38 +102,17 @@ Microsoft OneNote Graph API（Delegated Authorization）
 - google gen ai sdk（multimodal LLM enrichment）
 
 ### database, data storage
-- MongoDB Atlas（api logs、LLM logs、note metadata (含 enrichment 快取索引)、向量庫）
+- MongoDB Atlas
+  - api logs: collection 名稱為 `onenote_graph_api_logs`
+  - LLM logs: collection 名稱為 `multimodal_llm_enrichment_logs`
+  - note metadata: collection 名稱為 `onenote_note_metadata`
 - GCS（data lake，以 `dt=` 分區保存 html、md、png 多版本）
 
 ---
 
 ### Bronze layer — 多版本 raw notes 保存
 
-> **版本保留的設計核心**：路徑帶 `dt=<bronze執行日>` 分區。同一頁筆記每次 hash 有變動就寫進新的日期資料夾，舊版本留在舊分區、不被覆蓋。歷史可完整回溯。
-
-- Hierarchy of blobs
-```plaintext
-gs://onenote-vaults/raw-notes/<onenote_user_id>
-├── <notebook_name>/
-│       ├── <section_name>/
-│       │       ├── dt=2026-06-10/                ⬅️ 第一次偵測到變動的版本
-│       │       │       ├── <page_name>.html
-│       │       │       └── _images/
-│       │       │             └── image01.png
-│       │       ├── dt=2026-06-18/                ⬅️ hash 又變了，存新版本
-│       │       │       ├── <page_name>.html
-│       │       │       └── _images/
-│       │       │             └── image01.png
-│       │       └── dt=<bronze執行日>/             ⬅️ 最新版本
-│       │               ├── <page_name>.html
-│       │               └── _images/
-│       └── <section_name_2>/
-│               └── dt=.../
-└── <notebook_name_2>/
-        └── ...
-```
-
-- Extract 步驟
+- ETL 步驟
   1. Delegated token → 請求 OneNote Graph API，取得員工公務筆記的所有 page endpoints 清單。
   2. **人工確認 (python `input()`)** 核查要從哪些 endpoints 下載，避免自動化腳本無聲載到敏感資訊造成個資外流。
   3. 對核可的 endpoints 用 `requests.get()` 下載 html 原始碼（含引用圖片），計算 **html 原始碼 hash**（`utils/hashing.py`）。
@@ -106,83 +129,127 @@ gs://onenote-vaults/raw-notes/<onenote_user_id>
     - Insert to collection `onenote_graph_api_logs`。
     - Upsert to collection `onenote_note_metadata`（page_id、notebook、section、page_title、dt、html_hash、html_md5、html_path、html_downloaded_at、img_*、status=bronze_stored、embedded_status=false）。
       > 新版本一律落在 `bronze_stored`（待 on-demand enrich），ETL 不在此呼叫 LLM、不做任何跨版本標記。
----
+  6. 執行頻率
+    - 第一次由人工授權應用程式取得 token，第二次開始自動化每週一次。
+      > 需設計 refresh token 機制與記載第一次觸發時核可過哪些筆記本，否則第二次仍然需要人機互動來做筆記本挑選，若使用者仍期望人機互動，應再設計服務介面且部署在有人監管的伺服器；若可完全自動化，則可部署 bronze 至 serverless 服務上。
 
-### Bronze → Silver 過渡期 — ETL 只到 Bronze，Silver 純 on-demand
+  7. Hierarchy of blobs on GCS
+    ```plaintext
+    gs://onenote-vaults/raw-notes/<onenote_user_id>
+    ├── <notebook_name>/
+    │       ├── <section_name>/
+    │       │       ├── dt=2026-06-10/                ⬅️ 第一次偵測到變動的版本
+    │       │       │       ├── <page_name>.html
+    │       │       │       └── _images/
+    │       │       │             └── image01.png
+    │       │       ├── dt=2026-06-18/                ⬅️ hash 又變了，存新版本
+    │       │       │       ├── <page_name>.html
+    │       │       │       └── _images/
+    │       │       │             └── image01.png
+    │       │       └── dt=<bronze執行日>/             ⬅️ 最新版本
+    │       │               ├── <page_name>.html
+    │       │               └── _images/
+    │       └── <section_name_2>/
+    │               └── dt=.../
+    └── <notebook_name_2>/
+            └── ...
+    ```
 
-> **省 LLM calls 的設計核心**：ETL（每週腳本）**只做到 Bronze**——下載 + hash + 存版本 + 更新 C3，全程不呼叫 LLM。Silver 的 enrichment **完全交給 UI 端觸發**：使用者登入審查頁、點擊某個尚未處理的版本時，才當場走 Silver 流程。沒有背景預熱、沒有佇列空/非空的分流閘門、沒有跨版本 `superseded` 標記。
-
-- 設計取捨（為何改為純 Lazy Loading）
-  - 公務筆記改動頻繁、人工審查易塞車。若每週主動預熱最新版，塞車時預熱出來的中間版多半沒人會選，等於白燒 token。
-  - 改為 on-demand 後，**省 token 的效益完全由 `html_hash` 快取自然達成**：使用者沒點的版本永遠不 enrich；點過的版本第二次點命中快取、零成本。毋須用狀態機去「決定這週該不該動手」。
-  - ETL 與人類審查兩端透過 GCS 既有檔案 + C3 metadata 解耦，資料流**單向**（Bronze 存檔 → 使用者點擊 → Silver 生成），不會有 `pending_review → bronze_stored → superseded` 的中間態 race condition。
-
-- 服務級守門（取代原本綁「單筆記版本次數」的斷路器）
-  - 斷路器**不再綁定單一筆記的歷史版本次數**，而是設在 **LLM 服務級別**：若 LLM API **連續失敗/超時達門檻（如 5 次）**，則暫停 on-demand enrich 一段時間，避免服務異常時持續打壞掉的 API。期間筆記狀態維持 `bronze_stored`，**不懲罰任何單一筆記**、不鎖死使用者操作。
-  - 單筆記的成本上限則由 Silver→Gold 既有的 `regenerate` quota 控制（同一 `html_hash` 最多 regenerate 2 次）。
-  - 此守門為輕量邏輯，收進 `t_html_to_markdown.py` 的 LLM 呼叫包裝，不另開模組。
+    > GCS 保存路徑前綴帶 `dt=<bronze執行日>`。同一頁筆記每次 hash 有跟`上一版本的 hash 值不同`就寫進新的日期資料夾，舊版本留在舊 dt 分區、不被覆蓋，以保留歷史可完整回溯。
 
 ---
 
 ### Silver layer — on-demand 觸發 × 冪等快取
 
-> **省 LLM  的設計核心之二**：enriched document markdown 結果以 `html_hash` 為快取鍵，同一份 html 永遠只打一次 LLM。
-
-- Hierarchy of blobs（md 存 silver，分區對齊 bronze）
-```plaintext
-gs://onenote-vaults/processed-notes/<onenote_user_id>/
-├── <notebook_name>/
-│       └── <section_name>/
-│               └── dt=<bronze執行日>/             # 注意是 bronze 的執行日
-│                       └── <page_name>_001.md    ⬅️ 放 LLM enriched documents + 流水號
-```
+> 設計取捨（為何純 Lazy Loading (on-deman)）
+>  - 公務筆記改動頻繁、人工審查易塞車。若每週主動預熱最新版，塞車時預熱出來的中間版多半沒人會選，等於白燒 token。
+>  - on-demand 後，**省 token 的效益完全由 `html_hash` 快取自然達成**：使用者沒點的版本永遠不 enrich；點過的版本第二次點命中快取、零成本。毋須用狀態機去「決定這週該不該動手」。
 
 - 觸發時機**只有一種**：**on-demand**——使用者在審查 UI 點擊某個 `bronze_stored`（尚未生成 md）的版本時即時觸發。針對被點到的那一版 html 筆記（不限定最新版；舊版被點同樣即時生成），ETL 階段不主動觸發。
 
-- Transformation 步驟
-  1. 取該版 `html_hash`，先**查快取**：拿 html_hash 去 collection `onenote_note_metadata` 找「有沒有一列 相同 `html_hash` 且 `md_path != null` 的資料」。
-    - 若有 (即 enriched document markdown 存在): 判定且寫入 colleciotn `multimodal_llm_enrichment_logs` 的欄位 `cache_hit=true`，直接讀 `gs://onenote-vaults/processed-notes/<onenote_user_id>/` 下的既有 md，**不打 LLM，跳過 step 2**。
-    - 若無：判定且寫入 colleciotn `multimodal_llm_enrichment_logs` 的欄位 `cache_hit=false`，並執行 step 2 生成文件。
-  2. `html.parser` 解析 html，交給 multimodal LLM 做 document enrichment 轉成 markdown，存 md 檔到 `gs://onenote-vaults/processed-notes/<onenote_user_id>/` 下的分區。
-    > **多模態 enrichment**：除了送入 html 純文字，亦把該頁內嵌圖片（C3 `img_path` 記錄的 `gs://` URI）以 `types.Part.from_uri()` 一併送進 `generate_content()`，讓 model 實際判讀圖片內容、在對應 `![]()` 連結下方生成更精準的「AI生成圖釋」。圖片以「文字標籤 `_images/<檔名>` + 圖片 Part」成對附上，供 model 與內文連結對齊。
-  > **冪等快取得到的本體其實是透過 `onenote_note_metadata` 的 `html_hash` 資料去 GCS 找到已經持久化的 md 檔**，所以「同一 hash」取資料的請求（員工切換/重看版本）的工作時，都是重複利用步驟 1。
-  3. 更新資料庫:
-  - Insert collection `multimodal_llm_enrichment_logs` (含 cache_hit、trigger、tokens)
-  - Upsert collection `onenote_note_metadata` (md_path、md_md5、md_exported_at、status=pending_review)
+- ETL 步驟
+  1. 使用者在透過 streamlit 寫出的審查介面，選擇某一篇筆記後，即時觸發`最新版`的筆記 enrichment 任務 (step 2&3)，而最新版筆記的 html 檔放在 GCS 哪個路徑下，由 collection `onenote_note_metadata` 的欄位 `dt=<最新>` & `page_id` 作為主鍵來查詢得到該資料列的 `html_hash`。
 
-*補充: 快取本體不放 Streamlit cache 理由是，on-demand enrich 雖由 UI 觸發，但生成結果（md）需跨 session、跨 process 持久可查（其他使用者或下次登入都要看得到），Streamlit 記憶體不能當事實來源。持久、跨 process 的事實來源 = `onenote_note_metadata`的 html_hash + GCS（md）媒合出的筆記內容；`st.cache_data` 只當選配的 session 內加速層。將來 `onenote_note_metadata` 查詢量過大才考慮在前面加 Redis。*
+  2. 拿該列 `html_hash` 繼續在 collection `onenote_note_metadata` 找「有沒有`任何列` 具有相同 `html_hash` 且 `md_path != null` 的資料」，若有，代表 enriched document markdown 之前已經透過 LLM 生成且存入 GCS:
+    - 判定 colleciotn `multimodal_llm_enrichment_logs` 的欄位 `cache_hit=true`。
+    - Insert collection `multimodal_llm_enrichment_logs` (含 cache_hit、trigger、tokens)。
+    - 拿著搜尋到的 `md_path` (路徑架構應為: `gs://onenote-vaults/processed-notes/<onenote_user_id>/`) 去下載 enriched document 後渲染在審查 UI 上，**不打 LLM**。
+    - 跳過 step 3.
+    > **此步驟定義為 「冪等快取」，得到的本體其實是透過 `onenote_note_metadata` 的 `html_hash` 資料去 GCS 找到已經持久化的 md 檔**，所以在 UI 上對「同一 hash」的資料讀取情境時，都是重複利用此步驟。
+
+  3. 若 md_path 均為 null，代表該筆記完全沒有經過 LLM 做 enrichment 且存入 GCS:
+    - 判定 colleciotn `multimodal_llm_enrichment_logs` 的欄位 `cache_hit=false`。
+    - 以 BeautifulSoup `html.parser` 解析 html，去掉 markup 標記取出文本主幹，文本中應該要清理 (clean&transform) 加上 `![<文字標籤>](_images/<檔名>)`，告訴模型這裡有張圖片。
+    - 把圖片 URI (collection `onenote_note_metadata` 欄位 `img_path` 可查到) 與文本交給 multimodal LLM 做 document enrichment 轉成 markdown。讓模型將需判讀圖片內容、在對應 `![]()` 連結下方生成擴寫出「AI生成圖釋」。
+    - 存 md 檔到 `gs://onenote-vaults/processed-notes/<onenote_user_id>/` 下的分區。
+    - Insert collection `multimodal_llm_enrichment_logs` (含 cache_hit、trigger、tokens)
+    - Upsert collection `onenote_note_metadata` (md_path、md_md5、md_exported_at、status=pending_review)。
+
+  4. 若使用者移步到較早版本的筆記，則也是進行 step 1-3 步驟來建立 enriched document markdown。
+
+  5. Hierarchy of blobs on GCS (dt=值，對齊 bronze 的 dt 值)
+    ```plaintext
+    gs://onenote-vaults/processed-notes/<onenote_user_id>/
+    ├── <notebook_name>/
+    │       └── <section_name>/
+    │               └── dt=<bronze執行日>/          # 注意是 bronze 的執行日
+    │                       └── <page_name>.md     # 放 LLM enriched documents
+    ```
+
+  6. on-demand 觸發後，若對於 LLM 生成結果不滿意，允許使用者在 UI 上操作 `regenerate` 按鈕重新生成，生成機制有兩層管制:
+    - 服務級別設計 circuit breaker：若 LLM API **連續失敗/超時達門檻（如 5 次）**，則暫停 on-demand enrich 一段時間，避免服務異常時持續打壞掉的 API。期間筆記狀態 (= collection `onenote_note_metadata` 欄位 `status`) 維持 `bronze_stored`，不鎖死使用者操作。
+    - 單篇筆記的 `regenerate` 成本上限由預設 quota 做控制 (同一 `html_hash` 在 `multimodal_llm_enrichment_logs` 欄位 `trigger` 值最多出現兩筆 `regenerate`)。
+
+> 將來 `onenote_note_metadata` 查詢量過大，或許考慮在前面加 Redis，專門存放會被 step 2 捕捉到的 markdown。
 
 ---
 
-### Silver → Gold 過渡期 — 多版本對照人工審查
+### Silver → Gold 過渡期 — UI 互動模式
 
-- Streamlit 對照頁：左渲染 bronze html、右渲染 silver layer 產出的 enriched document markdown (md)，但仍保留上方圓鈕可切換同名筆記 1~5 任一版本（對應1~5種不同 `dt=` 分區）。
-- **on-demand 首次載入**：圓鈕點到一個 `md_path=null`（從未 enrich）的版本時，當場呼叫 Silver 服務生成 md（cache miss、實際打 LLM）；點到已生成過的版本則直接讀 GCS 既有 md（cache hit、零成本）。沒被點到的版本永不 enrich。
-- 在 streamlit 人工確認 LLM 產出品質、不偏離 bronze 本意。
-- **同名一次只認可一份**：按下某版 `approved` → 觸發 gold layer；其餘同名版本的歸檔按鈕失效、按下 `reject` 則不進 gold layer。
-- **防貪心重複呼叫**：同一版本重看走快取零成本；唯一會主動產生新 LLM call 的是認為品質不好、按下 `regenerate` 按鈕，對此 `regenerate` 設小 quota（同一 `html_hash` 最多 regenerate 2 次）即可。
+- **對照頁設計**：Streamlit 左渲染 bronze html、右渲染 silver layer 產出的 enriched document markdown，但仍保留上方圓鈕可切換同名筆記 1~5 任一版本（對應1~5種不同 `dt=` 分區）。
+- **on-demand 首次載入**：圓鈕點到一個 `md_path=null`（=從未 enrich）的版本時，當場呼叫 Silver 服務生成 md，若點到已生成過的版本則直接讀 GCS 既有 md（cache hit、零成本）。沒被點過的版本永不 enrich。
+- **防貪心重複呼叫**：切換到生成過的版本必須走[冪等快取](#silver-layer--on-demand-觸發--冪等快取)，不重複打 LLM，唯一會主動產生新 LLM call 的是認為品質不好，按下 `regenerate` 按鈕，請 silver layer 執行 `regenerate` 任務。
+- **進入 Gold layer 方式**：按下某版 `approve` 或 `reject`。
 
 ---
 
-### Gold layer — 最終清洗、歸檔與向量化
+### Gold layer — 核可後歸檔
 
-> 將 silver 產出且經人工 `approved` 的 md 做最終格式清洗與向量化。
+> 將 silver layer 產出的 enriched document 且經人工 `approved`/`rejected` 的 md 做最終格式歸檔，並驗證資料品質記載入 metadata。
 
 - Hierarchy of blobs
 ```plaintext
-gs://<onenote_user_id>/from_onenote/archived_note
+gs://onenote-vaults/archived-notes/<onenote_user_id>/
 ├── <notebook_name>/
 │       └── <section_name>/
-│               ├── <page_name>.md          ⬅️ cleaned，從 processed_note 清洗複製
-│               └── _images/
-│                     └── image01.png        ⬅️ cleaned，從 processed_note 複製
+│               └── dt=<bronze執行日>/             # 注意是 bronze 的執行日，從 C3 可讀 dt 取得
+│                       ├── <page_name>.md.       # 從 processed_note 讀取後清理存入
+│                       └── _images/
+│                             └── image01.png     # 從 raw-notes 複製過來，每份筆記的 img 來自
+                                                  # 哪個 raw-notes/ 下的路徑，可以從 C3
+                                                  # 讀 img_path 得知。
 ```
 
 - Load 步驟:
-  1. cleaned md 與 png 存 `gs://<onenote_user_id>/from_onenote/archived_note/...`，各自有 md5。
-  2. 向量化資料存 MongoDB Atlas Vector Database collection `note_vectors_multimodal`。
-  3. **向量化亦以 hash 做冪等**：避免同內容重複 embed。
+  - 允許使用者觸發 `approved` 或 `rejected` 任一行為，由 flask routing 到不同處理程序，如下說明：
+  - 若為`rejected`:
+    1. 這一篇的筆記 `approved`、`reject`、`regenerate` 按鈕立即失效，前端顯示 `已退件`
+    2. 以 page_id & dt 為主鍵，upsert `onenote_note_metadata`，更新欄位 review_result、reviewed_at、reviewed_by_role、error_msg (若有例外)。
+    3. 回讀 `gs://onenote-vaults/processed-notes/<onenote_user_id>/` 被退件的 md 檔，萃取 frontmatter 區的 metadata (tags、date、type、alias)。
+    4. 以 page_id & dt 為主鍵，Upsert `onenote_note_metadata`，更新欄位 tags、date、type、alias、valid_img_cont，[schema 見後方](#collection-3-簡稱-c3-onenote_note_metadata)。
+
+  - 若為`approved`:
+    1. 將 md 從 `gs://onenote-vaults/processed-notes/<onenote_user_id>/...` 複製到 `gs://onenote-vaults/archived-notes/<onenote_user_id>/`，得到新 md5；將 md 引用的 png 從 `gs://onenote-vaults/raw-notes/<onenote_user_id>/...` 複製到 `gs://onenote-vaults/archived-notes/<onenote_user_id>/`，得到新 md5。
+    2. 前端顯示 `archive 完成` 後，歸檔的那份筆記以及比它舊的筆記 (dt 較早) 的所有 `approved`、`reject`、`regenerate` 按鈕立即失效。
+    3. 以 page_id & dt 為主鍵，upsert `onenote_note_metadata`，更新欄位 archived_at、img_archive_path、md_archive_path、review_result、reviewed_at、reviewed_by_role、error_msg (若有例外)。
+    4. 歸檔後回讀 `gs://onenote-vaults/archived-notes/<onenote_user_id>/` 那份剛剛歸檔的 md 檔，萃取 frontmatter 區的 metadata (tags、date、type、alias)。
+    5. 以 page_id & dt 為主鍵，Upsert `onenote_note_metadata`，更新欄位 tags、date、type、alias、valid_img_cont，[schema 見後方](#collection-3-簡稱-c3-onenote_note_metadata)。
+
+### Followup policies out of bronze/silver/gold layer
+
   > bronze 的 html 留存於各 `dt=` 分區、不自動刪除，保留期人工評估。
+  > 存在 archived-notes/ 下的資料 (md、png) 的向量化工作由另一條解耦的 pipeline (分支 feature/etl-pipeline task06) 開發後額外部署，避免初期模型調整頻繁但過度管道依賴性太黏而不易維護。
+  > 向量化以 hash 做冪等：避免同內容重複 embed。embed 存 MongoDB Atlas Vector Database collection `note_vectors_multimodal`。
 
 ---
 
@@ -263,6 +330,12 @@ gs://<onenote_user_id>/from_onenote/archived_note
 | img_archive_path   | Array<String> | N    | gold 歸檔 png 路徑集合 |
 | archived_at        | Date          | N    | 歸檔完成時間 |
 | error_msg          | String        | N    | C1/C2 未接住的其他關卡錯誤 |
+| md_frontmatter     | Object        | N    | archive & reject 後觸發寫入 md 的 frontmatter，作為筆記識別與追蹤資料品質用 |
+| md_frontmatter.tags | Array<String> | N    | 在 md frontmatter 欄位裡面，筆記的關鍵字清單 |
+| md_frontmatter.date | Date          | N    | md frontmatter 欄位裡面，原始筆記上傳到 html 時間 |
+| md_frontmatter.type | String        | N    | md frontmatter 欄位裡面，筆記的大類別 |
+| md_frontmatter.alias | Array<String> | N   | md frontmatter 欄位裡面，單篇筆記的別名 |
+| md_frontmatter.valid_img | int      | N    | md frontmatter 欄位裡面，筆記中能正常解析與渲染的圖片數量 |
 
 - Indexes
 ```javascript
@@ -285,105 +358,111 @@ gs://<onenote_user_id>/from_onenote/archived_note
 | 生成成功、等人審查 | pending_review | null | false |
 | 按通過、歸檔成功 | archived | approved | true |
 | 按通過、歸檔中途失敗 | archive_failed | approved | false |
-| 被退回 | review_closed | rejected | false |
+| 針對性單一筆記退件 | review_closed | rejected | false |
+| 核可日當天的候選筆記已有其他份歸檔<br>，間接造成此份筆記過期結束審閱期 | review_closed | overwritten 或 rejected | false |
 
-> approved ≠ archived，審核通過後仍視檔案系統運作分 archive_failed / archived，以 status 為最終判斷依據。
->
-> 同名筆記「一次只認可一份」由 Gold/UI 控制：approve 某版後，UI 讀回 C3 發現該 page_id 已有 `archived` 版本，其餘版本歸檔按鈕即失效。不需要 `superseded` 旗標。
+> `overwritten` 僅發生在，歸檔的筆記之 html_hash 跟被退件其他筆記 html_hash 相同。若歸檔的筆記之 html_hash 跟其他同時間競選的筆記之 html_hash 不同，則既為 `rejected`。需要這樣設計是因為，如果不區分 `overwritten` 這個情境，統一把被退件的筆記判定為 `rejected`，則未來在分析好壞筆記的時候，被核可的筆記內容將會同時出現 `rejected` 與 `approved` 兩種狀態，那就區分不出來他是好或壞了，誤導分析。
+
+> 語意釐清：approved ≠ archived，審核通過後仍視檔案系統運作分 archive_failed / archived，以 status 為最終判斷依據。
 
 ### Example - 同名筆記在 week 1 ~ week 4 的變化歷程（純 Lazy Loading）
-> 下面用同一份筆記 `page_id=p1`、人類連續幾週沒登入、第 4 週才回來審查走一遍。`vx` 代表筆記版本、`Hx`代表筆記版本的 `html_hash`：v1=H1、v2=H2、v3=H3、v4=H4。C1、C2、C3 代表前述提到的 collection 1、2、3。
-> **重點：ETL 每週只跑 Bronze、完全不呼叫 LLM；C2 只有在第 4 週人類點擊版本時才出現列。沒人點到的 v2、v3 永遠不 enrich，這就是省 token 的地方。**
 
-#### Week 1~3（dt=06-01 / 06-08 / 06-15）：v1、v2、v3 陸續進版 → 只存 Bronze
+#### Week 1~3
 
-每週 ETL 下載新版、算 hash、存 GCS 分區、upsert C3，**都不呼叫 LLM**。
+每週 ETL 下載新版、算 hash、存 GCS 分區，**都不進入審查頁呼叫 LLM**。
 
-**C1 `onenote_graph_api_logs`（每週各新增 1 列，共 3 列）**
+**C1 `onenote_graph_api_logs` (每週各新增 1 列，共 3 列)**
 
-| page_id | html_hash | downloaded | status_code | status |
-|---|---|---|---|---|
-| p1 | H1 | true | 200 | success |
-| p1 | H2 | true | 200 | success |
-| p1 | H3 | true | 200 | success |
+| page_id |     dt     | html_hash | downloaded | status_code | status |
+|---------|------------|-----------|------------|-------------|--------|
+|   p1    | 2026-06-01 |     H1    |    true    |    200     | success |
+|   p1    | 2026-06-08 |     H2    |    true    |    200     | success |
+|   p1    | 2026-06-15 |     H3    |    true    |    200     | success |
 
-**C2 `multimodal_llm_enrichment_logs` → 三週皆無新增列**（ETL 不呼叫 LLM）
+**C2 `multimodal_llm_enrichment_logs`**
+
+三週皆無新增列。
 
 **C3 `onenote_note_metadata`（三列，全為 bronze_stored）**
 
-| dt | html_hash | md_path | status | embedded_status | review_result |
-|---|---|---|---|---|---|
-| 06-01 | H1 | null | bronze_stored | false | null |
-| 06-08 | H2 | null | bronze_stored | false | null |
-| 06-15 | H3 | null | bronze_stored | false | null |
+| page_id |     dt     | html_hash | md_path | status | embedded_status | review_result |
+|---------|------------|-----------|---------|--------|-----------------|---------------|
+|   p1    | 2026-06-01 |     H1    |  null | bronze_stored |   false   |   null   |
+|   p1    | 2026-06-08 |     H2    |  null | bronze_stored |   false   |   null   |
+|   p1    | 2026-06-15 |     H3    |  null | bronze_stored |   false   |   null   |
 
-> 三個版本都靜靜躺在 Bronze，`md_path` 全 null。沒有 `pending_review` 把任何閘門關著，也沒有任何 superseded 標記。
+> 三個版本都靜靜躺在 `bronze_stored` 的 `raw-notes/` 下，`md_path` 全 null，也沒有 `pending_review` 的 markdown 文件。
 
-#### Week 4（dt=2026-06-22）：v4 進版（Bronze）→ 人類登入 → on-demand enrich → 核可歸檔
+#### Week 4 - 筆記透過 OneNote 軟體被改回 H2 一樣的內容，然後重新下載。當周人類登入審查頁，查看 06-22 版本 -> 06-15 版本 -> 06-08 版本，比對後核可 06-22 版本。
 
-本週 ETL 一樣只下載 v4 存 Bronze；之後人類登入審查頁，**只點了最新版 v4**，比對滿意後核可。
+**C1**
 
-**C1（再新增 1 列）**
+| page_id |     dt     | html_hash | downloaded | status_code | status |
+|---------|------------|-----------|------------|-------------|--------|
+|   p1    | 2026-06-01 |     H1    |    true    |    200     | success |
+|   p1    | 2026-06-08 |     H2    |    true    |    200     | success |
+|   p1    | 2026-06-15 |     H3    |    true    |    200     | success |
+|   p1    | 2026-06-22 |     H2    |    true    |    200     | success |
 
-| page_id | html_hash | downloaded | status_code | status |
-|---|---|---|---|---|
-| p1 | H4 | true | 200 | success |
+**C2 - 當周人類登入審查頁，查看 06-22 版本 -> 06-15 版本 -> 06-08 版本。**
 
-**C2（人類點 v4 觸發；第一次 miss、切走再切回 hit，共 2 列）**
+| page_id | timestamp  | html_hash | trigger | cache_hit | total_tokens | status |
+|---------|------------|-----------|---------|-----------|--------------|--------|
+|   p1    |     t1     |     H2    |on_demand|  false    |      1750    | success|
+|   p1    |     t2     |     H3    |on_demand|  false    |      1247    | success|
+|   p1    |     t3     |     H2    |on_demand|  true     |       0      | success|
 
-| page_id | html_hash | trigger | cache_hit | total_tokens | status |
-|---|---|---|---|---|---|
-| p1 | H4 | on_demand | false | 1750 | success |
-| p1 | H4 | on_demand | **true** | 0 | success |
+> 第三列，t3 查看的 06-08 版本之 html_hash 跟 06-22 版本相同，所以直接取 06-22 生成的 md 即可，第三列的`cache_hit=true` 表沒有打過 LLM。
 
-> 第一列：首次點 v4，cache miss、實際 enrich。第二列：員工切去看別版又切回 v4，命中快取、**不打 LLM**（tokens=0）。v1/v2/v3 因為沒人點，C2 從頭到尾沒有它們的列。
+**C3 比對後核可 06-22 版本**
 
-**C3（最終四列狀態）**
+- 核可前一刻:
 
-| dt | html_hash | md_path | status | embedded_status | review_result |
-|---|---|---|---|---|---|
-| 06-01 | H1 | null | bronze_stored | false | null |
-| 06-08 | H2 | null | bronze_stored | false | null |
-| 06-15 | H3 | null | bronze_stored | false | null |
-| 06-22 | H4 | …/dt=06-22/Note.md | archived | **true** | approved |
+| page_id |   dt  | html_hash | md_path | status | embedded_status | review_result |
+|---------|-------|-----------|---------|--------|-----------------|---------------|
+|   p1    | 06-01 |     H1    |   null  | bronze_stored | false | null |
+|   p1    | 06-08 |     H2    | `在process-notes/dt=06-22` | `pending_review` | false | null |
+|   p1    | 06-15 |     H3    | `在process-notes/dt=06-15` | `pending_review` | false | null |
+|   p1    | 06-22 |     H2    | `在process-notes/dt=06-22` | `pending_review` | false | approved |
 
-> v1~v3 維持 `bronze_stored`（仍可被未來某次點擊即時 enrich），v4 被核可、歸檔、向量化。整段流程單向、無中間態翻轉，也不需要 superseded 旗標——「同名一次只認可一份」由 UI 讀回 C3 是否已有 `archived` 版本來把關。
+- 核可後:
+
+| page_id |   dt  | html_hash | md_path | status | embedded_status | review_result | md_archive_path |
+|---------|-------|-----------|---------|--------|-----------------|---------------|---------------|
+|   p1    | 06-01 |     H1    |   null  | `bronze_stored` | false | null | null |
+|   p1    | 06-08 |     H2    | `在process-notes/dt=06-22` | `review_closed` | false | `overwritten` | null |
+|   p1    | 06-15 |     H3    | `在process-notes/dt=06-15` | `review_closed` | false | `rejected` | null |
+|   p1    | 06-22 |     H2    | `在process-notes/dt=06-22` | `archived` | false | `approved` | `在archived-notes/dt=06-22` |
 
 ---
 
 ## Development strategy
 
 ### **地端測試階段**
-**此分支**
+**`feature/html-to-markdown` 分支**
 
 1. **Extract**: 同[前述](#bronze-layer--多版本-raw-notes-保存)
 
-2. **Bronze 收尾 (ETL 只到 Bronze、不呼叫 LLM)**: 同[前述](#bronze--silver-過渡期--etl-只到-bronzesilver-純-on-demand)。每週腳本下載 + hash + 存版本 + upsert C3（status=bronze_stored）即結束。
+2. **Bronze layer**: 同[前述](#bronze--silver-過渡期--etl-只到-bronzesilver-純-on-demand)。每週腳本下載 + hash + 存版本 + upsert C3（status=bronze_stored）即結束。
 
-3. **Silver (on-demand enrichment + hash 冪等快取 + 服務級守門)**: 同[前述](#silver-layer--on-demand-觸發-冪等快取)。由 UI 點擊觸發，含 LLM API 連續失敗的服務級守門。
+3. **Silver layer**: 同[前述](#silver-layer--on-demand-觸發-冪等快取)。由 UI 點擊觸發，含 LLM API 連續失敗的服務級守門。
 
 **切到 `feature/dashboard-ui` 分支**
 
-4a. **on-demand Silver 觸發（端點化，比照 Archive）**: Streamlit 本身維持唯讀；點到 `md_path=null` 的版本時，只帶 page_id + dt 呼叫 **Silver enrich service**（即 `feature/html-to-markdown` 分支的 enrichment 服務本體）。由該服務查快取 → 必要時打 LLM → 寫 md 到 GCS `processed_note/` → upsert C3（status=pending_review）。Streamlit 收到結果後渲染。
+4a. **on-demand Silver 觸發**: 參考既有 Archive_service 的框架，繼承 `feature/html-to-markdown` 分支的 silver 後包成獨立端點。
 
-4. **Gold layer**: 參考[前述1](#silver--gold-過渡期--多版本對照人工審查)與[前述2](#gold-layer--最終清洗歸檔與向量化)。approved 觸發步驟 5，reject 記 `review_closed`，頁面加 demo 級登入窗。
+4. **Gold layer**: 參考[前述1](#gold-layer--核可後歸檔)與[前述2](#silver--gold-過渡期--ui-互動模式)。參考既有 Archive_service 的框架包成獨立端點，頁面加 demo 級登入窗。
 
-5. **Archive 端點（獨立腳本）**: Streamlit 不自寫 vault，只帶 page_id + dt + 登入者角色呼叫 Archive service。Archive 讀 silver、寫 `gs://<onenote_user_id>/from_onenote/archived_note/`：複製 png、改寫 md 圖片連結為相對路徑後寫 `cleaned.md`，並向量化寫入 `note_vectors_multimodal`（向量化亦以 hash 冪等）。
-
-6. **Archive upsert `onenote_note_metadata`**：status、review_result、reviewed_by_role、reviewed_at、md_archive_path、img_archive_path、archived_at、embedded_status=true。
-
-7. **防重複檢核**：Streamlit 渲染時讀回 `onenote_note_metadata`，已歸檔頁顯示「已歸檔」橫幅並停用按鈕；同名其餘版本按鈕失效。
-
-8. **舊版 html 保留**：各 `dt=` 分區 html 不自動刪，保留期人工於 GCP console 評估，不過度開發。
+5. **舊版 html 保留**：各 `dt=` 分區 html 不自動刪，保留期人工於 GCP console 評估，不過度開發。
 
 ### **雲端部署階段（同部門跨帳號，GCP 為平台）**
 
-9. Merge `feature/dashboard-ui` → `develop`，包 image 推 Artifact Registry、跑 Cloud Run。Streamlit 服務帳戶僅持 staging（raw_note / processed_note）**唯讀**；頁面加 demo 級登入窗。
+6. Merge `feature/dashboard-ui` → `develop`，包 image 推 Artifact Registry、跑 Cloud Run。Streamlit 服務帳戶僅持 staging（raw_note / processed_note）**唯讀**；頁面加 demo 級登入窗。
 
-10. Archive 端點包 image，Cloud Run 持 `archived_note` **寫入** + staging **唯讀**。
+7. gold archive 端點包成獨立 image，Cloud Run 持 `archived_note` **寫入** 權限。
 
-10b. Silver enrich 端點包 image，Cloud Run 持 `processed_note` **寫入** + `raw_note` **唯讀**；由 Streamlit on-demand 呼叫。
+7b. Silver enrich 端點包 image，Cloud Run 持 `processed_note` **寫入** 權限。
 
-11. log 仍寫入同一個 MongoDB Atlas（地端階段已整併），雲端只是換 Cloud Run 容器讀寫同一 Atlas。
+8. log 仍寫入同一個 MongoDB Atlas（地端階段已整併），雲端只是換 Cloud Run 容器讀寫同一 Atlas。
 
-> 核心原則：Streamlit 直連 Atlas / GCS 皆**唯讀**僅作狀態顯示；所有寫入（on-demand enrich 的 md / 狀態翻轉、檢核者、歸檔）分別由 **Silver enrich 端點**與 **Archive 端點**執行。LLM 與 embedding 兩段都以 `html_hash` / 內容 hash 做冪等、hash 值判定變動，整條鏈不重複燒 token。
+> 核心原則：Streamlit 直連 Atlas / GCS 皆**唯讀**僅作狀態顯示；所有寫入 GCS 分別由 **Silver enrich 端點**與 **Gold archive 端點**執行。LLM 與 embedding 兩段都以 `html_hash` / 內容 hash 做冪等、hash 值判定變動，整條鏈不重複燒 token。

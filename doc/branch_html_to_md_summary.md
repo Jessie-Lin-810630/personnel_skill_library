@@ -260,10 +260,10 @@ poetry run python -m unittest tests.test_task07_onenote_to_markdown -v
 - [x] Unit tests 覆蓋四個模組的型別正確性與例外處理
 
 **後續待開發（跨分支）**
-- [ ] 步驟 3：將本機 HTML / MD / 圖片同步上傳至 GCS `onenote-vaults`（staging vault）
-- [ ] 步驟 4–8：`feature/dashboard-ui` 新增對照審核頁面（HTML vs. MD 並排、檢核按鈕、Archive 端點）
+- [x] 步驟 3：將本機 HTML / MD / 圖片同步上傳至 GCS `onenote-vaults`（staging vault）
+- [x] 步驟 4–8：`feature/dashboard-ui` 新增對照審核頁面（HTML vs. MD 並排、檢核按鈕、Archive 端點）
 - [ ] 步驟 9–11：雲端部署（Cloud Run Service / Job）
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 的所有腳本與測試，於 2026-06-15 完成記錄。*
+*本摘要涵蓋 `feature/html-to-markdown`與 `feature/dashboard-ui` 分支中 task07 的所有腳本與測試，於 2026-06-20 完成記錄。*

@@ -28,15 +28,16 @@ from google.genai import types
 from google.oauth2.service_account import Credentials
 from loguru import logger
 
-from .l_save_markdown import save_enriched_md
-from .utils import gcs
-from .utils.audit_log import (
+from task07_common import gcs
+from task07_common.audit_log import (
     count_regenerate,
     find_cached_md_by_hash,
     get_version_meta,
     log_enrichment_call,
     upsert_version_meta,
 )
+
+from .l_save_markdown import save_enriched_md
 
 load_dotenv()
 
@@ -166,6 +167,7 @@ def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
     soup = BeautifulSoup(html_content, "html.parser")
     for img in soup.find_all("img"):
         alt = " ".join(img.get("alt", "").split()) or "image"
+        alt = alt.replace("]", "-")  # alt 替代避免文字可能會有 ] 符號會讓 md 檔圖片顯示失敗
         src = img.get("src", "")
 
         # conver to string to meet the link syntax of image in a markdown file
@@ -203,7 +205,7 @@ def _call_llm(
                         (v) 如文章中有「詞彙(terminology)定義」、「參考資料連結」或「參考資料文件名稱」，
                             把他們移到整篇文章的前面，當作前言，然後才排序其他主文標題。
                         (vi) 如果遇到![]()這樣的文字，代表它是與 markdown 語法相容的圖片link，
-                             **請不要隨意移出他原本所屬的章節，但可以調整縮排**。
+                             **請不要隨意移出他原本所屬的章節，也不可以修改![]()這裡面的任何文字符號，但可以調整縮排**。
                              本次請求已把該連結對應的原始圖片一併附在後面（依 `_images/<檔名>` 對齊），
                              **請實際觀看每張圖片的內容**，為其在原連結下方生成 3-10 行精準圖片概述，
                              並標注此段為「AI生成圖釋」。
@@ -256,8 +258,10 @@ def _build_markdown(llm: dict, page_title: str, dt: str) -> str:
     tags = llm.get("tags", [])
     alias = llm.get("alias", [page_title])
     md_body = llm.get("new_content", "")
-    tags_list = "[" + ",".join(f'"{t.replace(" ", "-")}"' for t in tags) + "]"
-    alias_list = "[" + ",".join(f'"{a.replace(" ", "-")}"' for a in alias) + "]"
+
+    # 模型輸出浮動，可能出現特殊符號開頭，例如: %rd，以雙引號匡住每個元素避免未來 frontmatter 解析失敗。
+    tags_list = "[" + ",".join(f'"{t.lower().replace(" ", "-").replace("_", "-")}"' for t in tags) + "]"
+    alias_list = "[" + ",".join(f'"{a.lower().replace(" ", "-").replace("_", "-")}"' for a in alias) + "]"
     note_type = _classify_note_type(page_title)
 
     # frontmatter suitable opened by Obsidian
