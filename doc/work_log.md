@@ -1796,3 +1796,12 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         > 待辦事項：這裡的快照項目需要視希望看task01、task07與task06還有沒有什麼指標想放進來，所以欄位還可能要再多想。
 
 2. Based on the planning above, established the scripts of [task01-v2](../task01_obsidian_etl_v2/).
+
+## 20260708 Work log
+1. In the branch `feature/html-to-markdown`, revised the [task07](../task07_onenote_to_markdown_lazy_loading/) to reduce the difference of schema designs between task01 that ingested the notes from Obsidian App and this task07 that ingested the notes from OneNote App. Most of columns in [task07](../doc/task07_onenote_versioned_etl_hand_over_v2.md) were all almost similar except for the hash calculation for raw-notes and existence of columns to address the metadata of processed-notes in Silver layer. The gold layer, storing the archived-notes prior to embedding to RAG, are described in the same business meaning in their individual tables.
+    > Next Step: *`dashboard_ui/pages/onenote_review.py` 第 328,342 行應使用enriched_md_path，否則版本清單會誤判尚未生成。*
+2. Estabslished [task08](../task08_onenote_embed_etl/) for embedding the OneNote archived-note markdown files to vector database. The design of the task08 almost the same as the embedding task06 that handles the archived-notes from Obsidian.
+    > Next Step: Minor correct the column name of vector database collection `note_vectors_multimodal` from `raw_md_path` to `md_path` in order to correct the business meaning:
+    > - Source of any embed should be archived notes in markdown file and no longer raw notes or processed notes. The latter two only valued in bronze and silver layer. Source of embed should come from gold layer (i.e., archived notes).
+    > - To accommodate the archived .md from both task07 (handling OneNote) and task01 (handling Obsidian), the column name of `md_path` does not specifiy the note APP name. (Neither `onenote_md_path` nor `obsidian_md_path` were used. Just `md_path`).
+    > - Same requirements for the column `image_paths`. This column point to the paths of archived images of a note without limiting to any specific note APP.

@@ -298,7 +298,7 @@ def t_enrich_html_to_markdown(
     if not meta:
         return {"status": "not_found", "error": f"無此版本 (page_id={page_id}, dt={dt})"}
 
-    html_hash = meta["html_hash"]
+    html_hash = meta["html_sha_hash"]
     notebook, section, page_title = meta["notebook"], meta["section"], meta["page_title"]
     html_path = meta["html_path"]
     user_id = meta["onenote_user_id"]
@@ -311,7 +311,7 @@ def t_enrich_html_to_markdown(
             "status": meta.get("status"),
             "error": "regenerate quota exceeded",
             "cache_hit": False,
-            "md_path": meta.get("md_path"),
+            "md_path": meta.get("enriched_md_path"),
         }
 
     # 3. 若不是接收到 regenerate 需求重新 enrichment，則直接快取查找：
@@ -339,14 +339,19 @@ def t_enrich_html_to_markdown(
                 page_id,
                 dt,
                 set_fields={
-                    "md_path": cached["md_path"],
-                    "md_md5": cached.get("md_md5"),
+                    "enriched_md_path": cached["enriched_md_path"],
+                    "md_md5_hash": cached.get("md_md5_hash"),
                     "status": "pending_review",
                     "error_msg": None,
                 },
             )
-            logger.info(f"[cache hit] html_hash={html_hash[:8]} 重用 {cached['md_path']} (tokens=0)")
-            return {"status": "pending_review", "cache_hit": True, "md_path": cached["md_path"], "circuit_open": False}
+            logger.info(f"[cache hit] html_hash={html_hash[:8]} 重用 {cached['enriched_md_path']} (tokens=0)")
+            return {
+                "status": "pending_review",
+                "cache_hit": True,
+                "md_path": cached["enriched_md_path"],
+                "circuit_open": False,
+            }
 
     # 若 cache miss:
     # 4. 服務級斷路：開啟期間不打 LLM
@@ -364,7 +369,7 @@ def t_enrich_html_to_markdown(
     raw_html = gcs.download_text(html_path)
     plain_text = convert_img_tag_to_md_str(raw_html).get_text(" ", strip=True)
 
-    img_uris = meta.get("img_path", [])
+    img_uris = [img["raw_image_path"] for img in meta.get("attached_images", []) if img.get("raw_image_path")]
     # 6. 呼叫多模態 LLM
     client = client or _get_genai_client()
 

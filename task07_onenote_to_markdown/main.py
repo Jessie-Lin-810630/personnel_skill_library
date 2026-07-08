@@ -1,0 +1,57 @@
+"""task07 ETL 入口：串接 Extract → Transform → Load 完成 OneNote 轉 Markdown。
+
+執行流程：Extract 下載 OneNote 頁面成 HTML → 由 env 或終端機互動選擇要轉換的筆記本 →
+Transform 解析 HTML 並呼叫 Gemini → Load 逐頁存 .md 並 upsert MongoDB。
+
+Usage:
+    poetry run python -m task07_onenote_to_markdown.main
+
+Optional .env keys:
+    ONENOTE_SELECTED_NOTEBOOKS   Comma-separated notebook names; interactive select if omitted.
+"""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from .e_onenote_download import e_onenote_download
+from .t_html_to_markdown import t_html_to_markdown
+
+load_dotenv()
+
+
+def run_task07_onenote_etl():
+    # Extract: download OneNote pages as HTML files; returns OUTPUT_DIR / user_account
+    export_dir = Path(e_onenote_download())
+    selected_raw = os.getenv("ONENOTE_SELECTED_NOTEBOOKS", "").strip()
+    if not selected_raw:
+        candidates = [d.name for d in sorted(export_dir.iterdir()) if d.is_dir() and not d.name.startswith(".")]
+        if not candidates:
+            raise EnvironmentError(f"No subdirectories found in {export_dir}.")
+        print("\nDownloaded notebooks:")
+        for i, name in enumerate(candidates, 1):
+            print(f"  [{i}] {name}")
+        raw_input = input("\nEnter the notebooks to transform. Name(s) comma-separated (or numbers): ").strip()
+        if not raw_input:
+            logger.warning("No notebooks selected. Exiting.")
+            return
+        selected_notebooks = []
+        for token in raw_input.split(","):
+            token = token.strip()
+            if token.isdigit() and 1 <= int(token) <= len(candidates):
+                selected_notebooks.append(candidates[int(token) - 1])
+            elif token:
+                selected_notebooks.append(token)
+    else:
+        selected_notebooks = [s.strip() for s in selected_raw.split(",") if s.strip()]
+
+    logger.info(f"Transform: processing {len(selected_notebooks)} notebook(s) from {export_dir}")
+
+    # Transform + Load: parse HTML → call Gemini → save .md + upsert MongoDB per page
+    t_html_to_markdown(selected_notebooks, export_dir)
+
+
+if __name__ == "__main__":
+    run_task07_onenote_etl()

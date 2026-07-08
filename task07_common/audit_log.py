@@ -5,8 +5,9 @@
   multimodal_llm_enrichment_logs  — 每次 LLM enrichment 呼叫一筆（含 cache_hit） (C2)
   onenote_note_metadata           — 每個 (page_id, dt) 版本一筆，全程 upsert (C3)
 
-與 v01 差異：C3 主鍵改為 (page_id, dt)，支援同頁多版本；新增 html_hash、
-embedded_status、superseded 已移除（企劃書改版後不再使用）。
+與 v01 差異：C3 主鍵改為 (page_id, dt)，支援同頁多版本；新增 html_sha_hash、
+embedded_status、superseded 已移除（企劃書改版後不再使用）。三個 collection 寫入的
+html sha256 欄位一律命名 html_sha_hash，跨 collection join 命名一致。
 """
 
 import os
@@ -99,7 +100,7 @@ def log_api_call(
                 "status": status,
                 "status_code": status_code,
                 "latency_ms": latency_ms,
-                "html_hash": html_hash,
+                "html_sha_hash": html_hash,
                 "html_path": html_path,
                 "downloaded": downloaded,
                 "environment": _environment(),
@@ -145,7 +146,7 @@ def log_enrichment_call(
         _get_db()[C2].insert_one(
             {
                 "page_id": page_id,
-                "html_hash": html_hash,
+                "html_sha_hash": html_hash,
                 "timestamp": _now_utc(),
                 "event_type": "llm_enrichment_call",
                 "model": model,
@@ -172,7 +173,7 @@ def count_regenerate(html_hash: str) -> int:
     try:
         return _get_db()[C2].count_documents(
             {
-                "html_hash": html_hash,
+                "html_sha_hash": html_hash,
                 "trigger": "regenerate",
                 "status": "success",
             }
@@ -208,14 +209,14 @@ def get_version_meta(page_id: str, dt: str) -> dict:
 def find_cached_md_by_hash(html_hash: str) -> dict:
     """在 Collection onenote_note_metadata 做 md 快取查找。
 
-    找一列相同 html_hash 且 md_path != null 的版本；命中即可重用其 md。
+    找一列相同 html_sha_hash 且 enriched_md_path != null 的版本；命中即可重用其 md。
     """
     try:
         return (
             _get_db()[C3].find_one(
                 {
-                    "html_hash": html_hash,
-                    "md_path": {"$ne": None},
+                    "html_sha_hash": html_hash,
+                    "enriched_md_path": {"$ne": None},
                 }
             )
             or {}
@@ -258,10 +259,16 @@ def upsert_version_meta(
     set_fields: dict,
     set_on_insert_fields: dict | None = None,
 ) -> None:
-    """Upsert Collection onenote_note_metadata，主鍵為 (page_id, dt)，支援同頁多版本。"""
-    update: dict = {"$set": set_fields}
-    if set_on_insert_fields:
-        update["$setOnInsert"] = set_on_insert_fields
+    """Upsert Collection onenote_note_metadata，主鍵為 (page_id, dt)，支援同頁多版本。
+
+    每次寫入一律在 $set 蓋 updated_at、在 $setOnInsert 補 created_at（當下 UTC），
+    呼叫端不需逐處手動帶這兩個稽核時間戳。
+    """
+    now = _now_utc()
+    update: dict = {
+        "$set": {**set_fields, "updated_at": now},
+        "$setOnInsert": {**(set_on_insert_fields or {}), "created_at": now},
+    }
     try:
         _get_db()[C3].update_one(
             {"page_id": page_id, "dt": dt},

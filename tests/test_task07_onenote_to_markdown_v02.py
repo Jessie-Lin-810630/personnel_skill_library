@@ -80,7 +80,7 @@ class LogApiCallTests(unittest.TestCase):
                 html_path="u/from_onenote/raw_note/x/dt=2026-06-30/p.html",
             )
         doc = mock_col.insert_one.call_args[0][0]
-        self.assertEqual(doc["html_hash"], "abc123")
+        self.assertEqual(doc["html_sha_hash"], "abc123")
         self.assertTrue(doc["downloaded"])
         self.assertEqual(doc["event_type"], "onenote_api_download")
 
@@ -139,16 +139,20 @@ class UpsertVersionMetaTests(unittest.TestCase):
         upsert_version_meta(page_id="p1", dt="2026-06-30", set_fields={"status": "bronze_stored"})
         filter_doc, update_doc = mock_col.update_one.call_args[0]
         self.assertEqual(filter_doc, {"page_id": "p1", "dt": "2026-06-30"})
-        self.assertEqual(update_doc["$set"], {"status": "bronze_stored"})
+        # $set 保留呼叫端欄位，並集中補上 updated_at
+        self.assertEqual(update_doc["$set"]["status"], "bronze_stored")
+        self.assertIn("updated_at", update_doc["$set"])
         self.assertTrue(mock_col.update_one.call_args[1]["upsert"])
 
     @patch("task07_common.audit_log._get_db")
-    def test_set_on_insert_optional(self, mock_get_db):
+    def test_created_at_stamped_on_insert(self, mock_get_db):
         mock_col = MagicMock()
         mock_get_db.return_value = {"onenote_note_metadata": mock_col}
+        # 即使呼叫端未給 set_on_insert，仍集中在 $setOnInsert 補 created_at
         upsert_version_meta(page_id="p2", dt="2026-06-30", set_fields={"status": "x"})
         _, update_doc = mock_col.update_one.call_args[0]
-        self.assertNotIn("$setOnInsert", update_doc)
+        self.assertIn("created_at", update_doc["$setOnInsert"])
+        self.assertNotIn("created_at", update_doc["$set"])
 
     @patch("task07_common.audit_log._get_db")
     def test_mongo_failure_does_not_raise(self, mock_get_db):
@@ -307,6 +311,62 @@ class DownloadNotebooksFailedBranchTests(unittest.TestCase):
         self.assertEqual(set(set_fields) & set(set_on_insert), set())
 
 
+class DownloadNotebooksSuccessBranchTests(unittest.TestCase):
+    """content 下載成功、hash 有變動時，download_notebooks 對 C3 寫入的欄位契約（對齊定稿 schema）。"""
+
+    @patch(
+        "task07_onenote_to_markdown_lazy_loading.e_onenote_download._store_images",
+        return_value=(["mm1"], ["gs://b/raw/dt=2026-06-30/_images/a.png"]),
+    )
+    @patch("task07_onenote_to_markdown_lazy_loading.e_onenote_download.upsert_version_meta")
+    @patch("task07_onenote_to_markdown_lazy_loading.e_onenote_download.log_api_call")
+    @patch("task07_onenote_to_markdown_lazy_loading.e_onenote_download.get_latest_version_meta", return_value={})
+    @patch("task07_onenote_to_markdown_lazy_loading.e_onenote_download.get_all_from_an_api")
+    @patch("task07_onenote_to_markdown_lazy_loading.e_onenote_download.api_get")
+    def test_success_upserts_aligned_schema(
+        self, mock_api_get, mock_get_all, _mock_latest, mock_log, mock_upsert, _mock_imgs
+    ):
+        nb_resp = MagicMock()
+        nb_resp.json.return_value = {"displayName": "NB"}
+        content_resp = MagicMock()
+        content_resp.text = "<html><body><img src='https://x/a.png'></body></html>"
+        mock_api_get.side_effect = [nb_resp, content_resp]
+        mock_get_all.side_effect = [
+            [{"id": "s1", "displayName": "SEC", "self": "https://graph/users/jessie@gmail.com/onenote/sections/s1"}],
+            [{"id": "p1", "title": "python-note"}],
+        ]
+
+        with (
+            patch.object(e.gcs, "raw_note_prefix", return_value="raw-notes/jessie/NB/SEC/dt=2026-06-30"),
+            patch.object(e.gcs, "upload_text", return_value="html_md5"),
+            patch.object(e.gcs, "gs_uri", side_effect=lambda b: f"gs://b/{b}"),
+        ):
+            e.download_notebooks(["nb1"], {}, RateLimiter(), None, None, "2026-06-30")
+
+        set_fields = mock_upsert.call_args.kwargs["set_fields"]
+        set_on_insert = mock_upsert.call_args.kwargs["set_on_insert_fields"]
+        # 改名後的 hash 欄位
+        self.assertEqual(set_fields["html_sha_hash"], mock_log.call_args.kwargs["html_hash"])
+        self.assertEqual(set_fields["html_md5_hash"], "html_md5")
+        self.assertNotIn("html_hash", set_fields)
+        self.assertNotIn("html_md5", set_fields)
+        # attached_images 為 Object 陣列（raw 端），非平行 list
+        self.assertEqual(
+            set_fields["attached_images"],
+            [{"raw_image_path": "gs://b/raw/dt=2026-06-30/_images/a.png", "raw_image_md5": "mm1"}],
+        )
+        self.assertNotIn("img_path", set_fields)
+        self.assertNotIn("img_md5", set_fields)
+        # topic 由 page_title "python-note" 命中 → python
+        self.assertEqual(set_fields["topic"], "python")
+        self.assertEqual(set_fields["status"], "bronze_stored")
+        # set_on_insert 為新 schema 占位欄位、與 set_fields 無重疊
+        self.assertIn("md_md5_hash", set_on_insert)
+        self.assertIn("md_body", set_on_insert)
+        self.assertNotIn("img_archive_path", set_on_insert)
+        self.assertEqual(set(set_fields) & set(set_on_insert), set())
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # t_html_to_markdown.py — Silver on-demand service
 # ═════════════════════════════════════════════════════════════════════════════
@@ -388,7 +448,7 @@ class EnrichPageTests(unittest.TestCase):
     """on-demand enrich 的分流：not_found / cache-hit / circuit-open / regenerate quota。"""
 
     BASE_META = {
-        "html_hash": "h1",
+        "html_sha_hash": "h1",
         "onenote_user_id": "u1",
         "notebook": "NB",
         "section": "SEC",
@@ -408,7 +468,7 @@ class EnrichPageTests(unittest.TestCase):
     @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_cache_hit_skips_llm(self, mock_meta, mock_cache, mock_log, mock_upsert):
         mock_meta.return_value = dict(self.BASE_META)
-        mock_cache.return_value = {"md_path": "u1/.../Note.md", "md_md5": "m5"}
+        mock_cache.return_value = {"enriched_md_path": "u1/.../Note.md", "md_md5_hash": "m5"}
         result = t.t_enrich_html_to_markdown("p1", "2026-06-30")
         self.assertTrue(result["cache_hit"])
         self.assertEqual(result["status"], "pending_review")
@@ -434,7 +494,7 @@ class EnrichPageTests(unittest.TestCase):
     @patch("task07_silver_service.t_enrich_html_to_markdown.count_regenerate")
     @patch("task07_silver_service.t_enrich_html_to_markdown.get_version_meta")
     def test_regenerate_quota_exceeded(self, mock_meta, mock_count):
-        mock_meta.return_value = dict(self.BASE_META, status="pending_review", md_path="u1/.../Note.md")
+        mock_meta.return_value = dict(self.BASE_META, status="pending_review", enriched_md_path="u1/.../Note.md")
         mock_count.return_value = t.REGENERATE_QUOTA
         result = t.t_enrich_html_to_markdown("p1", "2026-06-30", trigger="regenerate")
         self.assertEqual(result["error"], "regenerate quota exceeded")

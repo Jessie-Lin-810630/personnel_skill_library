@@ -1,7 +1,8 @@
 """Bronze 層 Extract：下載 OneNote 頁面 html、比對 hash、有變動才分區寫入 GCS。
 
-執行流程：下載 OneNote 頁面 html → 算 html_hash → 與 onenote_note_metadata 最新一筆 hash 比對 →
-有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata（status=bronze_stored）。
+執行流程：下載 OneNote 頁面 html → 算 html_sha_hash → 與 onenote_note_metadata 最新一筆 hash 比對 →
+有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata（status=bronze_stored、
+含 attached_images 圖片血緣與 topic 初判）。
 本層完全不呼叫 LLM；Silver enrichment 改由 UI on-demand 觸發。
 
 Usage:
@@ -39,7 +40,8 @@ from task07_common.audit_log import (  # 回傳現在 UTC 時間
     log_api_call,  # Insert request log to OneNote Graph API
     upsert_version_meta,  # Upsert data lineage between html to md
 )
-from task07_common.hashing import html_source_hash  # 計算 html_hash 用
+from task07_common.hashing import html_source_hash  # 計算 html_sha_hash 用
+from task07_common.topic import infer_topic  # bronze 以 page_title 初判 topic
 
 load_dotenv()
 
@@ -592,26 +594,29 @@ def download_notebooks(
                             "notebook": nb_name,
                             "section": sec_name,
                             "page_title": title,
+                            "topic": infer_topic([], title),
                             "status": "fetched_failed",
                             "error_msg": str(e),
                         },
                         set_on_insert_fields={
-                            "md_path": None,
-                            "md_md5": None,
-                            "md_exported_at": None,
+                            "enriched_md_path": None,
+                            "md_md5_hash": None,
+                            "enriched_md_exported_at": None,
                             "review_result": None,
                             "reviewed_by_role": None,
                             "reviewed_at": None,
-                            "md_archive_path": None,
-                            "img_archive_path": None,
+                            "archived_md_path": None,
                             "archived_at": None,
-                            "html_hash": None,
-                            "html_md5": None,
+                            "html_sha_hash": None,
+                            "html_md5_hash": None,
                             "html_path": None,
                             "html_downloaded_at": None,
-                            "img_md5": None,
-                            "img_path": None,
+                            "attached_images": [],
                             "embedded_status": False,
+                            "md_frontmatter": None,
+                            "md_body": None,
+                            "dismatched_img_count": None,
+                            "md_has_dismatched_img": None,
                         },
                     )
                     continue
@@ -622,7 +627,7 @@ def download_notebooks(
 
                 # 6. 與 Collection "onenote_note_metadata" 最新一筆 hash 比對
                 latest = get_latest_version_meta(page_id)
-                if latest.get("html_hash") == html_hash:
+                if latest.get("html_sha_hash") == html_hash:
                     logger.info("      ↳ hash 未變動，跳過（不存新版本）")
                     log_api_call(
                         page_id=page_id,
@@ -644,6 +649,8 @@ def download_notebooks(
                 html_blob = f"{raw_prefix}/{title}.html"
                 soup = BeautifulSoup(raw_html, "html.parser")
                 img_md5, img_path = _store_images(soup, headers, limiter, app, cache, page_id, raw_prefix)
+                # 兩個等長 list zip 成 attached_images Object 陣列（raw 端；archived 端由 gold 歸檔後回填）
+                attached_images = [{"raw_image_path": p, "raw_image_md5": m} for p, m in zip(img_path, img_md5)]
                 html_md5 = gcs.upload_text(html_blob, str(soup))  # 這裡的 soup 之 img tag 已被改寫過
                 html_uri = gcs.gs_uri(html_blob)
                 new_versions += 1
@@ -673,26 +680,29 @@ def download_notebooks(
                         "notebook": nb_name,
                         "section": sec_name,
                         "page_title": title,
-                        "html_hash": html_hash,
-                        "html_md5": html_md5,
+                        "topic": infer_topic([], title),
+                        "html_sha_hash": html_hash,
+                        "html_md5_hash": html_md5,
                         "html_path": html_uri,
                         "html_downloaded_at": _now_utc(),
-                        "img_md5": img_md5,
-                        "img_path": img_path,
+                        "attached_images": attached_images,
                         "status": "bronze_stored",
                         "embedded_status": False,
                     },
                     set_on_insert_fields={
-                        "md_path": None,
-                        "md_md5": None,
-                        "md_exported_at": None,
+                        "enriched_md_path": None,
+                        "md_md5_hash": None,
+                        "enriched_md_exported_at": None,
                         "review_result": None,
                         "reviewed_by_role": None,
                         "reviewed_at": None,
-                        "md_archive_path": None,
-                        "img_archive_path": None,
+                        "archived_md_path": None,
                         "archived_at": None,
                         "error_msg": None,
+                        "md_frontmatter": None,
+                        "md_body": None,
+                        "dismatched_img_count": None,
+                        "md_has_dismatched_img": None,
                     },
                 )
 
