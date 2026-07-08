@@ -273,7 +273,7 @@ class Task05MainTests(unittest.TestCase):
                 os.environ,
                 {
                     "GS_CREDENTIAL_FILE_PATH": "/tmp/creds.json",
-                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                     "MONGO_DB_NAME": "skill_library",
                 },
                 clear=False,

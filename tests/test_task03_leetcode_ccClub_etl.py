@@ -518,7 +518,7 @@ class Task03MainTests(unittest.TestCase):
                     "LEETCODE_USERNAME": "jessie",
                     "LEETCODE_SESSION": "session-token",
                     "CSRF_TOKEN": "csrf-token",
-                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                     "MONGO_DB_NAME": "skill_library",
                 },
                 clear=False,
@@ -558,7 +558,7 @@ class Task03MainTests(unittest.TestCase):
             patch.dict(
                 os.environ,
                 {
-                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                     "MONGO_DB_NAME": "skill_library",
                 },
                 clear=False,

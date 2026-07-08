@@ -387,7 +387,7 @@ class GithubMainTests(unittest.TestCase):
                     "GITHUB_TOKEN": "token-123",
                     "GITHUB_USERNAME": "jessie",
                     "GITHUB_MAIL": "jessie@example.com",
-                    "MONGO_URI": "mongodb://localhost:27017",
+                    "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                     "MONGO_DB_NAME": "skill_library",
                 },
                 clear=False,
