@@ -41,6 +41,7 @@ poetry run python -m task03_leetcode_ccClub_etl.main
 poetry run python -m task05_googlesheet_skill_etl.main
 poetry run python -m task06_obsidian_embed_etl.main
 poetry run python -m task07_onenote_to_markdown.main
+poetry run python -m task08_onenote_embed_etl.main   # OneNote archived → obsidian_vectors_v2（多模態向量化）
 
 # 執行所有測試
 poetry run python -m unittest discover -s tests
@@ -48,6 +49,10 @@ poetry run python -m unittest discover -s tests
 # 執行單一測試檔
 poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 ```
+
+## Git commit 慣例
+
+- **環境變數檔一律由人類自行 `git add` / `git commit`。** 當 `git status` 或 `git diff` 出現 `.env`、`.env.example`、`env/` 等敏感檔時，Claude **一律跳過、不要 stage、不要 commit**，並主動提醒使用者自行處理。這是專案刻意設下的限制（有 protect-env pre-commit hook 會擋住 diff／commit），不是臨時狀況——不需要每次等使用者說「.env 我自己來」。
 
 ## 架構說明
 
@@ -100,9 +105,12 @@ Optional .env keys:
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
 | task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
-| task07（`task07_onenote_to_markdown_lazy_loading` + `task07_silver_service` + `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL（`task07_onenote_to_markdown_lazy_loading`）只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 歸檔/退件由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至另一條 pipeline |
+| task07（`task07_onenote_to_markdown_lazy_loading` + `task07_silver_service` + `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL（`task07_onenote_to_markdown_lazy_loading`）只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 歸檔/退件由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至 task08 |
+| task08（`task08_onenote_embed_etl`） | GCS `onenote-vaults/archived-notes/` 的歸檔 `.md`＋`_images/` → chunking → 多模態 embedding（`gemini-embedding-2`，1536 維、L2 normalize） | MongoDB：`obsidian_vectors_v2`（與 task01/task06 共用同一張向量表）。gate 讀 `onenote_note_metadata`（`status=archived AND embedded_status=false`）；向量 doc 血緣欄 `md_path`=`md_archive_path`、`image_paths`=archived 圖片；以 `md_md5_hash` 守衛 CAS 翻 `embedded_status`；OneNote 無軟刪除故不含 purge |
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
+
+> **task07/task01 兩來源共寫 `obsidian_vectors_v2`**：OneNote（task07 歸檔）走 task08、Obsidian（task01_v2 歸檔）走 task06_v2，兩者向量化後寫入**同一張** `obsidian_vectors_v2`（同一 Atlas index）。血緣鍵語意＝人工核可後的 archived md 路徑。過渡期 task06_v2 仍寫 `raw_md_path`、task08 寫 `md_path`（值為 archived 路徑），兩欄暫並存；task06_v2 的 `raw_md_path`→`md_path` 收斂由另一分支處理（本分支不碰 task06_v2）。
 
 > **task07 已定案採 lazy_loading 變體、原版退役**：經審查 UI 遴選後，保留 GCS 資料湖多版本 × 純 on-demand 的變體，原版 `task07_onenote_to_markdown/`（本機磁碟、ETL 主動逐頁呼叫 LLM）已淘汰。變體拆成四個獨立執行環境（未來各自部署容器）：
 > - `task07_onenote_to_markdown_lazy_loading/` — Bronze ETL（下載 html、算 hash、存 raw-notes、upsert C3，不呼叫 LLM）。

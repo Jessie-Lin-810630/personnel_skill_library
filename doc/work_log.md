@@ -3,8 +3,8 @@
 - README 與專案結構文件仍需隨任務演進持續修訂，包含各 ETL 任務產出的 MongoDB collection schema 與 Phase IV 部署里程碑。
 - Task03 LeetCode GraphQL API 缺少正式文件，且依賴 `LEECODE_SESSION` 與 CSRF token；cookie 過期會導致 403，雲端部署前需評估自動更新或替代認證流程。
 - Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
-- Phase III 的 Router Agent 追問繼承仍有殘留上下文污染：`_looks_like_followup()` 判定為追問並繼承上輪 `filter_tags` 後，rag agent 仍會以「追問 query」重算向量相似度，導致混入與追問語意相近、但與上一輪主題較遠的筆記來源（如 partition_clause 追問仍混入 Sharding/NoSQL 來源）。後續需評估追問時是否應沿用上一輪 `search_query` 或限制相似度重算範圍。（20260621）
-- Phase III 的 Router Agent 追問判定為啟發式規則（`_looks_like_followup()` 比對追問詞／排他詞），會誤判：同主題的新查詢（如「找 dev container」）未被視為追問而重抽 tag，雖結果正確但邏輯非預期；需評估更穩健的追問判定機制。（20260621）
+- Phase III RAG agent v2 檢索受資料量不均影響：通識型主題（如 docker / k8s）在向量庫中的筆記量少於特定主題（如 dev container），rerank 後雖能命中、但回答易偏狹隘（見 20260625 測試 case 3）。後續需補充通識型筆記或評估針對主題覆蓋度的檢索策略。（20260625）
+- Phase III RAG agent v2 reranker 信心門檻未設：rerank 相對分數偏低（最高僅約 0.7）時模型仍會給出探索性回答，需評估是否設定 rerank 分數門檻或在回答中標示信心程度。（20260625）
 - Task07 長 context 筆記（如大型筆記本頁面）會造成 LLM 回應高延遲，需追蹤並建立監控機制以識別潛在卡頓點。（20260616）
 
 ## ✅ 已解決
@@ -30,6 +30,7 @@
 - Task06 embedding 選型：已從純文字模型 `text-embedding-3-small` 改為多模態 `Gemini-embedding-2`，並重構 task06 pipeline 以符合其 prompt 格式（多模態與未來圖片需求的疑慮已解除）。（20260624）
 - Task06 vector upsert 殘留 chunk：筆記重新切塊後 chunk 數變少時，舊 chunk 不會被 upsert 覆蓋而成為殘缺孤兒資料；已改為先依 `file_path` `deleteMany` 同筆記所有 chunk 再 insert 新 chunk，避免多輪 embedding 後殘留破碎 chunk。（20260624）
 - Task06 API 用量：導入 CDC（data capture change）機制，僅當 GCS 檔案變更且 `obsidian_notes` 中 `embedding_done=false` 時才呼叫 Vertex AI 進行 embedding，否則略過，節省 API 請求。（20260624）
+- Phase III Router/RAG Agent prefilter 雙面刃與跨輪上下文污染：舊版以 tag／file_path 對 vector search 做 boolean prefilter，初始命中錯誤或漏掉時反而把正確答案硬排除，且 `_looks_like_followup()` 追問繼承上輪 filter 易擴大污染、啟發式追問判定又會誤判同主題新查詢。已重構為 RAG agent v2——Router 職責單一化只做 intent 分類，retrieval 全封裝進 `rag_query()`：帶 chat history 的 Query Rewrite（改寫為獨立問句並推薦 tags 做 query expansion，不做 prefilter）→ 無 prefilter 的 vector search（top_k 10~15）→ Cohere cross-encoder rerank（用原始 query 取 top 5）→ LLM 生成。標籤缺失不再排除正確答案，追問由 rewrite 看 history 自動補全指代，多輪測試 case 1/2/3 大多通過（殘留資料量不均問題見改進中）。（20260625）
 
 # Daily Work Log
 ## 20260423 Work log
@@ -1795,3 +1796,12 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
         > 待辦事項：這裡的快照項目需要視希望看task01、task07與task06還有沒有什麼指標想放進來，所以欄位還可能要再多想。
 
 2. Based on the planning above, established the scripts of [task01-v2](../task01_obsidian_etl_v2/).
+
+## 20260708 Work log
+1. In the branch `feature/html-to-markdown`, revised the [task07](../task07_onenote_to_markdown_lazy_loading/) to reduce the difference of schema designs between task01 that ingested the notes from Obsidian App and this task07 that ingested the notes from OneNote App. Most of columns in [task07](../doc/task07_onenote_versioned_etl_hand_over_v2.md) were all almost similar except for the hash calculation for raw-notes and existence of columns to address the metadata of processed-notes in Silver layer. The gold layer, storing the archived-notes prior to embedding to RAG, are described in the same business meaning in their individual tables.
+    > Next Step: *`dashboard_ui/pages/onenote_review.py` 第 328,342 行應使用enriched_md_path，否則版本清單會誤判尚未生成。*
+2. Estabslished [task08](../task08_onenote_embed_etl/) for embedding the OneNote archived-note markdown files to vector database. The design of the task08 almost the same as the embedding task06 that handles the archived-notes from Obsidian.
+    > Next Step: Minor correct the column name of vector database collection `note_vectors_multimodal` from `raw_md_path` to `md_path` in order to correct the business meaning:
+    > - Source of any embed should be archived notes in markdown file and no longer raw notes or processed notes. The latter two only valued in bronze and silver layer. Source of embed should come from gold layer (i.e., archived notes).
+    > - To accommodate the archived .md from both task07 (handling OneNote) and task01 (handling Obsidian), the column name of `md_path` does not specifiy the note APP name. (Neither `onenote_md_path` nor `obsidian_md_path` were used. Just `md_path`).
+    > - Same requirements for the column `image_paths`. This column point to the paths of archived images of a note without limiting to any specific note APP.
