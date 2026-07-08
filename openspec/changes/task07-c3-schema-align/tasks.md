@@ -31,6 +31,6 @@
 ## 5. 收尾
 
 - [x] 5.1 全域 grep 確認無殘留 `html_hash`/`html_md5`/`md_md5`/`img_path`/`img_md5`/`img_archive_path` 作為 C3 document key 的寫入點（HTTP response dict 的 `img_archive_path` 屬端點回應契約、非 C3，保留）
-- [ ] 5.2 清空 local `onenote_note_metadata`/`onenote_graph_api_logs`/`multimodal_llm_enrichment_logs`，端到端重跑 Bronze→Silver→Gold（approve 與 reject 各一），核對新欄位（需真實 GCS/Mongo/LLM，待人工實跑）
+- [x] 5.2 清空 local `onenote_note_metadata`/`onenote_graph_api_logs`/`multimodal_llm_enrichment_logs`，端到端重跑 Bronze→Silver→Gold（approve 與 reject 各一），核對新欄位（已實跑，欄位正確）
 - [x] 5.3 `poetry run python -m unittest discover -s tests` 全綠（141 tests）
-- [ ] 5.4 （文件 follow-up，非本 change 程式範圍）提醒維護者更正交接文件 Indexes 區塊 `html_hash`→`html_sha_hash`
+- [x] 5.4 （文件 follow-up）交接文件 Indexes 區塊已更正為 `{ page_id: 1, html_sha_hash: 1 }`

@@ -26,7 +26,7 @@
 ## 5. 串接與收尾
 
 - [x] 5.1 `main.py`：串 E→T→L（gate → chunk+embed → 先刪後插+CAS），補 loguru 日誌與 env 檢查；不含 purge
-- [ ] 5.2 端到端本地實跑核對 `obsidian_vectors_v2` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（需真實 GCS/Mongo/Vertex，待 `task07-c3-schema-align` live）
+- [x] 5.2 端到端本地實跑核對 `obsidian_vectors_v2` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（已實跑；並修正 CAS 同步蓋 `updated_at`）
 - [x] 5.3 `poetry run python -m unittest discover -s tests` 全綠
 - [x] 5.4 CLAUDE.md 的 ETL 表新增 task08 一列（來源 `onenote-vaults/archived-notes/`、目的地 `obsidian_vectors_v2`）
 - [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `obsidian_vectors_v2` 血緣欄；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存
