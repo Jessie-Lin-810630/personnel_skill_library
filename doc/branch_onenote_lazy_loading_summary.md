@@ -1,6 +1,6 @@
 # Feature Branch: `feature/html-to-markdown` — Task07 v02（純 Lazy Loading 改版）開發執行成果摘要
 
-> **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：(1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）；(2) **省 multimodal LLM enrichment 的 token**：ETL 階段完全不呼叫 LLM，所有 enrichment 改為 UI **on-demand** 觸發，並以 `html_hash` 為冪等鍵建立 md 快取，使用者重複點擊同一版本不再產生額外 token。
+> **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：(1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）；(2) **省 multimodal LLM enrichment 的 token**：ETL 階段完全不呼叫 LLM，所有 enrichment 改為 UI **on-demand** 觸發，並以 `html_sha_hash` 為冪等鍵建立 md 快取，使用者重複點擊同一版本不再產生額外 token。
 
 > **開發起始日期**：2026-07-01（於 `feature/html-to-markdown` 分支內另建 v02 變體資料夾）
 
@@ -10,7 +10,9 @@
 
 > **與 v01 的差異**：
 > - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 主鍵為 `page_id`，一個筆記只存一個版本。
-> - v02 為**平行資料夾** `task07_onenote_to_markdown_lazy_loading/`，改存 onenote筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；僅有將輸出筆記做自動化 ETL (定義為 Bronze layer)；呼叫 LLM 生成 markdown 由純前端 on-demand 觸發 (Silver layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
+> - v02 改存 onenote 筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；ETL 只做到 Bronze layer；呼叫 LLM 生成 markdown 由前端 on-demand 觸發 (Silver layer)；人工核可後歸檔 (Gold layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
+
+> **三服務拆分（未來各自部署容器）**：v02 已從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點 8002）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點 8003）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化再解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task01_v2/task06_v2）共寫同一張向量表 `obsidian_vectors_v2`。
 
 ---
 
@@ -22,21 +24,44 @@ feature/html-to-markdown/
 ├── poetry.lock
 ├── pyproject.toml
 │
-├── task07_onenote_to_markdown_lazy_loading/          # v02：純 Lazy Loading 變體
+├── task07_common/                                    # 三服務共用工具
 │   ├── __init__.py
-│   ├── e_onenote_download.py                         # Bronze Extract：MSAL device-flow 取 token、
-│   │                                                 # 下載 HTML、算 hash、有變動才以 dt= 分區寫 GCS
-│   ├── t_enrich_html_to_markdown.py                  # Silver Transform：on-demand 函式，
-│   │                                                 # html_hash 快取 → multimodal LLM → 組 frontmatter
-│   ├── l_save_markdown.py                            # Silver Load：enriched md 寫 GCS + upsert C3
-│   ├── main.py                                       # Bronze ETL 入口（只 Extract，不含 LLM）
-│   └── utils/
-│       ├── audit_log.py                              # 三個 MongoDB collections（C1/C2/C3）讀寫工具
-│       ├── gcs.py                                    # GCS 資料湖讀寫、三層 blob 路徑組裝
-│       └── hashing.py                                # html sha256（變動判定 / enrichment 冪等鍵）
+│   ├── audit_log.py                                  # 三個 MongoDB collections（C1/C2/C3）讀寫工具
+│   │                                                 # upsert_version_meta 集中補 created_at/updated_at
+│   ├── gcs.py                                        # GCS 資料湖讀寫、三層 blob 路徑組裝
+│   ├── hashing.py                                    # html sha256（變動判定 / enrichment 冪等鍵）
+│   └── topic.py                                      # topic 主題分類（copy 自 task01 TOPIC_KEYWORDS）
+│
+├── task07_onenote_to_markdown_lazy_loading/          # Bronze ETL（只 Extract，不含 LLM）
+│   ├── __init__.py
+│   ├── e_onenote_download.py                         # 下載 HTML、算 hash、有變動才以 dt= 分區寫 GCS
+│   │                                                 # + upsert C3（bronze_stored、attached_images、topic）
+│   └── main.py                                       # Bronze ETL 入口
+│
+├── task07_silver_service/                            # Silver enrich 端點（localhost:8002）
+│   ├── __init__.py
+│   ├── t_enrich_html_to_markdown.py                  # on-demand 函式：html_sha_hash 快取 → 多模態 LLM
+│   ├── l_save_markdown.py                            # enriched md 寫 GCS + upsert C3（pending_review）
+│   └── app.py                                        # Flask POST /enrich
+│
+├── task07_gold_service/                              # Gold 歸檔/退件端點（localhost:8003）
+│   ├── __init__.py
+│   ├── l_archive_note.py                             # approve 歸檔 archived-notes / reject 標記；
+│   │                                                 # 回寫 md_frontmatter/md_body/dismatched/topic
+│   └── app.py                                        # Flask POST /archive（approved / rejected）
+│
+├── task08_onenote_embed_etl/                         # 向量化（解耦，寫 obsidian_vectors_v2）
+│   ├── __init__.py
+│   ├── e_scan_metadata.py                            # gate 讀 C3（archived + 未向量化）、取歸檔 md
+│   ├── t_chunk_embed.py                              # chunk + 多模態 gemini-embedding-2（1536+L2）
+│   ├── l_load_to_mongodb.py                          # 先刪後插 obsidian_vectors_v2 + md_md5_hash CAS
+│   └── main.py                                       # E→T→L 入口（無 purge）
 │
 └── tests/
-    └── test_task07_onenote_to_markdown_v02.py        # Unit tests（unittest）
+    ├── test_task07_onenote_to_markdown_v02.py        # Bronze + Silver 服務本體 unittest
+    ├── test_silver_service_endpoint.py               # Silver /enrich 端點 unittest
+    ├── test_gold_service_endpoint.py                 # Gold /archive 端點 + 歸檔/退件 unittest
+    └── test_task08_onenote_embed.py                  # task08 向量化 unittest
 ```
 
 ---
@@ -63,10 +88,11 @@ Microsoft OneNote（個人帳號），透過 Microsoft Graph API 存取（endpoi
 raw-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.html          Bronze HTML
 raw-notes/<user_id>/<notebook>/<section>/dt=<執行日>/_images/<res_id>.ext Bronze 圖片
 processed-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.md      Silver enriched md
-（Gold archived 由 feature/dashboard-ui 的 Archive 端點負責，不在此模組）
+archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.md       Gold 歸檔 md
+archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/_images/<x>.ext Gold 歸檔圖片
 ```
 
-`dt=` 分區為版本鍵：同一份筆記每次偵測到 `html_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。
+`dt=` 分區為版本鍵：同一份筆記每次偵測到 `html_sha_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。Gold 的 `dt` 對齊 Bronze 執行日。
 
 ### 資料表 Collections
 
@@ -88,8 +114,8 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 2. **設定速率控制**：`RateLimiter` 滑動視窗，每分鐘 115 次、每小時 380 次（低於 OneNote 官方 120/min、400/hour）
 3. **請求並附設容錯（`api_get()`）**：`requests.get()` 設 `REQUEST_TIMEOUT=(10, 60)` 避免伺服器 hang 住無限等待；以 `raise_for_status()` 統一轉 `HTTPError` 後**分兩層 except**——`HTTPError`（401 換 token / 429 讀 `Retry-After` 退避 / 5xx 指數退避 / 其他 4xx 直接 raise 不重試）與 `RequestException`（傳輸層錯誤，`status_code=0` 退避重試）；最多 10 次，耗盡補一筆收尾列再 raise `RuntimeError`
 4. **帳號萃取**：從 section 的 `self` URL（`/users/<email>/onenote/...`）萃取 `@` 前段作為 `user_id`（如 `lucky460721`）
-5. **變動判定（核心）**：對**未 parse 的 HTML 原始碼**算 `html_source_hash`（sha256），與 C3 `get_latest_version_meta()` 取回的最新一筆 `html_hash` 比對——相同則只寫一筆 `downloaded=False` 的 C1 log 並跳過（不存新版本）；不同才進入下載流程
-6. **圖片處理**：hash 有變動才 `BeautifulSoup` parse，偵測 `<img>` 的 Graph API 圖片資源 URL，下載後上傳 GCS `_images/`，並將 HTML 內 `src` 改寫為相對路徑 `_images/{resource_id}.ext`（`soup` tag copy-by-reference，改寫後連同 HTML 一併上傳）
+5. **變動判定（核心）**：對**未 parse 的 HTML 原始碼**算 `html_source_hash`（sha256），與 C3 `get_latest_version_meta()` 取回的最新一筆 `html_sha_hash` 比對——相同則只寫一筆 `downloaded=False` 的 C1 log 並跳過（不存新版本）；不同才進入下載流程
+6. **圖片處理**：hash 有變動才 `BeautifulSoup` parse，偵測 `<img>` 的 Graph API 圖片資源 URL，下載後上傳 GCS `_images/`，並將 HTML 內 `src` 改寫為相對路徑 `_images/{resource_id}.ext`（`soup` tag copy-by-reference，改寫後連同 HTML 一併上傳）；下載成功的圖片 `zip` 成 C3 的 `attached_images` Object 陣列（`raw_image_path`/`raw_image_md5`）
   -  **request_id 注入式設計**：page content 呼叫由 `download_notebooks()`（page 層邏輯範圍）先生成 `request_id` 再**注入** `api_get()` 共用，使 api_get 內部的失敗 attempt log 與外層事後補記的結果 log 掛同一 ID 可 join；listing、圖片等各自獨立的請求則不注入、由 api_get 自生成
   - **稽核職責分離**：C1（request 層）全歸 `api_get()`——逐次 attempt 失敗 + retry 耗盡收尾列；C3（page 層生命週期）全歸 `download_notebooks()`——只記 `status`。避免同一次失敗重複寫 C1、避免 `status_code=0` 蓋掉真實碼
 7. **回傳**：本次實際偵測到 hash 變動並寫入 GCS 的**新版本數**（`int`）
@@ -99,32 +125,46 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 **純 Lazy Loading**：本模組不在 ETL 主動執行，而是對外提供 `t_enrich_html_to_markdown(page_id, dt, trigger, client)` 函式，供 `feature/dashboard-ui` 的審查頁在使用者點擊某版本時 on-demand 呼叫。分支流程：
 
 1. **查版本 metadata**：`get_version_meta(page_id, dt)`，查無回 `{"status": "not_found"}`
-2. **regenerate 配額檢查**：`trigger="regenerate"` 且同一 `html_hash` 已成功 regenerate ≥ `REGENERATE_QUOTA (=2)` 次則拒絕（per-note 成本上限）
-3. **html_hash 快取查找**：非 regenerate 時 `find_cached_md_by_hash()` 找相同 `html_hash` 且 `md_path != null` 的既有版本——**命中則零 token**（寫一筆 `cache_hit=True, tokens=0` 的 C2 log、upsert C3 進 `pending_review`、直接回傳既有 md_path）
+2. **regenerate 配額檢查**：`trigger="regenerate"` 且同一 `html_sha_hash` 已成功 regenerate ≥ `REGENERATE_QUOTA (=2)` 次則拒絕（per-note 成本上限）
+3. **html_sha_hash 快取查找**：非 regenerate 時 `find_cached_md_by_hash()` 找相同 `html_sha_hash` 且 `enriched_md_path != null` 的既有版本——**命中則零 token**（寫一筆 `cache_hit=True, tokens=0` 的 C2 log、upsert C3 進 `pending_review`、直接回傳既有 md_path）
 4. **服務級斷路器**：cache miss 時先檢查 `_LLMServiceGuard`——LLM API **連續失敗達門檻（預設 5 次）即開斷路冷卻（預設 300s）**，期間筆記維持 `bronze_stored`、**不懲罰單一筆記**、不鎖使用者操作（取代 v01 綁「單筆記版本次數」的斷路器）
-5. **多模態 LLM 呼叫**：從 GCS 下載 HTML、`convert_img_tag_to_md_str()` 把 `<img>` 轉 `![alt](src)` 後 `get_text()` 取純文字；連同 C3 `img_path` 內的 `gs://` 圖片 URI 一併送入 Vertex AI Gemini（`gemini-2.5-flash`），要求 model 實際判讀每張圖並生成「AI生成圖釋」；structured JSON 輸出 schema 強制 `tags`（5–10 中英混合關鍵字）、`alias`（1–2 個簡短別名）、`new_content`（重整後 Markdown）；`temperature=0.2`
+5. **多模態 LLM 呼叫**：從 GCS 下載 HTML、`convert_img_tag_to_md_str()` 把 `<img>` 轉 `![alt](src)` 後 `get_text()` 取純文字；連同 C3 `attached_images[].raw_image_path` 內的 `gs://` 圖片 URI 一併送入 Vertex AI Gemini（`gemini-2.5-flash`），要求 model 實際判讀每張圖並生成「AI生成圖釋」；structured JSON 輸出 schema 強制 `tags`（5–10 中英混合關鍵字）、`alias`（1–2 個簡短別名）、`new_content`（重整後 Markdown）；`temperature=0.2`
 6. **frontmatter 組合**：`_build_markdown()` 產出可被 Obsidian 開啟的 YAML frontmatter（`tags` / `date` / `type` / `alias`）；`type` 由 `_classify_note_type()` 依檔名是否含日期分類 `daily_log` / `knowledge_summary`
 7. **稽核**：每次呼叫寫 C2 `multimodal_llm_enrichment_logs`（含 `cache_hit`、`trigger`、input/output/total tokens、latency）；失敗時 token 欄位寫 `None`（非 0）以區別 cache hit
 
-#### Silver — Load（`l_save_markdown.py`）
+#### Silver — Load（`task07_silver_service/l_save_markdown.py`）
 
-- `save_enriched_md()`：把 enriched md 寫至 GCS `processed-notes/.../dt=<對齊 bronze 執行日>/<page>.md`，回傳 `(md_uri, md_md5)`
-- 以 `(page_id, dt)` upsert C3，更新 `md_path`、`md_md5`、`md_exported_at`、`status="pending_review"`
+- `save_enriched_md()`：把 enriched md 寫至 GCS `processed-notes/.../dt=<對齊 bronze 執行日>/<page>.md`，回傳 `(md_uri, md_md5_hash)`
+- 以 `(page_id, dt)` upsert C3，更新 `enriched_md_path`、`md_md5_hash`、`enriched_md_exported_at`、`status="pending_review"`
 
-#### 入口（`main.py`）
+#### Silver 端點（`task07_silver_service/app.py`，localhost:8002）
+
+- Flask `POST /enrich`，body `{page_id, dt, trigger}`；呼叫 `t_enrich_html_to_markdown` 做 on-demand enrichment
+- 缺欄位 400、trigger 非法 400、查無版本 404、未預期例外 500，其餘（cache hit / pending_review / circuit_open / enrich_failed / quota）回 200，由呼叫端依 dict 欄位判讀
+- 供審查頁維持對 GCS 唯讀、只能透過端點觸發 enrich
+
+#### Gold — Load（`task07_gold_service/l_archive_note.py`，localhost:8003）
+
+Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `approved` / `rejected`：
+
+- **approve（`archive_note`）**：把關是否早有更新版本已歸檔（本版 `dt` 早於最後歸檔日則 409 拒絕、idempotent 重複 approve 回既有結果）→ 從 `processed-notes/` 複製 md、從 `raw-notes/` 複製 png 到 `archived-notes/`，把每個 `attached_images` Object 回填 `archived_image_path`/`archived_image_md5` → upsert C3（`status=archived`、`review_result=approved`、`archived_md_path`、`md_md5_hash`、審核欄位）→ **退役同頁其他 `pending_review` 版本**（同 `html_sha_hash` 標 `overwritten`、否則 `rejected`）→ 讀回歸檔 md 萃取品質欄位
+- **reject（`reject_note`）**：不寫 GCS，upsert C3（`status=review_closed`、`review_result=rejected`、審核欄位）→ 背景讀 silver md 萃取品質欄位
+- **品質欄位（approve/reject 皆寫）**：`md_frontmatter`（`tags`/`date`/`type`/`alias`）、`md_body`（`valid_img_count`/`word_count`/`recomputed_at`）、`dismatched_img_count`、`md_has_dismatched_img`，並以 `md_frontmatter.tags`＋頁面標題重算 `topic`；`valid_img_count` 由 md 正文 `![]()` 連結 basename 命中歸檔/raw 圖片者計數
+
+#### 入口（`task07_onenote_to_markdown_lazy_loading/main.py`）
 
 - 函式 `run_task07_bronze_etl()` 只調用 `e_onenote_download()` 下載並記錄新版本數
-- **Silver Transform 與 Silver Load 不放在此執行**，由 UI on-demand 觸發
+- **Silver / Gold 不放在此執行**，由 UI on-demand（Silver）與 approve/reject（Gold）觸發
 
 ---
 
 ## MongoDB Collections
 > 總計三份 collections, C1, C2 and C3
-> 由 `utils/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
+> 由 `task07_common/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
 
 ### Collection 1：`onenote_graph_api_logs`
 
-每筆 = 一次 Graph API 請求嘗試。新增 `html_hash`、`html_path`、`downloaded` 三欄，讓「hash 未變動而跳過」也能留下 `downloaded=False` 的紀錄。
+每筆 = 一次 Graph API 請求嘗試。新增 `html_sha_hash`、`html_path`、`downloaded` 三欄，讓「hash 未變動而跳過」也能留下 `downloaded=False` 的紀錄。
 
 ```json
 {
@@ -139,7 +179,7 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
   "status": "success",
   "status_code": 200,
   "latency_ms": 312,
-  "html_hash": "aa58a....",
+  "html_sha_hash": "aa58a....",
   "html_path": "gs://onenote-vaults/raw-notes/lucky460721/NB/Sec/dt=2026-07-01/page.html",
   "downloaded": true,
   "environment": "local",
@@ -155,7 +195,7 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 {
   "_id": ObjectId("6a4526abcf5f1da7406adebd"),
   "page_id": "0-c69860f9dd8507...",
-  "html_hash": "sha256...",
+  "html_sha_hash": "sha256...",
   "timestamp": ISODate("2026-07-01T10:00:00.012Z+0000"),
   "event_type": "llm_enrichment_call",
   "model": "gemini-2.5-flash",
@@ -175,10 +215,10 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 
 ### Collection 3：`onenote_note_metadata`（主鍵 = `page_id` + `dt`）
 
-每筆 = 一頁 OneNote 的**某一版本**完整生命週期，貫穿 Bronze → Silver → Gold 逐步 upsert。
+每筆 = 一頁 OneNote 的**某一版本**完整生命週期，貫穿 Bronze → Silver → Gold 逐步 upsert。欄位命名已對齊 hand-over v2 定稿（見文件第 303–347 行）。
 
 ```json
-// 下方 schema 欄位值為 null 將在 Silver layer 開發完成後更新。
+// bronze 階段的 enriched_*/archived_*/md_frontmatter/md_body 等為 null，Silver/Gold 逐步補。
 {
   "_id": ObjectId("6a4526abcf5f1da7406adebd"),
   "page_id": "0-c69860f9dd8507...",
@@ -187,25 +227,46 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
   "notebook": "工作筆記",
   "section": "資料工程",
   "page_title": "MongoDB 索引設計",
-  "html_hash": "sha256...",
-  "html_md5": "base64...",
+
+  // Bronze（html + 圖片血緣 + topic 初判）
+  "html_sha_hash": "sha256...",             // 變動判定 / enrichment 冪等鍵
+  "html_md5_hash": "base64...",             // GCS html 物件 md5
   "html_path": "gs://onenote-vaults/raw-notes/.../dt=2026-07-01/MongoDB 索引設計.html",
   "html_downloaded_at": ISODate("2026-07-01T08:22:26.093+0000"),
-  "img_md5": ["base64..."],
-  "img_path": ["gs://onenote-vaults/raw-notes/.../_images/res-abc.png"],
-  "md_path": null,  // Silver layer transform task 執行後更新
-  "md_md5": null,  // Silver layer transform task 執行後更新
-  "md_exported_at": null,  // Silver layer transform task 執行後更新
-  "note_type": "knowledge_summary",
+  "attached_images": [
+    {
+      "raw_image_path": "gs://onenote-vaults/raw-notes/.../_images/res-abc.png",
+      "raw_image_md5": "base64...",
+      "archived_image_path": null,          // Gold approve 後回填
+      "archived_image_md5": null            // Gold approve 後回填
+    }
+  ],
+  "topic": "database",                      // TOPIC_KEYWORDS 分類；bronze 以標題初判、gold 以 tags 重算
+
+  // Silver（enriched md）
+  "enriched_md_path": null,                 // silver md 路徑
+  "md_md5_hash": null,                      // silver/gold md 的 GCS md5（有 gold 則以其為主）
+  "enriched_md_exported_at": null,
+
+  // 生命週期 / 審核
   "status": "bronze_stored",
-  "embedded_status": false,  // Silver layer transform task 執行後更新
+  "embedded_status": false,                 // task08 向量化冪等依據
+  "review_result": null,                    // null / approved / rejected / overwritten
+  "reviewed_by_role": null,                 // ML engineer / note_owner / dept_senior_specialist
+  "reviewed_at": null,
   "error_msg": null,
-  "review_result": null,  // Silver layer transform task 執行後更新
-  "reviewed_by_role": null,  // Silver layer transform task 執行後更新
-  "reviewed_at": null,  // Silver layer transform task 執行後更新
-  "md_archive_path": null,  // Silver layer transform task 執行後更新
-  "img_archive_path": null,  // Silver layer transform task 執行後更新
-  "archived_at": null  // Silver layer transform task 執行後更新
+
+  // Gold（歸檔 + 品質欄位）
+  "archived_md_path": null,                 // gold 歸檔 md 路徑
+  "archived_at": null,
+  "md_frontmatter": null,                   // {tags, date, type, alias}（無 valid_img）
+  "md_body": null,                          // {valid_img_count, word_count, recomputed_at}
+  "dismatched_img_count": null,             // 失效（basename 未命中）圖片數
+  "md_has_dismatched_img": null,            // dismatched_img_count > 0
+
+  // 稽核時間戳（upsert_version_meta 集中維護）
+  "created_at": ISODate("2026-07-01T08:22:26.093+0000"),
+  "updated_at": ISODate("2026-07-01T08:22:26.093+0000")
 }
 ```
 
@@ -218,13 +279,36 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 | Silver | LLM enrichment 進行中（on-demand 觸發） | `fetched` | null | false |
 | Silver | LLM 生成失敗 | `enrich_failed` | null | false |
 | Silver | 生成成功、等人審查 | `pending_review` | null | false |
-| Silver | 按通過、歸檔成功 | `archived` | `approved` | true |
-| Silver | 按通過、歸檔中途失敗 | `archive_failed` | `approved` | false |
-| Silver | 被退回 | `review_closed` | `rejected` | false |
+| Gold | 按通過、歸檔成功 | `archived` | `approved` | false（待 task08 翻 true） |
+| Gold | 按通過、歸檔中途失敗 | `archive_failed` | `approved` | false |
+| Gold | 針對性單一筆記退件 | `review_closed` | `rejected` | false |
+| Gold | 同頁擇一歸檔而連帶退役、且 hash 與歸檔版相同 | `review_closed` | `overwritten` | false |
+| task08 | 歸檔筆記完成向量化 | `archived` | `approved` | true |
+
+> `overwritten` 與 `rejected` 之分：被退役版本的 `html_sha_hash` 與歸檔版相同者標 `overwritten`（內容等同已被採納），不同者標 `rejected`，避免好/壞 md 分析被誤導。`embedded_status` 由 task08 向量化成功後才翻 `true`。
 
 > 相較 v01：
 > - C3 主鍵由 `page_id` 改為 `(page_id, dt)`；
-> - 新增 `html_hash`、`embedded_status`；
+> - 新增 `html_sha_hash`、`embedded_status`、`attached_images`、`topic`、`md_body`、`dismatched_img_count`/`md_has_dismatched_img`、`created_at`/`updated_at`；
+> - 欄位改名：silver md → `enriched_md_path`/`enriched_md_exported_at`、gold md → `archived_md_path`、圖片血緣由 `img_md5`/`img_path`/`img_archive_path` 三平行陣列重構為 `attached_images` Object 陣列。
+
+---
+
+## Task 08 — OneNote 向量化（`task08_onenote_embed_etl/`）
+
+向量化從 task07 解耦成獨立 pipeline，目標是讓 **OneNote（task07 歸檔）** 與 **Obsidian（task01_v2 歸檔）** 兩種來源，向量化後寫入**同一張** `obsidian_vectors_v2`（同一 Atlas Vector Search index），供同一條 RAG 檢索。chunk/embed/normalize 邏輯 copy 自 `task06_obsidian_embed_etl_v2`，僅替換 ingestion 與圖片解析；`task06_v2` 本分支完全不動。
+
+| 面向 | 設計 |
+|------|------|
+| gate（`e_scan_metadata.py`） | 讀 C3 挑 `status="archived"` 且 `embedded_status=false`，投影 `archived_md_path`/`md_md5_hash`/`md_frontmatter`/`page_title`/`attached_images` |
+| 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
+| 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)`（非 wiki-link），以 basename 對上 `attached_images[].archived_image_path` |
+| embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize（逐 chunk 多模態） |
+| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `obsidian_vectors_v2`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
+| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋蓋 `embedded_at` |
+| purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
+
+> **跨分支待辦**：`obsidian_vectors_v2` 過渡期 task06_v2 仍寫 `raw_md_path`、task08 寫 `md_path`（值皆為 archived 路徑語意），兩欄暫並存；task06_v2 的 `raw_md_path`→`md_path` 收斂由另一分支處理。`archived_md_path`（完整 gs:// URI，跨 bucket 天然唯一）即向量表與兩張 metadata 的 join 鍵，不另設 source 判別欄。
 
 ---
 
@@ -235,7 +319,7 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 | 輸出目的地 | 本機磁碟 `.md` + HTML | GCS 資料湖（Bronze/Silver medallion 分層） |
 | 歷史版本 | 依賴 GCS bucket versioning（Console 難讀） | `dt=` 日期分區顯式多版本 |
 | LLM 觸發 | ETL 主動逐頁呼叫 | **純 Lazy Loading**，UI on-demand 觸發 |
-| 省 token 機制 | 無 | `html_hash` md 快取 + regenerate 配額 |
+| 省 token 機制 | 無 | `html_sha_hash` md 快取 + regenerate 配額 |
 | 斷路器 | 綁單一筆記版本次數 | **LLM 服務級**（連續失敗開斷路冷卻） |
 | C3 主鍵 | `page_id`（單版本） | `(page_id, dt)`（多版本） |
 | C2 collection | `gemini_llm_logs` | `multimodal_llm_enrichment_logs`（加 `cache_hit`/`trigger`） |
@@ -267,53 +351,56 @@ ENVIRONMENT=                      # local | dev | prod
 
 ---
 
-## Unit Tests（`tests/test_task07_onenote_to_markdown_v02.py`）
+## Unit Tests
 
-以 `unittest` 撰寫，全部 mock（不連 MongoDB / GCS / LLM）；在 import 前先注入假 env 以繞過 `e_onenote_download.py` 模組層的 `ONENOTE_CLIENT_ID` 守門。
+以 `unittest` 撰寫，全部 mock（不連 MongoDB / GCS / LLM）；在 import 前先注入假 env 以繞過模組層守門。四個測試檔涵蓋 Bronze/Silver 服務本體、Silver 端點、Gold 端點與 task08 向量化。
+
+**`tests/test_task07_onenote_to_markdown_v02.py`（Bronze + Silver 本體 + task07_common）**
 
 | 測試類別 | 測試對象 | 測試重點 |
 |---------|---------|---------|
-| `NowUtcTests` | `_now_utc()` | 回 UTC timezone-aware datetime |
-| `EnvironmentEnumTests` | `Environment` StrEnum | 合法值、非法值 raise ValueError |
-| `LogApiCallTests` | `log_api_call()` | 寫入 `html_hash`/`downloaded`/`event_type`、MongoDB 失敗不 raise |
+| `LogApiCallTests` | `log_api_call()` | 寫入 `html_sha_hash`/`downloaded`/`event_type`、MongoDB 失敗不 raise |
 | `LogEnrichmentCallTests` | `log_enrichment_call()` | cache hit 時 tokens=0、`trigger`/`event_type` 正確 |
-| `UpsertVersionMetaTests` | `upsert_version_meta()` | filter key 為 `(page_id, dt)`、`$setOnInsert` 選用、db 失敗不 raise |
-| `HashingTests` | `html_source_hash()` | 決定性、內容不同 hash 不同 |
-| `GcsPrefixTests` | `gcs` 路徑組裝 | raw/processed prefix、`gs_uri`、`_split_uri` |
-| `SanitizeTests` | `sanitize()` | 禁用字元替換、空字串回 Untitled |
-| `ApiGetTests` | `api_get()` | 成功回傳、4xx 直接拋不重試、傳輸層錯誤重試（`status_code=0`）、重試耗盡收尾 log 後 raise、timeout 常數 |
-| `ExtractUserAccountTests` | `_extract_user_account()` | 從 self URL 萃取帳號前段、無 match 回 None |
-| `DownloadNotebooksFailedBranchTests` | `download_notebooks()` | content 失敗時傳給 `upsert_version_meta` 的參數契約（`fetched_failed`、`$set`/`$setOnInsert` 無 key 重疊） |
-| `CircuitGuardTests` | `_LLMServiceGuard` | 達門檻開斷路、success 歸零計數 |
-| `ClassifyNoteTypeTests` | `_classify_note_type()` | 有日期 → daily_log、無日期 → knowledge_summary |
-| `ConvertImgTagTests` | `convert_img_tag_to_md_str()` | img 轉 Markdown 語法 |
-| `CallLlmMultimodalTests` | `_img_mime()` / `_call_llm()` | mime 推斷、contents 含圖片 part、無圖只送文字、token usage |
+| `UpsertVersionMetaTests` | `upsert_version_meta()` | filter key `(page_id, dt)`、`$set` 帶 `updated_at`、insert 補 `created_at`、db 失敗不 raise |
+| `HashingTests` / `GcsPrefixTests` / `SanitizeTests` | hashing / gcs / sanitize | 決定性 hash、raw/processed prefix、禁用字元替換 |
+| `ApiGetTests` | `api_get()` | 4xx 不重試、傳輸層錯誤重試、重試耗盡收尾 log 後 raise、timeout 常數 |
+| `DownloadNotebooksFailedBranchTests` | `download_notebooks()` | 失敗路徑 `fetched_failed`、`$set`/`$setOnInsert` 無 key 重疊 |
+| `DownloadNotebooksSuccessBranchTests` | `download_notebooks()` | 成功路徑寫 `html_sha_hash`/`html_md5_hash`/`attached_images`(raw 端)/`topic`，不含舊欄位名 |
+| `CircuitGuardTests` / `ClassifyNoteTypeTests` / `ConvertImgTagTests` / `CallLlmMultimodalTests` | Silver 本體 helper | 斷路器、note_type 分類、img 轉 md、多模態 contents/token usage |
 | `EnrichPageTests` | on-demand 入口 | not_found / cache-hit 略過 LLM / circuit-open 維持 bronze / regenerate 配額超限 |
+
+**`tests/test_silver_service_endpoint.py`（`POST /enrich`）**：缺欄位 400、trigger 非法 400、查無版本 404、業務結果 200、未預期例外 500。
+
+**`tests/test_gold_service_endpoint.py`（`POST /archive` + 歸檔/退件本體）**：端點狀態碼（400/404/409/422/200）、`_build_md_quality_meta`（`md_frontmatter` 不含 valid_img、`md_body.valid_img_count`、`dismatched_img_count`/`md_has_dismatched_img`）、approve 退役同頁版本（`html_sha_hash` 判 overwritten/rejected）、reject 回寫品質欄位、型別正規化。
+
+**`tests/test_task08_onenote_embed.py`（向量化）**：gate 過濾與投影、markdown `![]()` 圖片 basename 解析、向量 doc 結構（`md_path`=archived 路徑、L2 normalize）、切塊為空仍算已處理、失敗檔不列入 CAS、先刪後插、`md_md5_hash` 守衛 CAS 命中/未命中。
 
 執行方式：
 ```bash
-poetry run python -m unittest tests.test_task07_onenote_to_markdown_v02 -v
+poetry run python -m unittest discover -s tests
 ```
 
-> **測試狀態**：37 個測試全數通過（`Ran 37 tests OK`）。測試檔的 import／`@patch` 目標與函式名皆已對齊 `task07_onenote_to_markdown_lazy_loading` package（Silver 模組 `t_enrich_html_to_markdown`、入口函式 `t_enrich_html_to_markdown`）。
+> **測試狀態**：全套 **154 個測試全數通過**（`Ran 154 tests OK`）。測試 import／`@patch` 目標與函式名皆已對齊三服務 package（`task07_common`、`task07_silver_service`、`task07_gold_service`）與 `task08_onenote_embed_etl`。
 
 ---
 
 ## 此分支（v02）完成範圍
 
-**已完成（Bronze + Silver 服務本體，本機地端階段）**
-- [x] Bronze Extract：MSAL device-flow + Graph API 下載 HTML/圖片 + 速率控制 + `html_hash` 變動判定 + `dt=` 分區寫 GCS + C1/C3 稽核
-- [x] Silver Transform：on-demand `t_enrich_html_to_markdown()` + `html_hash` 冪等快取 + LLM 服務級斷路器 + 多模態圖片判讀 + regenerate 配額 + C2 稽核
-- [x] Silver Load：enriched md 寫 GCS + upsert C3（`pending_review`）
-- [x] `main.py` 只跑 Bronze ETL（不含 LLM）
-- [x] `utils/`：`audit_log.py`（C1/C2/C3）、`gcs.py`（資料湖三層路徑）、`hashing.py`（sha256 變動鍵）
-- [x] Unit tests 覆蓋各模組型別正確性與例外處理（37 個測試全數通過）
+**已完成（Bronze + Silver + Gold + 向量化，本機地端階段）**
+- [x] Bronze Extract：MSAL device-flow + Graph API 下載 HTML/圖片 + 速率控制 + `html_sha_hash` 變動判定 + `dt=` 分區寫 GCS + `attached_images`/`topic` + C1/C3 稽核
+- [x] Silver Transform + 端點（8002）：on-demand `t_enrich_html_to_markdown()` + `html_sha_hash` 冪等快取 + LLM 服務級斷路器 + 多模態圖片判讀 + regenerate 配額 + C2 稽核
+- [x] Silver Load：enriched md 寫 GCS + upsert C3（`enriched_md_path`、`pending_review`）
+- [x] Gold 端點（8003）：approve 歸檔 archived-notes（回填 `attached_images` archived 端）/ reject 標記；退役同頁候選版本；回寫 `md_frontmatter`/`md_body`/`dismatched_*`/`topic`
+- [x] task08 向量化：gate C3（archived+未向量化）→ chunk + `gemini-embedding-2` → 先刪後插 `obsidian_vectors_v2` + `md_md5_hash` CAS 翻 `embedded_status`
+- [x] `task07_common`：`audit_log.py`（C1/C2/C3 + 集中時間戳）、`gcs.py`、`hashing.py`、`topic.py`
+- [x] C3 欄位對齊 hand-over v2 定稿（第 303–347 行）；`l_archive_note.py` 的 `except (ValueError, TypeError)` 語法 bug 修正
+- [x] Unit tests 全套 **154 個測試全數通過**
 
-**後續待開發（跨分支）**
-- [ ] Silver → Gold on-demand 觸發點與多版本對照審查頁（`feature/dashboard-ui`）——圓鈕切換同名筆記 1~5 版、點未處理版本即時生成 md、人工核可後 Archive
-- [ ] Gold layer：最終清洗、歸檔（`archived`）與向量化（`embedded_status`）
-- [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver 服務隨 dashboard Cloud Run Service）
+**後續待開發**
+- [ ] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
+- [ ] 跨分支：`obsidian_vectors_v2` 的 task06_v2 `raw_md_path`→`md_path` 收斂；RAG 檢索端知悉過渡期兩欄並存
+- [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_onenote_to_markdown_lazy_loading/`）的所有腳本與測試，於 2026-07-01 記錄。*
+*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-08 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
