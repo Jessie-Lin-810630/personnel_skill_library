@@ -41,6 +41,7 @@ from task07_common.audit_log import (
     get_version_meta,
     upsert_version_meta,
 )
+from task07_common.topic import infer_topic
 
 
 def _dt_to_date(dt_str: str) -> date | None:
@@ -48,7 +49,9 @@ def _dt_to_date(dt_str: str) -> date | None:
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y_%m_%d"):
         try:
             return datetime.strptime(dt_str, fmt).date()
-        except ValueError, TypeError:
+        except ValueError:  # 格式不符：試下一個格式
+            continue
+        except TypeError:  # dt_str 為 None：試下一個格式（拆兩行避開 tuple 寫法被反覆還原成 Py2 語法）
             continue
     logger.warning(f"dt 分區字串 '{dt_str}' 轉換失敗，請在資料庫檢查該字串是否特別不同")
     return None
@@ -118,51 +121,77 @@ def _normalize_date(value) -> datetime | None:
     return None
 
 
-def _count_valid_images(content: str, img_archive_paths: list[str]) -> int:
-    """統計 md 正文 ![]() 連結中，檔名有落入 img_archive_path (basename 比對) 的張數。
+# md 圖片語法 ![alt](path)：取 () 內路徑，供統計連結總數與比對是否命中圖片
+_IMG_LINK_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
-    模型有隨機性，可能把圖片檔名改壞導致連結指向不存在的圖；命中歸檔圖者才算 validated，
+
+def _count_img_links(content: str) -> int:
+    """統計 md 正文 ![]() 圖片連結的總數（含改壞、指向不存在圖片者）。"""
+    return len(_IMG_LINK_RE.findall(content))
+
+
+def _count_valid_images(content: str, img_paths: list[str]) -> int:
+    """統計 md 正文 ![]() 連結中，檔名有落入 img_paths (basename 比對) 的張數。
+
+    模型有隨機性，可能把圖片檔名改壞導致連結指向不存在的圖；命中對應圖者才算 validated，
     此計數供事後追蹤模型輸出的圖片連結正確率。
 
     Args:
-        content (str): 歸檔 md 的正文 (不含 frontmatter 區)。
-        img_archive_paths (list[str]): gold 歸檔的 png gs:// 路徑集合。
+        content (str): md 的正文 (不含 frontmatter 區)。
+        img_paths (list[str]): 對應的 png gs:// 路徑集合 (approve 傳 archived、reject 傳 raw，basename 一致)。
 
     Returns:
-        int: md 圖片連結命中歸檔圖片的次數。
+        int: md 圖片連結命中對應圖片的次數。
     """
-    # md 圖片語法 ![alt](path)：取 () 內路徑，供比對是否命中歸檔圖片
-    _IMG_LINK_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-    archive_names = {PurePosixPath(p).name for p in (img_archive_paths or [])}
-
-    if not archive_names:
+    valid_names = {PurePosixPath(p).name for p in (img_paths or [])}
+    if not valid_names:
         return 0
-    return sum(1 for link in _IMG_LINK_RE.findall(content) if PurePosixPath(link.strip()).name in archive_names)
+    return sum(1 for link in _IMG_LINK_RE.findall(content) if PurePosixPath(link.strip()).name in valid_names)
 
 
-def _extract_frontmatter(md_str: str, img_paths: list[str] | None = None) -> dict:
-    """讀 md，組出內嵌 Object md_frontmatter (4 個 frontmatter 欄 + valid_img)。
+def _build_md_quality_meta(md_str: str, img_paths: list[str] | None, page_title: str) -> dict:
+    """讀 md，組出要 upsert 進 metadata 的品質欄位：md_frontmatter、md_body、dismatched 統計與 topic。
 
-    frontmatter 未寫進 metadata 區時以正文頂端補救解析；valid_img 由正文 ![]() 連結比對
-    img_paths basename 得出 (approve 傳 img_archive_path、reject 傳 raw-notes img_path，basename 一致)。
+    frontmatter 未寫進 metadata 區時以正文頂端補救解析；valid_img 由正文 ![]() 連結 basename
+    比對 img_paths 得出 (approve 傳 archived_image_path、reject 傳 raw_image_path，basename 一致)；
+    dismatched = 連結總數 - valid_img；topic 以 frontmatter tags＋頁面標題重算 (對齊 task01 分類)。
 
     Args:
         md_str (str): md 全文 (approve 為歸檔 md、reject 為 silver md)。
         img_paths (list[str] | None): 該版對應的 png 路徑集合，供 valid_img basename 比對。
+        page_title (str): 頁面標題，供 topic 重算的比對來源之一。
 
     Returns:
-        dict: {tags, date, type, alias, valid_img}，供作 Collection onenote_note_metadata 的 md_frontmatter 值。
+        dict: {md_frontmatter, md_body, dismatched_img_count, md_has_dismatched_img, topic}，
+        供以同主鍵 upsert Collection onenote_note_metadata。
     """
     post = frontmatter.loads(md_str)
     fm = post.metadata
     if not fm:
         fm = _infer_misposition_metadata(post)
-    return {
-        "tags": _normalize_str_list(fm.get("tags", [])),
+
+    tags = _normalize_str_list(fm.get("tags", []))
+    valid_img = _count_valid_images(post.content, img_paths or [])
+    total_links = _count_img_links(post.content)
+    dismatched = total_links - valid_img
+
+    md_frontmatter = {
+        "tags": tags,
         "date": _normalize_date(fm.get("date")),
         "type": fm.get("type") or None,
         "alias": _normalize_str_list(fm.get("alias", [])),
-        "valid_img": _count_valid_images(post.content, img_paths or []),
+    }
+    md_body = {
+        "valid_img_count": valid_img,
+        "word_count": len(post.content.split()),
+        "recomputed_at": None,
+    }
+    return {
+        "md_frontmatter": md_frontmatter,
+        "md_body": md_body,
+        "dismatched_img_count": dismatched,
+        "md_has_dismatched_img": dismatched > 0,
+        "topic": infer_topic(tags, page_title),
     }
 
 
@@ -195,13 +224,15 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
     if meta.get("status") == "archived":
         return {
             "status": "archived",
-            "md_archive_path": meta.get("md_archive_path"),
-            "img_archive_path": meta.get("img_archive_path", []),
+            "md_archive_path": meta.get("archived_md_path"),
+            "img_archive_path": [
+                img["archived_image_path"] for img in meta.get("attached_images", []) if img.get("archived_image_path")
+            ],
             "note": "already archived",
         }
 
-    md_path = meta.get("md_path")
-    if not md_path:
+    enriched_md_path = meta.get("enriched_md_path")
+    if not enriched_md_path:
         return {"status": meta.get("status"), "error": "此版本目前無生成 md，無法歸檔"}
 
     # 取出最近一次歸檔日
@@ -227,18 +258,26 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
     now = _now_utc()
     try:
         # 2. 執行歸檔：從 processed-notes 複製 md 到 archived-notes
-        md_name = PurePosixPath(md_path).name
+        md_name = PurePosixPath(enriched_md_path).name
         md_dst_blob = f"{archived_prefix}/{md_name}"
-        md_md5 = gcs.copy_blob(md_path, md_dst_blob)
+        md_md5_hash = gcs.copy_blob(enriched_md_path, md_dst_blob)
         md_archive_uri = gcs.gs_uri(md_dst_blob)
 
-        # 3. 執行歸檔：從 raw-notes 複製 png 到 archived-notes
+        # 3. 執行歸檔：逐一從 raw-notes 複製 png 到 archived-notes，並把 archived 端路徑/md5
+        #    回填進對應的 attached_images Object（保留 raw 端欄位不動）。
+        attached_images: list[dict] = []
         img_archive_paths: list[str] = []
-        for img_uri in meta.get("img_path", []) or []:
-            img_name = PurePosixPath(img_uri).name
+        for img in meta.get("attached_images", []) or []:
+            raw_uri = img.get("raw_image_path")
+            if not raw_uri:
+                attached_images.append(img)
+                continue
+            img_name = PurePosixPath(raw_uri).name
             img_dst_blob = f"{archived_prefix}/_images/{img_name}"
-            gcs.copy_blob(img_uri, img_dst_blob)
-            img_archive_paths.append(gcs.gs_uri(img_dst_blob))
+            archived_md5 = gcs.copy_blob(raw_uri, img_dst_blob)
+            archived_uri = gcs.gs_uri(img_dst_blob)
+            img_archive_paths.append(archived_uri)
+            attached_images.append({**img, "archived_image_path": archived_uri, "archived_image_md5": archived_md5})
     except Exception as e:  # noqa: BLE001
         upsert_version_meta(page_id, dt, set_fields={"error_msg": f"[gold:copy] {e}"})
         logger.exception(f"[gold] 歸檔複製失敗: page_id={page_id}, dt={dt}")
@@ -254,18 +293,18 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             "reviewed_by_role": role,
             "reviewed_at": now,
             "archived_at": now,
-            "md_archive_path": md_archive_uri,
-            "md_md5": md_md5,
-            "img_archive_path": img_archive_paths,
+            "archived_md_path": md_archive_uri,
+            "md_md5_hash": md_md5_hash,
+            "attached_images": attached_images,
             "error_msg": None,
         },
     )
 
     # 4b. 退役同頁其他仍在審閱的候選版本：本輪已擇一歸檔，其餘連帶結束審閱期。
-    #     html_hash 與歸檔版相同者標 overwritten（內容等同已被採納），不同者 rejected。
-    archived_hash = meta.get("html_hash")
+    #     html_sha_hash 與歸檔版相同者標 overwritten（內容等同已被採納），不同者 rejected。
+    archived_hash = meta.get("html_sha_hash")
     for sib in get_sibling_pending_versions(page_id, dt):
-        retired_result = "overwritten" if sib.get("html_hash") == archived_hash else "rejected"
+        retired_result = "overwritten" if sib.get("html_sha_hash") == archived_hash else "rejected"
         upsert_version_meta(
             sib["page_id"],
             sib["dt"],
@@ -276,13 +315,13 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             },
         )
 
-    # 5. 後台運作：讀回歸檔完成的 md、萃取 frontmatter，
+    # 5. 後台運作：讀回歸檔完成的 md、萃取 md_frontmatter/md_body/dismatched/topic，
     # 以內嵌 Object upsert Collection onenote_note_metadata
     for _ in range(ATTEMPTS):
         try:
             archived_md = gcs.download_text(md_archive_uri)
-            fm = _extract_frontmatter(archived_md, img_archive_paths)
-            upsert_version_meta(page_id, dt, set_fields={"md_frontmatter": fm})
+            quality = _build_md_quality_meta(archived_md, img_archive_paths, meta["page_title"])
+            upsert_version_meta(page_id, dt, set_fields=quality)
             logger.success(f"[gold] archived page_id={page_id}, dt={dt} → {md_archive_uri}")
             return {
                 "status": "archived",
@@ -333,14 +372,15 @@ def reject_note(page_id: str, dt: str, role: str) -> dict:
         },
     )
 
-    # 3. 背景：把 rejected md 的 frontmatter 也寫進 metadata，以分析被 reject 的原因
-    md_path = meta.get("md_path")
-    if md_path:
+    # 3. 背景：把 rejected md 的 md_frontmatter/md_body/dismatched/topic 也寫進 metadata，以分析被 reject 的原因
+    enriched_md_path = meta.get("enriched_md_path")
+    if enriched_md_path:
+        raw_img_paths = [img["raw_image_path"] for img in meta.get("attached_images", []) if img.get("raw_image_path")]
         for _ in range(ATTEMPTS):
             try:
-                md_str = gcs.download_text(md_path)
-                fm = _extract_frontmatter(md_str, meta.get("img_path", []))
-                upsert_version_meta(page_id, dt, set_fields={"md_frontmatter": fm})
+                md_str = gcs.download_text(enriched_md_path)
+                quality = _build_md_quality_meta(md_str, raw_img_paths, meta["page_title"])
+                upsert_version_meta(page_id, dt, set_fields=quality)
                 logger.success(f"[gold] rejected page_id={page_id}, dt={dt}, role={role}")
                 return {"status": "review_closed", "review_result": "rejected"}
             except Exception as e:  # noqa: BLE001
