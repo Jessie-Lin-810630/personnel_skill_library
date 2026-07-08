@@ -54,15 +54,15 @@ def run_task06_v2():
         n_purged = purge_deleted_vectors(db)
         logger.success(f"=== Task 06 v2 完成 | 向量化: 0 | purge: {n_purged} ===")
         return
-    vector_docs, embedded_md5_by_raw_md_path = t_chunk_and_embed_v2(gate_list, BUCKET_NAME)
+    vector_docs, embedded_by_raw_md_path = t_chunk_and_embed_v2(gate_list, BUCKET_NAME)
 
     # Gold - Load: 更新到向量資料庫 (先刪前次向量化結果後插入) CAS
-    load_vectors_incremental_v2(db, vector_docs, embedded_md5_by_raw_md_path)
+    load_vectors_incremental_v2(db, vector_docs, embedded_by_raw_md_path)
 
     # Purge：將已被軟刪除的事實來源之 embed，從向量資料庫中移除。
     n_purged = purge_deleted_vectors(db)
 
-    logger.success(f"=== Task 06 v2 完成 | 向量化: {len(embedded_md5_by_raw_md_path)} | purge: {n_purged} ===")
+    logger.success(f"=== Task 06 v2 完成 | 向量化: {len(embedded_by_raw_md_path)} | purge: {n_purged} ===")
 
 
 if __name__ == "__main__":

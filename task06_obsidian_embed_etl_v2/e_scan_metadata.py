@@ -37,8 +37,8 @@ def get_embedding_gate_list(db: Database) -> list[dict]:
     """從 obsidian_note_metadata 挑出 status=archived 且 embedded_status=false 的筆記，作為 embedding gate。
 
     1. 以 status 與 embedded_status 過濾，只留下已歸檔但尚未向量化的筆記。
-    2. 每筆只投影 embedding 需要的欄位：raw_md_path 當向量資料庫與 metadata 的共同血緣鍵、
-       archived_md_path 是內文來源、archived_md_md5_hash 供 CAS 守衛，
+    2. 每筆只投影 embedding 需要的欄位：raw_md_path 為 metadata 主鍵（CAS 定位筆記用）、
+       archived_md_path 既是內文來源、也是寫入向量表的血緣欄 md_path 值、archived_md_md5_hash 供 CAS 守衛，
        另外帶上 archived_md_frontmatter 與 file_name。
 
     只依 database 狀態判斷，不重掃 GCS。

@@ -1,4 +1,4 @@
-"""對 archived md body 做 chunking 與多模態 embedding，產出以 raw_md_path 為血緣鍵的 vector docs。
+"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_path（archived md 路徑）為血緣鍵的 vector docs。
 
 清理 Obsidian 特有語法 → 兩段式 chunking → 每 chunk 都送 text 與 圖片 uri 給多模態模型 gemini-embedding-2
 → L2 normalize → 組 vector doc。
@@ -331,22 +331,22 @@ def t_chunk_and_embed_v2(
     gate_list: list[dict],
     bucket_name: str = "personal-vaults",
     genai_client: genai.Client | None = None,
-) -> tuple[list[dict], dict[str, str]]:
-    """串接 fetch → preprocess → chunk → embed，產出 vector docs 與 {raw_md_path: 本次 archived md5}。
+) -> tuple[list[dict], dict[str, dict]]:
+    """串接 fetch → preprocess → chunk → embed，產出 vector docs 與 {raw_md_path: {md_path, archived_md5}}。
 
-    回傳 (all_vector_docs, embedded_md5_by_raw_md_path)：
-      - all_vector_docs：可寫入 obsidian_vectors_v2 的 list[dict]，每筆上帶 raw_md_path，作為與
-      collection obsidian_note_metadata 數據血緣。
-      - embedded_md5_by_raw_md_path：本次成功處理（含切塊為空）的 {raw_md_path: archived_md_md5_hash}，
-        供 load 層做「先刪後插 + CAS 翻 embedding_status」只對成功的檔翻 done，
-        失敗 (拋例外) 的檔不列入，下輪會重試。
+    回傳 (all_vector_docs, embedded_by_raw_md_path)：
+      - all_vector_docs：可寫入 obsidian_vectors_v2 的 list[dict]，每筆血緣欄為 md_path（＝人工核可後的
+        archived_md_path 值），作為向量表與 collection obsidian_note_metadata 的 join 鍵。
+      - embedded_by_raw_md_path：本次成功處理（含切塊為空）的 {raw_md_path: {"md_path": archived_md_path,
+        "archived_md5": archived_md_md5_hash}}。key 為 metadata 主鍵 raw_md_path（CAS 仍以它定位筆記），
+        value 帶 md_path 供 load 層以向量欄位先刪後插、archived_md5 作 CAS 守衛值。失敗（拋例外）的檔不列入。
 
     all_vector_docs 每筆輸出的結構：
 
         ```
         {
             # 來源追蹤
-            "file_path":    "03_knowledge/xxx.md",
+            "md_path":      "gs://personal-vaults/archived-notes/.../xxx.md",  # 血緣鍵（archived md 路徑）
             "file_name":    "xxx.md",
             "chunk_index":  0,          # 從 0 開始
             "chunk_total":  6,          # 這份筆記共幾個 chunk
@@ -372,8 +372,8 @@ def t_chunk_and_embed_v2(
         genai_client: 已初始化的 google-genai client；省略則由 _get_genai_client() 建立。
 
     Returns:
-        tuple (all_vector_docs, embedded_md5_by_raw_md_path)：可入庫的 vector docs 清單 (每筆結構見上)，
-        與本次成功處理 (含切塊為空) 的 {raw_md_path: archived_md_md5_hash}。
+        tuple (all_vector_docs, embedded_by_raw_md_path)：可入庫的 vector docs 清單 (每筆結構見上)，
+        與本次成功處理 (含切塊為空) 的 {raw_md_path: {"md_path": archived_md_path, "archived_md5": md5}}。
     """
     if not gate_list:
         return [], {}  # 無待做筆記：不需初始化 genai client，直接回空
@@ -381,7 +381,7 @@ def t_chunk_and_embed_v2(
         genai_client = _get_genai_client()
     bucket = storage.Client().bucket(bucket_name)  # 供 embed 階段檢查圖片是否存在
     all_vector_docs = []
-    embedded_md5_by_raw_md_path: dict[str, str] = {}
+    embedded_by_raw_md_path: dict[str, dict] = {}
 
     for note in gate_list:
         raw_md_path = note.get("raw_md_path")
@@ -401,7 +401,10 @@ def t_chunk_and_embed_v2(
             if not chunks:
                 # 切塊為空 (例如空筆記) 仍算「成功處理」
                 logger.warning(f"切塊結果為空，視為已處理 (無 chunk): {archived_md_path}")
-                embedded_md5_by_raw_md_path[raw_md_path] = note["archived_md_md5_hash"]
+                embedded_by_raw_md_path[raw_md_path] = {
+                    "md_path": archived_md_path,
+                    "archived_md5": note["archived_md_md5_hash"],
+                }
                 continue
 
             # 4. Embedding
@@ -414,7 +417,7 @@ def t_chunk_and_embed_v2(
             for idx, ec in enumerate(embedded):
                 all_vector_docs.append(
                     {
-                        "raw_md_path": raw_md_path,
+                        "md_path": archived_md_path,  # 向量血緣鍵＝人工核可後的 archived md 路徑
                         "file_name": note.get("file_name", ""),
                         "chunk_index": idx,
                         "chunk_total": chunk_total,
@@ -427,13 +430,14 @@ def t_chunk_and_embed_v2(
                         "embedding": ec["embedding"],
                     }
                 )
-            embedded_md5_by_raw_md_path[raw_md_path] = note["archived_md_md5_hash"]
+            embedded_by_raw_md_path[raw_md_path] = {
+                "md_path": archived_md_path,
+                "archived_md5": note["archived_md_md5_hash"],
+            }
         except Exception as e:
             # 失敗的檔之 embedded_status 維持 False，待下次執行本函式時重試
             logger.warning(f"處理失敗，略過：{raw_md_path} | 原因：{e}")
             continue
 
-    logger.info(
-        f"向量化完成：{len(all_vector_docs)} 個 vector docs，成功處理 {len(embedded_md5_by_raw_md_path)} 份筆記"
-    )
-    return all_vector_docs, embedded_md5_by_raw_md_path
+    logger.info(f"向量化完成：{len(all_vector_docs)} 個 vector docs，成功處理 {len(embedded_by_raw_md_path)} 份筆記")
+    return all_vector_docs, embedded_by_raw_md_path

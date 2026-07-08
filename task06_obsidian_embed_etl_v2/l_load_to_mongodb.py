@@ -36,42 +36,48 @@ def get_db(mongo_uri: str, db_name: str):
 def load_vectors_incremental_v2(
     db: Database,
     vector_docs: list[dict],
-    embedded_md5_by_raw_md_path: dict[str, str],
+    embedded_by_raw_md_path: dict[str, dict],
 ) -> None:
     """把本次成功處理的每份筆記寫進 obsidian_vectors_v2，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
-    1. 依 raw_md_path 把 vector_docs 分組。
+    1. 依 md_path（＝archived md 路徑）把 vector_docs 分組——向量表血緣欄為 md_path。
     2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重切後 chunk 數變少也不會殘留孤兒，
        全新的筆記因為沒有舊向量，delete 這步等於沒事。
     3. 只有這份筆記在 DB 仍是 embedded_status=false、且 archived_md_md5_hash 等於本次 embedding 的版本時，
-       才把 embedded_status 翻成 true 並蓋上 embedded_at。若 embedding 期間 task01_v2 又重歸檔改了 md5，
-       CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。
+       才把 embedded_status 翻成 true 並以同一時戳蓋上 embedded_at 與 updated_at。若 embedding 期間 task01_v2
+       又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。
+       CAS 仍以 metadata 主鍵 raw_md_path 定位筆記（向量表血緣欄用 md_path 不影響 metadata 主鍵與 CAS 規則）。
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_v2 產出、待寫入 obsidian_vectors_v2 的 chunk 向量清單。
-        embedded_md5_by_raw_md_path: 本次成功處理的 raw_md_path 對到其 archived_md_md5_hash，作 CAS 守衛值。
+        vector_docs: t_chunk_and_embed_v2 產出、待寫入 obsidian_vectors_v2 的 chunk 向量清單（血緣欄 md_path）。
+        embedded_by_raw_md_path: 本次成功處理的 {raw_md_path: {"md_path": archived_md_path,
+            "archived_md5": archived_md_md5_hash}}；key 為 metadata 主鍵、md_path 供向量先刪後插、md5 作 CAS 守衛。
     """
     vectors = db[VECTORS_V2]
     notes = db[NOTE_METADATA]
 
-    # 依 file_path 分組
-    chunks_by_raw_md_path: dict[str, list[dict]] = {}
+    # 依向量血緣欄 md_path 分組
+    chunks_by_md_path: dict[str, list[dict]] = {}
     for doc in vector_docs:
-        chunks_by_raw_md_path.setdefault(doc["raw_md_path"], []).append(doc)
+        chunks_by_md_path.setdefault(doc["md_path"], []).append(doc)
 
     n_files = n_chunks = n_flipped = n_cas_miss = 0
-    for raw_md_path, archived_md5 in embedded_md5_by_raw_md_path.items():
-        chunks_of_file = chunks_by_raw_md_path.get(raw_md_path, [])
-        vectors.delete_many({"raw_md_path": raw_md_path})  # 先刪舊
+    for raw_md_path, info in embedded_by_raw_md_path.items():
+        md_path = info["md_path"]
+        archived_md5 = info["archived_md5"]
+        chunks_of_file = chunks_by_md_path.get(md_path, [])
+        vectors.delete_many({"md_path": md_path})  # 先刪舊（以向量血緣欄 md_path）
         if chunks_of_file:
             vectors.insert_many(chunks_of_file)
             n_chunks += len(chunks_of_file)
         n_files += 1
 
+        # CAS 仍以 metadata 主鍵 raw_md_path 定位；同一時戳一併蓋 embedded_at 與 updated_at，避免時序矛盾
+        now = datetime.now(timezone.utc)
         cas = notes.update_one(
             {"raw_md_path": raw_md_path, "embedded_status": False, "archived_md_md5_hash": archived_md5},
-            {"$set": {"embedded_status": True, "embedded_at": datetime.now(timezone.utc)}},
+            {"$set": {"embedded_status": True, "embedded_at": now, "updated_at": now}},
         )
         if cas.matched_count:
             n_flipped += 1
@@ -106,16 +112,17 @@ def purge_deleted_vectors(db: Database) -> int:
     vectors = db[VECTORS_V2]
 
     n_purged = 0
-    for doc in notes.find({"status": "deleted", "embedded_status": True}, {"raw_md_path": 1}):
+    for doc in notes.find({"status": "deleted", "embedded_status": True}, {"raw_md_path": 1, "archived_md_path": 1}):
         raw_md_path = doc["raw_md_path"]
-        vectors.delete_many({"raw_md_path": raw_md_path})
+        # 向量表血緣欄為 md_path（＝archived_md_path 值），故以它清除該筆記的向量
+        vectors.delete_many({"md_path": doc.get("archived_md_path")})
         notes.update_one(
             {
-                "raw_md_path": raw_md_path,  # 是從 raw-notes/ 被刪掉的筆記
+                "raw_md_path": raw_md_path,  # metadata 主鍵；是從 raw-notes/ 被刪掉的筆記
                 "status": "deleted",
                 "embedded_status": True,
             },
-            {"$set": {"embedded_status": False}},
+            {"$set": {"embedded_status": False, "updated_at": datetime.now(timezone.utc)}},
         )
         n_purged += 1
 

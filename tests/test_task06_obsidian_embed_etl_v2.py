@@ -97,11 +97,13 @@ class _FakeGenaiClient:
 
 
 class ChunkEmbedV2Tests(unittest.TestCase):
-    def test_vector_docs_keyed_on_raw_md_path_with_archived_image_source(self):
+    def test_vector_docs_keyed_on_md_path_with_archived_image_source(self):
+        raw = "gs://personal-vaults/raw-notes/u/nb/01-d/x.md"
+        archived = "gs://personal-vaults/archived-notes/u/nb/01-d/x.md"
         gate_list = [
             {
-                "raw_md_path": "gs://personal-vaults/raw-notes/u/nb/01-d/x.md",
-                "archived_md_path": "gs://personal-vaults/archived-notes/u/nb/01-d/x.md",
+                "raw_md_path": raw,
+                "archived_md_path": archived,
                 "archived_md_md5_hash": "M1",
                 "archived_md_frontmatter": {"tags": ["python"], "type": "daily-log", "alias": ["X"]},
                 "file_name": "x.md",
@@ -113,19 +115,21 @@ class ChunkEmbedV2Tests(unittest.TestCase):
             patch.object(t_chunk_embed, "fetch_archived_content", return_value=md_body),
             patch.object(t_chunk_embed.storage, "Client", return_value=_FakeStorageClient()),
         ):
-            docs, md5_map = t_chunk_embed.t_chunk_and_embed_v2(
+            docs, embedded_map = t_chunk_embed.t_chunk_and_embed_v2(
                 gate_list, "personal-vaults", genai_client=_FakeGenaiClient()
             )
 
         self.assertTrue(docs)
         for d in docs:
-            self.assertEqual(d["raw_md_path"], "gs://personal-vaults/raw-notes/u/nb/01-d/x.md")
+            # 向量血緣欄改為 md_path，值＝人工核可後的 archived md 路徑（非 raw）
+            self.assertEqual(d["md_path"], archived)
+            self.assertNotIn("raw_md_path", d)
             self.assertEqual(d["embedding"], [0.6, 0.8])
         # 圖片來源指向 archived-notes 的 _attachment（非 raw-notes）
         all_imgs = [p for d in docs for p in d["image_paths"]]
         self.assertIn("gs://personal-vaults/archived-notes/u/nb/01-d/_attachment/a.png", all_imgs)
-        # md5 map 供 Load 端 CAS 守衛
-        self.assertEqual(md5_map, {"gs://personal-vaults/raw-notes/u/nb/01-d/x.md": "M1"})
+        # map 以 metadata 主鍵 raw_md_path 為 key，value 帶 md_path 與 CAS 守衛 md5
+        self.assertEqual(embedded_map, {raw: {"md_path": archived, "archived_md5": "M1"}})
 
 
 # --------------------------- Task 4.3: load + CAS ---------------------------
@@ -140,23 +144,29 @@ class LoadVectorsTests(unittest.TestCase):
 
     def test_delete_then_insert_and_cas_flip(self):
         db = self._db()
-        # 舊 3 chunk（先刪後插應清光）
-        db.preset(l_load_to_mongodb.VECTORS_V2, [{"raw_md_path": "r1", "chunk_index": i} for i in range(3)])
-        new_docs = [{"raw_md_path": "r1", "chunk_index": 0}, {"raw_md_path": "r1", "chunk_index": 1}]  # 新 2 chunk
+        a1 = "gs://personal-vaults/archived-notes/u/r1.md"
+        # 舊 3 chunk（先刪後插應清光）；向量血緣欄為 md_path
+        db.preset(l_load_to_mongodb.VECTORS_V2, [{"md_path": a1, "chunk_index": i} for i in range(3)])
+        new_docs = [{"md_path": a1, "chunk_index": 0}, {"md_path": a1, "chunk_index": 1}]  # 新 2 chunk
 
-        l_load_to_mongodb.load_vectors_incremental_v2(db, new_docs, {"r1": "M1"})
+        l_load_to_mongodb.load_vectors_incremental_v2(db, new_docs, {"r1": {"md_path": a1, "archived_md5": "M1"}})
 
         vecs = db.collections[l_load_to_mongodb.VECTORS_V2].docs
         self.assertEqual(len(vecs), 2)  # 先刪後插，無孤兒
         note = db.collections[l_load_to_mongodb.NOTE_METADATA].docs[0]
         self.assertTrue(note["embedded_status"])
+        # embedded_at 與 updated_at 同一時戳一起蓋
         self.assertIn("embedded_at", note)
+        self.assertIn("updated_at", note)
+        self.assertEqual(note["embedded_at"], note["updated_at"])
 
     def test_cas_miss_when_md5_changed_does_not_flip(self):
         db = self._db(md5="M1")
-        new_docs = [{"raw_md_path": "r1", "chunk_index": 0}]
+        a1 = "gs://personal-vaults/archived-notes/u/r1.md"
+        new_docs = [{"md_path": a1, "chunk_index": 0}]
 
-        l_load_to_mongodb.load_vectors_incremental_v2(db, new_docs, {"r1": "M2"})  # 版本已變
+        # 版本已變（守衛值 M2 ≠ DB 的 M1）
+        l_load_to_mongodb.load_vectors_incremental_v2(db, new_docs, {"r1": {"md_path": a1, "archived_md5": "M2"}})
 
         note = db.collections[l_load_to_mongodb.NOTE_METADATA].docs[0]
         self.assertFalse(note["embedded_status"])  # CAS 未命中不翻
@@ -169,16 +179,17 @@ class PurgeTests(unittest.TestCase):
         db.preset(
             l_load_to_mongodb.NOTE_METADATA,
             [
-                {"raw_md_path": "d1", "status": "deleted", "embedded_status": True},
-                {"raw_md_path": "a1", "status": "archived", "embedded_status": True},
+                {"raw_md_path": "d1", "archived_md_path": "A_d1", "status": "deleted", "embedded_status": True},
+                {"raw_md_path": "a1", "archived_md_path": "A_a1", "status": "archived", "embedded_status": True},
             ],
         )
+        # 向量血緣欄為 md_path（＝archived_md_path 值）
         db.preset(
             l_load_to_mongodb.VECTORS_V2,
             [
-                {"raw_md_path": "d1", "chunk_index": 0},
-                {"raw_md_path": "d1", "chunk_index": 1},
-                {"raw_md_path": "a1", "chunk_index": 0},
+                {"md_path": "A_d1", "chunk_index": 0},
+                {"md_path": "A_d1", "chunk_index": 1},
+                {"md_path": "A_a1", "chunk_index": 0},
             ],
         )
         return db
@@ -188,8 +199,8 @@ class PurgeTests(unittest.TestCase):
         n = l_load_to_mongodb.purge_deleted_vectors(db)
 
         self.assertEqual(n, 1)
-        vecs = {d["raw_md_path"] for d in db.collections[l_load_to_mongodb.VECTORS_V2].docs}
-        self.assertEqual(vecs, {"a1"})  # d1 向量清除、a1 保留
+        vecs = {d["md_path"] for d in db.collections[l_load_to_mongodb.VECTORS_V2].docs}
+        self.assertEqual(vecs, {"A_a1"})  # d1 向量清除、a1 保留
         d1 = next(d for d in db.collections[l_load_to_mongodb.NOTE_METADATA].docs if d["raw_md_path"] == "d1")
         self.assertFalse(d1["embedded_status"])
 
@@ -235,15 +246,16 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(t_chunk_embed._normalize([0.0, 0.0]), [0.0, 0.0])
 
     def test_load_empty_chunk_note_deletes_old_and_flips(self):
-        # 空切塊 note：vector_docs 空但 md5 map 有此筆 → 舊向量清光、仍翻 embedded_status
+        # 空切塊 note：vector_docs 空但 map 有此筆 → 舊向量清光、仍翻 embedded_status
         db = FakeDb()
+        a1 = "gs://personal-vaults/archived-notes/u/r1.md"
         db.preset(
             l_load_to_mongodb.NOTE_METADATA,
             [{"raw_md_path": "r1", "embedded_status": False, "archived_md_md5_hash": "M1"}],
         )
-        db.preset(l_load_to_mongodb.VECTORS_V2, [{"raw_md_path": "r1", "chunk_index": 0}])
+        db.preset(l_load_to_mongodb.VECTORS_V2, [{"md_path": a1, "chunk_index": 0}])
 
-        l_load_to_mongodb.load_vectors_incremental_v2(db, [], {"r1": "M1"})
+        l_load_to_mongodb.load_vectors_incremental_v2(db, [], {"r1": {"md_path": a1, "archived_md5": "M1"}})
 
         self.assertEqual(db.collections[l_load_to_mongodb.VECTORS_V2].docs, [])
         self.assertTrue(db.collections[l_load_to_mongodb.NOTE_METADATA].docs[0]["embedded_status"])
