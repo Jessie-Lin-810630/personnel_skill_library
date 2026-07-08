@@ -44,9 +44,9 @@ def load_vectors_incremental_onenote(
     2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重歸檔重切後 chunk 數變少也不會殘留孤兒，
        全新的筆記因為沒有舊向量，delete 這步等於沒事。
     3. 只有這份筆記在 DB 仍是 embedded_status=false、且 md_md5_hash 等於本次 embedding 的版本時，
-       才把 embedded_status 翻成 true 並蓋上 embedded_at。若 embedding 期間該筆記又重歸檔改了 md5，
-       CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。archived_md_path 唯一定位該版本，
-       故以它作 CAS 過濾鍵，等同以 (page_id, dt) 定位。
+       才把 embedded_status 翻成 true 並蓋上 embedded_at（同時蓋 updated_at，兩者同一時戳）。
+       若 embedding 期間該筆記又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版
+       向量誤標成最新版本。archived_md_path 唯一定位該版本，故以它作 CAS 過濾鍵，等同以 (page_id, dt) 定位。
 
     Args:
         db: pymongo Database 物件。
@@ -70,9 +70,13 @@ def load_vectors_incremental_onenote(
             n_chunks += len(chunks_of_file)
         n_files += 1
 
+        # embedded_at 與 updated_at 同一時戳一起蓋：task08 直接以 pymongo 翻旗標、未經 task07
+        # 的 upsert_version_meta，故此處自行補 updated_at，避免 embedded_at 晚於 updated_at 的矛盾
+        # （否則會被誤讀成「先偷翻 status 再做 embedding」）。
+        now = datetime.now(timezone.utc)
         cas = notes.update_one(
             {"archived_md_path": md_path, "embedded_status": False, "md_md5_hash": md5},
-            {"$set": {"embedded_status": True, "embedded_at": datetime.now(timezone.utc)}},
+            {"$set": {"embedded_status": True, "embedded_at": now, "updated_at": now}},
         )
         if cas.matched_count:
             n_flipped += 1

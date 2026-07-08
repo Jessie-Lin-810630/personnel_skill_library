@@ -154,6 +154,9 @@ class LoadTests(unittest.TestCase):
         cas_update = notes.update_one.call_args[0][1]
         self.assertTrue(cas_update["$set"]["embedded_status"])
         self.assertIn("embedded_at", cas_update["$set"])
+        # embedded_at 與 updated_at 同一時戳，避免 embedded_at 晚於 updated_at 的矛盾
+        self.assertIn("updated_at", cas_update["$set"])
+        self.assertEqual(cas_update["$set"]["embedded_at"], cas_update["$set"]["updated_at"])
 
     def test_cas_miss_does_not_error(self):
         db, vectors, notes = self._db()

@@ -44,12 +44,12 @@
 
 ### Requirement: 以 md_md5_hash 守衛的 CAS 翻 embedded_status
 
-系統 SHALL 在該版本 chunk 寫入成功後，以 Compare-And-Swap 翻 `onenote_note_metadata.embedded_status=true`：以 `archived_md_path` 唯一定位該版本（等同 `page_id`+`dt`），**只有** DB 該版本仍 `embedded_status=false` 且 `md_md5_hash` 等於本次 embedding 的版本才翻，並蓋上 `embedded_at`（UTC）。CAS 未命中時 MUST NOT 翻旗標（代表 embedding 期間又重歸檔）。
+系統 SHALL 在該版本 chunk 寫入成功後，以 Compare-And-Swap 翻 `onenote_note_metadata.embedded_status=true`：以 `archived_md_path` 唯一定位該版本（等同 `page_id`+`dt`），**只有** DB 該版本仍 `embedded_status=false` 且 `md_md5_hash` 等於本次 embedding 的版本才翻，並以同一時戳蓋上 `embedded_at` 與 `updated_at`（UTC）。因 task08 直接以 pymongo 翻旗標、未經 task07 集中補 `updated_at` 的 `upsert_version_meta`，此處 MUST 自行同步 `updated_at`，避免 `embedded_at` 晚於 `updated_at` 的矛盾。CAS 未命中時 MUST NOT 翻旗標（代表 embedding 期間又重歸檔）。
 
 #### Scenario: 版本一致才翻旗標
 
 - **WHEN** 寫入 chunk 後，DB 該版本 `embedded_status=false` 且 `md_md5_hash` 與本次相同
-- **THEN** `embedded_status` 翻 `true` 並蓋 `embedded_at`
+- **THEN** `embedded_status` 翻 `true`，並以同一時戳蓋 `embedded_at` 與 `updated_at`
 
 #### Scenario: 版本已變則不翻
 
