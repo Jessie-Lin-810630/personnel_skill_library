@@ -1805,3 +1805,15 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
     > - Source of any embed should be archived notes in markdown file and no longer raw notes or processed notes. The latter two only valued in bronze and silver layer. Source of embed should come from gold layer (i.e., archived notes).
     > - To accommodate the archived .md from both task07 (handling OneNote) and task01 (handling Obsidian), the column name of `md_path` does not specifiy the note APP name. (Neither `onenote_md_path` nor `obsidian_md_path` were used. Just `md_path`).
     > - Same requirements for the column `image_paths`. This column point to the paths of archived images of a note without limiting to any specific note APP.
+
+3. 修正 [task01-v2 `l_load_to_mongodb.py`](../task01_obsidian_etl_v2/l_load_to_mongodb.py) 歸檔 `.md` 帶著髒 frontmatter 的問題。
+    - **問題**：`t_clean_obsidian.py` 已在 `build_note_document` 算出乾淨的 `archived_md_frontmatter`（tags/date/type/alias 四欄），但 `archive_note` 原本用 `_copy_blob()` 直接把 raw `.md` 原樣複製到 `archived-notes/`，等於把未清洗的原始 frontmatter 一起搬進 Gold 層。
+    - **修法**：新增 `_upload_clean_md()` 取代 `.md` 那段的 `_copy_blob()`——download raw → `frontmatter.loads` → `post.metadata.update(乾淨 frontmatter)` → `frontmatter.dumps` → `upload_from_string` 到 archived 路徑，回傳 archived 端 md5。圖片仍走 `_copy_blob`（二進位原樣搬）。
+    - **取捨**：直接沿用 `note_doc["archived_md_frontmatter"]` 而非在 Load 層重呼叫 `_extract_frontmatter`，避免重算、也避免 `l_` 反向 import `t_`；並保證寫進 GCS 檔案的 frontmatter 與寫進 MongoDB 的欄位為單一事實來源。
+    > **延伸設計討論（未實作，記錄結論）**：此修法讓 raw `.md` 在一次 loop iteration 內被 `download_as_text` 兩次（Transform 一次、Load 的 `_upload_clean_md` 一次），連帶 `frontmatter.loads` 也 parse 兩次。討論過的優化方向：
+    > - **A. 把 `text` 往下傳給 `archive_note`**：消掉第 2 次下載，改動最小，維持分層。
+    > - **B. 傳已 parse 的 `frontmatter.Post` 物件**：下載與 parse 都省，但**否決**——部分 orchestration tool 不接受傳遞這類物件，換工具跑腳本會踩坑。
+    > - **C. 在 Transform 就產好「乾淨 frontmatter 的 md 字串」、Load 退化成純 writer**：語意最貼合 repo 的 `t_`/`l_` 归类准则（改寫 body 屬 Transform），但需改 `build_note_document` 回傳合約（tuple/dataclass），連動 `main.py` 與測試。
+    > - **關鍵洞見**：A 與 C 都會讓「長文本」穿過 task 邊界，一旦上 Airflow 會撞 **XCom 長度限制**（預設約 48KB）。真正的約束不是 T/L 概念線，而是 orchestration 的 task 邊界＝什麼 payload 過 XCom。
+    > - **結論**：**單 process** 就 collapse 掉重複下載（A/C 皆可）；**一旦上 orchestration**，把 `build_note_document + archive_note` 綁成同一個 T unit，長文本全程留在 unit 內、只吐小 dict（`note_doc`）給 L（`upsert_note`）——同時避開重複下載與 XCom 限制。代價是 DAG 節點跨了 t/l 概念階段（職責略模糊）＋犧牲 L 獨立重試粒度（但兩者皆冪等、成本低，可接受）。檔名前綴（概念意圖）與 DAG task 分組（執行時 payload 邊界）本是兩條可不對齊的軸，只要函式命名對「寫入＝Load」保持誠實即可。
+    > - **caveat**：`note_doc` 內嵌的 `attached_images` 血緣 list 才是可能撐大 payload 的地方（非 frontmatter），圖多的極端筆記要留意 XCom 上限。
