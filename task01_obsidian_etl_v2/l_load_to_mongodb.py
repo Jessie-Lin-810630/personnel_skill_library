@@ -12,6 +12,7 @@ Required .env keys:
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 import frontmatter
 from google.cloud.storage import Bucket
@@ -179,9 +180,10 @@ def archive_note(note_doc: dict, bucket: Bucket, bucket_name: str = "personal-va
         note_doc["archived_md_md5_hash"] = archived_md5
         note_doc["archived_at"] = now
         note_doc["error_msg"] = ""
+        logger.info(f"md與其附件均歸檔完成：{Path(archived_md_name).name}")
         return note_doc
     except Exception as e:
-        note_doc["error_msg"] = f"歸檔失敗：{e}"
+        note_doc["error_msg"] = f"{archived_md_name} 歸檔失敗：{e}"
         raise
 
 
@@ -266,11 +268,18 @@ def build_and_upsert_summary(db: Database) -> dict:
     2. 逐筆累加各 note_type 與各 topic 的計數、總筆數，以及已向量化的筆數。
     3. 以截到日的 snapshot_date 為鍵 upsert，同一天重跑會覆蓋成最新值。
 
+    **NOTE:**
+        目前尚在執行新舊表雙寫，舊表名稱 Obsidian_summary，待舊表的舊資料遷移到 notes_summary
+        且不影響前端呈現後，再讓前端去讀 notes_summary，確定穩定能讀取一段時間後，再刪舊表。
+
     Args:
         db: pymongo Database 物件。
 
     Returns:
-        本次寫入的快照字典，含 by_type、by_topic、total_notes、embedded_notes。
+        本次寫入的快照字典，含全域的 by_type、by_topic、total_notes、embedded_notes，
+        以及 archived 桶（archived_notes、by_tag_in_archived_notes、by_topic_in_archived_notes、
+        by_type_in_archived_notes）與 rejected 桶（rejected_notes、by_tag_in_rejected_notes、
+        by_topic_in_rejected_notes、by_type_in_rejected_notes）。
     """
     collection = db[NOTE_METADATA]
     by_type: dict[str, int] = defaultdict(int)
@@ -278,24 +287,67 @@ def build_and_upsert_summary(db: Database) -> dict:
     total_notes = 0
     embedded_notes = 0
 
-    for doc in collection.find(
-        {"status": "archived"}, {"status": 1, "topic": 1, "embedded_status": 1, "archived_md_frontmatter.type": 1}
-    ):
-        if doc.get("status") != "archived":  # 只計成功歸檔者，排除 deleted / error
+    # archived / rejected 兩桶，各自累計 count 與 tag／topic／type 分佈
+    def _new_bucket() -> dict:
+        return {"count": 0, "by_tag": defaultdict(int), "by_topic": defaultdict(int), "by_type": defaultdict(int)}
+
+    archived = _new_bucket()
+    rejected = _new_bucket()
+
+    query = {"$or": [{"status": "archived"}, {"status": "review_closed", "review_result": "rejected"}]}
+    projection = {
+        "status": 1,
+        "review_result": 1,
+        "topic": 1,
+        "embedded_status": 1,
+        "archived_md_frontmatter.type": 1,
+        "archived_md_frontmatter.tags": 1,
+    }
+    for doc in collection.find(query, projection):
+        status = doc.get("status")
+        is_archived = status == "archived"
+        is_rejected = status == "review_closed" and doc.get("review_result") == "rejected"
+        if not (is_archived or is_rejected):  # 排除 deleted / error / 尚未定案的 review
             continue
+
+        meta = doc.get("archived_md_frontmatter", {})
+        note_type = meta.get("type", "unknown")
+        topic = doc.get("topic", "other")
+
         total_notes += 1
-        by_type[doc.get("archived_md_frontmatter", {}).get("type", "unknown")] += 1
-        by_topic[doc.get("topic", "other")] += 1
+        by_type[note_type] += 1
+        by_topic[topic] += 1
         if doc.get("embedded_status"):
             embedded_notes += 1
+
+        bucket = archived if is_archived else rejected
+        bucket["count"] += 1
+        bucket["by_type"][note_type] += 1
+        bucket["by_topic"][topic] += 1
+        for tag in meta.get("tags", []):
+            bucket["by_tag"][tag] += 1
 
     summary = {
         "by_type": dict(by_type),
         "by_topic": dict(by_topic),
         "total_notes": total_notes,
         "embedded_notes": embedded_notes,
+        "archived_notes": archived["count"],
+        "by_tag_in_archived_notes": dict(archived["by_tag"]),
+        "by_topic_in_archived_notes": dict(archived["by_topic"]),
+        "by_type_in_archived_notes": dict(archived["by_type"]),
+        "rejected_notes": rejected["count"],
+        "by_tag_in_rejected_notes": dict(rejected["by_tag"]),
+        "by_topic_in_rejected_notes": dict(rejected["by_topic"]),
+        "by_type_in_rejected_notes": dict(rejected["by_type"]),
     }
     today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     db[NOTES_SUMMARY].update_one({"snapshot_date": today}, {"$set": summary}, upsert=True)
+
     logger.success(f"notes_summary 快照已更新，快照日期：{today}")
+    # 舊表雙寫，待舊表的舊資料遷移到 db[NOTES_SUMMARY] 且不影響前端呈現後，
+    # 再讓前端去讀 db[NOTES_SUMMARY]，確定穩定能讀取一段時間後，
+    # 再刪舊表。
+    db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": summary}, upsert=True)
+    logger.success(f"舊表 obsidian_summary 快照也已更新，快照日期：{today}")
     return summary
