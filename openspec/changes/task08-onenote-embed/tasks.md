@@ -17,16 +17,16 @@
 - [x] 3.4 `t_chunk_embed`：組向量 doc，血緣欄 `md_path`=`archived_md_path`、`image_paths`=archived 圖片、`file_name`=`page_title`、`tags`/`note_type`/`date` 取自 `md_frontmatter`
 - [x] 3.5 unittest：chunk doc 帶 `md_path`（archived 路徑）、圖片來源為 archived 路徑、markdown `![]()` 語法解析正確（mock embedding 呼叫）
 
-## 4. Load：寫 obsidian_vectors_v2 + CAS 翻旗標
+## 4. Load：寫 note_vectors_multimodal + CAS 翻旗標
 
-- [x] 4.1 `l_load_to_mongodb`：對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫入 `obsidian_vectors_v2`（先刪後插、冪等）
+- [x] 4.1 `l_load_to_mongodb`：對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫入 `note_vectors_multimodal`（先刪後插、冪等）
 - [x] 4.2 `l_load_to_mongodb`：以 `md_md5_hash` 守衛的 CAS 翻 `onenote_note_metadata.embedded_status=true` 並蓋 `embedded_at`（條件 `{archived_md_path, embedded_status:false, md_md5_hash:本次版本}`，`archived_md_path` 唯一定位版本）
 - [x] 4.3 unittest：先刪後插冪等、CAS 命中翻旗標、CAS 未命中（md5 已變／切塊為空只刪不插）不翻
 
 ## 5. 串接與收尾
 
 - [x] 5.1 `main.py`：串 E→T→L（gate → chunk+embed → 先刪後插+CAS），補 loguru 日誌與 env 檢查；不含 purge
-- [x] 5.2 端到端本地實跑核對 `obsidian_vectors_v2` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（已實跑；並修正 CAS 同步蓋 `updated_at`）
+- [x] 5.2 端到端本地實跑核對 `note_vectors_multimodal` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（已實跑；並修正 CAS 同步蓋 `updated_at`）
 - [x] 5.3 `poetry run python -m unittest discover -s tests` 全綠
-- [x] 5.4 CLAUDE.md 的 ETL 表新增 task08 一列（來源 `onenote-vaults/archived-notes/`、目的地 `obsidian_vectors_v2`）
-- [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `obsidian_vectors_v2` 血緣欄；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存
+- [x] 5.4 CLAUDE.md 的 ETL 表新增 task08 一列（來源 `onenote-vaults/archived-notes/`、目的地 `note_vectors_multimodal`）
+- [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `note_vectors_multimodal` 血緣欄；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存
