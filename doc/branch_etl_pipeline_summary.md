@@ -707,7 +707,7 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 
 ## Task 06 v2 — Obsidian Vector DB ETL（變體，對接 Task 01 v2 medallion）
 
-> 程式在 `task06_obsidian_embed_etl_v2/`，與現行 `task06_obsidian_embed_etl` 並存。改吃 Task 01 v2 的 `obsidian_note_metadata` 與 `archived-notes/` 乾淨層，向量寫入 **v2 專用 `obsidian_vectors_v2`**，與 v1 的 `obsidian_vectors_multimodal` 完全隔離，並新增 purge 消費端消費 Task 01 v2 的軟刪除訊號。
+> 程式在 `task06_obsidian_embed_etl_v2/`，與現行 `task06_obsidian_embed_etl` 並存。改吃 Task 01 v2 的 `obsidian_note_metadata` 與 `archived-notes/` 乾淨層，向量寫入 **v2 專用 `note_vectors_multimodal`**，與 v1 的 `obsidian_vectors_multimodal` 完全隔離，並新增 purge 消費端消費 Task 01 v2 的軟刪除訊號。
 
 ### 資料來源
 MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內文與圖片來源。
@@ -715,12 +715,12 @@ MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內�
 ### ETL 設計重點
 - **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
 - **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 帶 `raw_md_path` 血緣鍵。
-- **Load**：`load_vectors_incremental_v2()` 對每份筆記先 `delete_many({raw_md_path})` 再 `insert_many` 寫 `obsidian_vectors_v2`，並以 **`archived_md_md5_hash` 守衛的 CAS** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。
-- **Purge（消費軟刪除）**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，`delete_many({raw_md_path})` 清 `obsidian_vectors_v2` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
+- **Load**：`load_vectors_incremental_v2()` 對每份筆記先 `delete_many({raw_md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`，並以 **`archived_md_md5_hash` 守衛的 CAS** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。
+- **Purge（消費軟刪除）**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，`delete_many({raw_md_path})` 清 `note_vectors_multimodal` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
 
 ### MongoDB Collections
 
-**`obsidian_vectors_v2`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `raw_md_path`）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `raw_md_path`）
 ```json
 {
   "raw_md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
@@ -736,7 +736,7 @@ MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內�
   "embedding": [0.01, -0.02, "..."]
 }
 ```
-> `embedding` 長度 1536、已 L2 normalize。需在 Atlas Console 手動建 `obsidian_vectors_v2` 的 Vector Search index，維度 1536、similarity cosine。
+> `embedding` 長度 1536、已 L2 normalize。需在 Atlas Console 手動建 `note_vectors_multimodal` 的 Vector Search index，維度 1536、similarity cosine。
 
 ### 套件依賴
 ```
@@ -782,7 +782,7 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 | attachment 血緣 | 內嵌 `attached_images`，只帶 raw md5 | 內嵌 `attached_images`，帶 raw ＋ archived 兩組 path/md5 |
 | 向量化旗標 | `embedding_done` | `embedded_status` |
 | CAS 守衛欄位 | `file_md5_hash` | `archived_md_md5_hash` |
-| 向量 collection | `obsidian_vectors_multimodal` | `obsidian_vectors_v2`，與 v1 完全隔離 |
+| 向量 collection | `obsidian_vectors_multimodal` | `note_vectors_multimodal`，與 v1 完全隔離 |
 | 刪除→向量清理 | 靠獨立孤兒 chunk 清理 job | **purge 消費端**：軟刪除訊號驅動 `delete_many` 即時清 |
 | 失敗處理 | 檔略過、下輪重試 | 檔略過並 `mark_note_error(status=error)` 落地稽核 |
 

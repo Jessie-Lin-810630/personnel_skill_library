@@ -16,21 +16,21 @@
 - [x] 3.3 `t_*`：組 chunk 向量 doc，帶 `raw_md_path` 血緣鍵、chunk 內文與 archived 圖片路徑
 - [x] 3.4 unittest：chunk doc 帶 `raw_md_path`、圖片來源為 archived 路徑（mock embedding 呼叫）
 
-## 4. Load：寫 obsidian_vectors_v2 + CAS 翻旗標
+## 4. Load：寫 note_vectors_multimodal + CAS 翻旗標
 
-- [x] 4.1 `l_*`：對每份筆記先 `delete_many({raw_md_path})` 再 `insert_many` 寫入 `obsidian_vectors_v2`（先刪後插、冪等）
+- [x] 4.1 `l_*`：對每份筆記先 `delete_many({raw_md_path})` 再 `insert_many` 寫入 `note_vectors_multimodal`（先刪後插、冪等）
 - [x] 4.2 `l_*`：以 `archived_md_md5_hash` 守衛的 CAS 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`（條件 `{raw_md_path, embedded_status:false, archived_md_md5_hash:本次版本}`）
 - [x] 4.3 unittest：先刪後插冪等（chunk 數變少無孤兒）、CAS 命中翻旗標、CAS 未命中（md5 已變）不翻
 
 ## 5. Purge：消費軟刪除訊號
 
-- [x] 5.1 `l_*`：查 `status="deleted"` 且 `embedded_status=true` 的筆記，逐筆 `delete_many({raw_md_path})` 清 `obsidian_vectors_v2`（不動 metadata 文件與 archived 副本）
+- [x] 5.1 `l_*`：查 `status="deleted"` 且 `embedded_status=true` 的筆記，逐筆 `delete_many({raw_md_path})` 清 `note_vectors_multimodal`（不動 metadata 文件與 archived 副本）
 - [x] 5.2 `l_*`：清完把該筆記 `embedded_status` 翻回 `false`（不再被重複挑出）
 - [x] 5.3 unittest：被刪+已向量化→清向量並翻 false、已 purge（deleted+false）重跑冪等
 
 ## 6. 串接與收尾
 
 - [x] 6.1 `main.py`：串 E→T→L（gate → chunk+embed → 先刪後插+CAS）＋ purge，補 loguru 日誌與 env 檢查
-- [x] 6.2 於 Atlas Console 手動建 `obsidian_vectors_v2` Vector Search index（1536 維、cosine）—手動步驟，需 task01_v2 先產出 archived 資料
-- [x] 6.3 端到端本地實跑（embedding + 軟刪除後 purge）核對 `obsidian_vectors_v2` 與 `embedded_status`—待 task01_v2 8.2 落地後
+- [x] 6.2 於 Atlas Console 手動建 `note_vectors_multimodal` Vector Search index（1536 維、cosine）—手動步驟，需 task01_v2 先產出 archived 資料
+- [x] 6.3 端到端本地實跑（embedding + 軟刪除後 purge）核對 `note_vectors_multimodal` 與 `embedded_status`—待 task01_v2 8.2 落地後
 - [x] 6.4 執行 `poetry run python -m unittest discover -s tests` 全綠

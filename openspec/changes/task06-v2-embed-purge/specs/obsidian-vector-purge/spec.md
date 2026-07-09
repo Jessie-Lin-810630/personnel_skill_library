@@ -2,12 +2,12 @@
 
 ### Requirement: 消費軟刪除訊號清除對應向量
 
-系統 SHALL 挑出 `obsidian_note_metadata` 中 `status="deleted"` 且 `embedded_status=true` 的筆記（task01_v2 軟刪除且其向量仍存在者），對每筆以 `delete_many({raw_md_path})` 清除 `obsidian_vectors_v2` 中對應向量。purge 只動 `obsidian_vectors_v2`，MUST NOT 刪除 `obsidian_note_metadata` 文件或其 archived 副本。
+系統 SHALL 挑出 `obsidian_note_metadata` 中 `status="deleted"` 且 `embedded_status=true` 的筆記（task01_v2 軟刪除且其向量仍存在者），對每筆以 `delete_many({raw_md_path})` 清除 `note_vectors_multimodal` 中對應向量。purge 只動 `note_vectors_multimodal`，MUST NOT 刪除 `obsidian_note_metadata` 文件或其 archived 副本。
 
 #### Scenario: 已向量化的被刪筆記其向量被清
 
 - **WHEN** 一筆記 `status="deleted"` 且 `embedded_status=true`
-- **THEN** `obsidian_vectors_v2` 中該 `raw_md_path` 的所有 chunk 被刪除，該 metadata 文件與 archived 副本保留
+- **THEN** `note_vectors_multimodal` 中該 `raw_md_path` 的所有 chunk 被刪除，該 metadata 文件與 archived 副本保留
 
 ### Requirement: purge 後翻旗標且不重複挑出
 

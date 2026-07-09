@@ -1,7 +1,7 @@
 """task06 v2 入口：對 task01_v2 medallion 資料做增量 embedding 與軟刪除 purge。
 
 gate 讀 obsidian_note_metadata（status=archived AND embedded_status=false）→ 從 archived 層 chunk+embed →
-先刪後插 obsidian_vectors_v2、CAS 翻 embedded_status → purge 軟刪除筆記的向量。
+先刪後插 note_vectors_multimodal、CAS 翻 embedded_status → purge 軟刪除筆記的向量。
 
 Usage:
     poetry run python -m task06_obsidian_embed_etl_v2.main
@@ -30,7 +30,7 @@ def run_task06_v2():
 
     1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
     2. 從 obsidian_note_metadata 挑出待向量化的筆記，若沒有就只跑 purge 後結束。
-    3. 對待做筆記從 archived 層 chunk 與 embed，先刪後插進 obsidian_vectors_v2，並以 CAS 翻 embedded_status。
+    3. 對待做筆記從 archived 層 chunk 與 embed，先刪後插進 note_vectors_multimodal，並以 CAS 翻 embedded_status。
     4. 最後消費軟刪除訊號，清掉已被軟刪除筆記的向量。
     """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")

@@ -1,6 +1,6 @@
-"""把向量本體載入目的地 obsidian_vectors_v2，並消費軟刪除訊號 purge 對應向量。
+"""把向量本體載入目的地 note_vectors_multimodal，並消費軟刪除訊號 purge 對應向量。
 
-load_vectors_incremental_v2 對每份筆記先刪後插 obsidian_vectors_v2、以 archived_md_md5_hash 守衛的 CAS
+load_vectors_incremental_v2 對每份筆記先刪後插 note_vectors_multimodal、以 archived_md_md5_hash 守衛的 CAS
 翻 obsidian_note_metadata.embedded_status=true → purge_deleted_vectors 清 status=deleted 且已向量化者的
 向量後翻 embedded_status=false。
 
@@ -16,7 +16,7 @@ from pymongo import MongoClient
 from pymongo.database import Database
 
 NOTE_METADATA = "obsidian_note_metadata"
-VECTORS_V2 = "obsidian_vectors_v2"
+VECTORS_V2 = "note_vectors_multimodal"
 
 
 def get_db(mongo_uri: str, db_name: str):
@@ -38,7 +38,7 @@ def load_vectors_incremental_v2(
     vector_docs: list[dict],
     embedded_by_raw_md_path: dict[str, dict],
 ) -> None:
-    """把本次成功處理的每份筆記寫進 obsidian_vectors_v2，並以帶 md5 守衛的 CAS 翻 embedded_status。
+    """把本次成功處理的每份筆記寫進 note_vectors_multimodal，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
     1. 依 md_path（＝archived md 路徑）把 vector_docs 分組——向量表血緣欄為 md_path。
     2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重切後 chunk 數變少也不會殘留孤兒，
@@ -50,7 +50,7 @@ def load_vectors_incremental_v2(
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_v2 產出、待寫入 obsidian_vectors_v2 的 chunk 向量清單（血緣欄 md_path）。
+        vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單（血緣欄 md_path）。
         embedded_by_raw_md_path: 本次成功處理的 {raw_md_path: {"md_path": archived_md_path,
             "archived_md5": archived_md_md5_hash}}；key 為 metadata 主鍵、md_path 供向量先刪後插、md5 作 CAS 守衛。
     """
@@ -86,7 +86,7 @@ def load_vectors_incremental_v2(
             logger.warning(f"CAS 未命中（embedding 期間 archived_md_md5_hash 已變或已翻），留待下輪重做：{raw_md_path}")
 
     logger.success(
-        f"obsidian_vectors_v2 增量寫入完成 | 檔案: {n_files} | 新插入 chunks: {n_chunks} | "
+        f"note_vectors_multimodal 增量寫入完成 | 檔案: {n_files} | 新插入 chunks: {n_chunks} | "
         f"翻 embedded: {n_flipped} | CAS 未命中: {n_cas_miss}"
     )
 
@@ -95,7 +95,7 @@ def purge_deleted_vectors(db: Database) -> int:
     """從向量資料庫中移除「事實來源 (GCS 上) 已經被軟刪除」的資料。
 
     針對 collection obsidian_note_metadata 中顯示 status=deleted
-    且 embedded_status=true 的筆記所對應的、存放於 collection obsidian_vectors_v2 中向量，
+    且 embedded_status=true 的筆記所對應的、存放於 collection note_vectors_multimodal 中向量，
     然後再翻過 embedded_status=false。
 
     此函式不會去改、刪 collection obsidian_note_metadata 文件與 GCS 上物件。
@@ -126,5 +126,5 @@ def purge_deleted_vectors(db: Database) -> int:
         )
         n_purged += 1
 
-    logger.success(f"obsidian_vectors_v2 purge 完成 | 清除軟刪除筆記向量: {n_purged}")
+    logger.success(f"note_vectors_multimodal purge 完成 | 清除軟刪除筆記向量: {n_purged}")
     return n_purged

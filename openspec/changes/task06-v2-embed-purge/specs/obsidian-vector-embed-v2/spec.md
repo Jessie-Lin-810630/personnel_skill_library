@@ -25,7 +25,7 @@
 
 ### Requirement: 向量寫入 v2 專用 collection 並 per-note 先刪後插
 
-系統 SHALL 將 chunk 向量寫入 MongoDB collection `obsidian_vectors_v2`（與 v1 `obsidian_vectors_multimodal` 隔離），每筆 = 一個 chunk，且帶 `raw_md_path` 作為 note 血緣鍵。對本次處理的每份筆記，系統 SHALL **先 `delete_many({raw_md_path})` 再 `insert_many`**，確保重切後 chunk 數變動不留孤兒、且重跑冪等。
+系統 SHALL 將 chunk 向量寫入 MongoDB collection `note_vectors_multimodal`（與 v1 `obsidian_vectors_multimodal` 隔離），每筆 = 一個 chunk，且帶 `raw_md_path` 作為 note 血緣鍵。對本次處理的每份筆記，系統 SHALL **先 `delete_many({raw_md_path})` 再 `insert_many`**，確保重切後 chunk 數變動不留孤兒、且重跑冪等。
 
 #### Scenario: 先刪後插避免孤兒 chunk
 
@@ -35,7 +35,7 @@
 #### Scenario: v2 向量與 v1 隔離
 
 - **WHEN** v2 embedding 寫入完成
-- **THEN** 向量落在 `obsidian_vectors_v2`，`obsidian_vectors_multimodal`（v1）不受影響
+- **THEN** 向量落在 `note_vectors_multimodal`，`obsidian_vectors_multimodal`（v1）不受影響
 
 ### Requirement: 以 archived_md_md5_hash 守衛的 CAS 翻 embedded_status
 
