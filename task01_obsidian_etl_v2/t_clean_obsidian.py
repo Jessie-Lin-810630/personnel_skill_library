@@ -218,9 +218,13 @@ def _normalize_str_list(value) -> list[str]:
         正規化後的字串清單。
     """
     if isinstance(value, list):
-        return [str(v).strip() for v in value if str(v).strip()]
+        return [str(v).lower().replace("_", "-").replace("__", "-").strip() for v in value if str(v).strip()]
     if isinstance(value, str):
-        return [t.strip() for t in value.replace("[", "").replace("]", "").split(",") if t.strip()]
+        return [
+            t.lower().replace("_", "-").replace("__", "-").strip()
+            for t in value.replace("[", "").replace("]", "").split(",")
+            if t.strip()
+        ]
     return []
 
 
@@ -296,6 +300,7 @@ def build_note_document(blob: Blob, text: str, bucket_name: str, image_md5_index
     Returns:
         一份 note document 字典，供 Load 歸檔並 upsert。
     """
+    logger.info(f"下載 {Path(blob.name).name} 完成，開始清理...")
     post = frontmatter.loads(text)
     md_file_path = blob.name
     md_frontmatter = _extract_frontmatter(post, md_file_path)
