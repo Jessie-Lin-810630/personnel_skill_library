@@ -381,6 +381,9 @@ class EmptyInputTests(unittest.TestCase):
         self.assertEqual(summary["total_notes"], 0)
         self.assertEqual(summary["by_type"], {})
         self.assertEqual(summary["by_topic"], {})
+        self.assertEqual(summary["archived_notes"], 0)
+        self.assertEqual(summary["rejected_notes"], 0)
+        self.assertEqual(summary["by_tag_in_rejected_notes"], {})
 
 
 # --------------------------- Task 7.2: gold snapshot ---------------------------
@@ -394,13 +397,20 @@ class SummaryTests(unittest.TestCase):
                     "status": "archived",
                     "topic": "python",
                     "embedded_status": True,
-                    "archived_md_frontmatter": {"type": "daily-log"},
+                    "archived_md_frontmatter": {"type": "daily-log", "tags": ["etl", "gcs"]},
                 },
                 {
                     "status": "archived",
                     "topic": "database",
                     "embedded_status": False,
-                    "archived_md_frontmatter": {"type": "project"},
+                    "archived_md_frontmatter": {"type": "project", "tags": ["etl"]},
+                },
+                {
+                    "status": "review_closed",
+                    "review_result": "rejected",
+                    "topic": "ml",
+                    "embedded_status": False,
+                    "archived_md_frontmatter": {"type": "draft", "tags": ["wip"]},
                 },
                 {
                     "status": "deleted",
@@ -418,10 +428,23 @@ class SummaryTests(unittest.TestCase):
         )
 
         summary = l_load_to_mongodb.build_and_upsert_summary(db)
-        self.assertEqual(summary["total_notes"], 2)  # deleted / error 不計
+        # 全域統計涵蓋 archived + rejected，排除 deleted / error
+        self.assertEqual(summary["total_notes"], 3)
         self.assertEqual(summary["embedded_notes"], 1)
-        self.assertEqual(summary["by_type"], {"daily-log": 1, "project": 1})
-        self.assertEqual(summary["by_topic"], {"python": 1, "database": 1})
+        self.assertEqual(summary["by_type"], {"daily-log": 1, "project": 1, "draft": 1})
+        self.assertEqual(summary["by_topic"], {"python": 1, "database": 1, "ml": 1})
+
+        # archived 桶
+        self.assertEqual(summary["archived_notes"], 2)
+        self.assertEqual(summary["by_tag_in_archived_notes"], {"etl": 2, "gcs": 1})
+        self.assertEqual(summary["by_topic_in_archived_notes"], {"python": 1, "database": 1})
+        self.assertEqual(summary["by_type_in_archived_notes"], {"daily-log": 1, "project": 1})
+
+        # rejected 桶
+        self.assertEqual(summary["rejected_notes"], 1)
+        self.assertEqual(summary["by_tag_in_rejected_notes"], {"wip": 1})
+        self.assertEqual(summary["by_topic_in_rejected_notes"], {"ml": 1})
+        self.assertEqual(summary["by_type_in_rejected_notes"], {"draft": 1})
 
         l_load_to_mongodb.build_and_upsert_summary(db)  # 同日重跑
         self.assertEqual(len(db.collections[l_load_to_mongodb.NOTES_SUMMARY].docs), 1)
