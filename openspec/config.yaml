@@ -12,7 +12,7 @@ context: |
   - Web framework: Streamlit
   - Database: MongoDB Atlas（upsert-idempotent writes）
   - Vector search: MongoDB Atlas Vector Search（cosine similarity, dim=1536）
-  - Embedding model: OpenAI text-embedding-3-small
+  - Embedding model: Vertex AI gemini-embedding-2（multimodal, dim=1536, L2 normalized）
   - Cloud storage: GCP Cloud Storage（bucket: personal-vaults）
   - AI Agent: Google Vertex AI Gemini（Phase III）
   - Visualization: Plotly
@@ -31,8 +31,9 @@ context: |
   - task02: GitHub REST API → github_repos, github_summary
   - task03: LeetCode GraphQL + ccClub REST API → solved_problems_on_ccClub, solved_problems_on_leetcode, ccClub&leetcode_summary
   - task05: Google Sheets API → skill_scores_biotech, skill_scores_data_eng, skill_radar_summary
-  - task06: Obsidian .md → chunking → embedding → obsidian_vectors
-  - task07: OneNote HTML → Markdown（in progress）
+  - task06: Obsidian .md → chunking → embedding → note_vectors_multimodal
+  - task07: OneNote HTML → Markdown, medallion lazy-loading split（Bronze ETL + Silver/Gold on-demand services）→ GCS data lake onenote-vaults + MongoDB onenote_note_metadata
+  - task08: OneNote archived .md → chunking → multimodal embedding → note_vectors_multimodal
 
   Product language:
   - Write proposals and specs describing observable user-facing behavior and data contracts
