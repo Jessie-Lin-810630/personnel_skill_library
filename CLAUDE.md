@@ -103,7 +103,7 @@ Optional .env keys:
 | task02 | GitHub REST API | MongoDB：`github_repos`, `github_summary` |
 | task03 | LeetCode GraphQL API + ccClub REST API | MongoDB：`solved_problems_on_ccClub`, `solved_problems_on_leetcode`, `ccClub&leetcode_summary` |
 | task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
-| task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`obsidian_vectors`（Atlas Vector Search） |
+| task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`note_vectors_multimodal`（Atlas Vector Search） |
 | task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
 | task07（`task07_onenote_to_markdown_lazy_loading` + `task07_silver_service` + `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL（`task07_onenote_to_markdown_lazy_loading`）只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 歸檔/退件由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至 task08 |
 | task08（`task08_onenote_embed_etl`） | GCS `onenote-vaults/archived-notes/` 的歸檔 `.md`＋`_images/` → chunking → 多模態 embedding（`gemini-embedding-2`，1536 維、L2 normalize） | MongoDB：`note_vectors_multimodal`（與 task01/task06 共用同一張向量表）。gate 讀 `onenote_note_metadata`（`status=archived AND embedded_status=false`）；向量 doc 血緣欄 `md_path`=`md_archive_path`、`image_paths`=archived 圖片；以 `md_md5_hash` 守衛 CAS 翻 `embedded_status`；OneNote 無軟刪除故不含 purge |
@@ -132,8 +132,8 @@ Optional .env keys:
 
 ### task06 向量搜尋
 
-- Embedding model：`text-embedding-3-small`（OpenAI，維度 1536）
-- Vector index name：`obsidian_vectors_index`，在 MongoDB Atlas Console 手動建立
+- Embedding model：`gemini-embedding-2`（Vertex AI，多模態，維度 1536、L2 normalize）
+- Vector index name：`obsidian_vectors_index2`，在 MongoDB Atlas Console 手動建立
 - 查詢方式：`$vectorSearch` stage，similarity = cosine
 
 ### GCS 整合
