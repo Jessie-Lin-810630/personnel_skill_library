@@ -29,4 +29,4 @@
 - [x] 5.2 端到端本地實跑核對 `note_vectors_multimodal` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（已實跑；並修正 CAS 同步蓋 `updated_at`）
 - [x] 5.3 `poetry run python -m unittest discover -s tests` 全綠
 - [x] 5.4 CLAUDE.md 的 ETL 表新增 task08 一列（來源 `onenote-vaults/archived-notes/`、目的地 `note_vectors_multimodal`）
-- [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `note_vectors_multimodal` 血緣欄；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存
+- [x] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `note_vectors_multimodal` 血緣欄（RAG 尚未上線，無過渡期兩欄並存，直接套 `md_path`）
