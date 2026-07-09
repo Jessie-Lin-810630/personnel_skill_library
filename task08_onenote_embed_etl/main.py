@@ -1,7 +1,7 @@
-"""task08 入口：對 task07 歸檔的 OneNote 筆記做增量多模態 embedding，寫入共用 obsidian_vectors_v2。
+"""task08 入口：對 task07 歸檔的 OneNote 筆記做增量多模態 embedding，寫入共用 note_vectors_multimodal。
 
 gate 讀 onenote_note_metadata（status=archived AND embedded_status=false）→ 從 archived 層 chunk+embed →
-先刪後插 obsidian_vectors_v2（血緣欄 md_path=md_archive_path）、以 md_md5_hash 守衛 CAS 翻 embedded_status。
+先刪後插 note_vectors_multimodal（血緣欄 md_path=md_archive_path）、以 md_md5_hash 守衛 CAS 翻 embedded_status。
 OneNote 無軟刪除，故不含 purge。
 
 Usage:
@@ -30,11 +30,11 @@ BUCKET_NAME = "onenote-vaults"
 
 
 def run_task08():
-    """task08 入口，對 task07 的 archived OneNote 筆記做增量 embedding，寫入共用 obsidian_vectors_v2。
+    """task08 入口，對 task07 的 archived OneNote 筆記做增量 embedding，寫入共用 note_vectors_multimodal。
 
     1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
     2. 從 onenote_note_metadata 挑出待向量化的版本，若沒有就直接結束。
-    3. 對待做版本從 archived 層 chunk 與 embed，先刪後插進 obsidian_vectors_v2，並以 CAS 翻 embedded_status。
+    3. 對待做版本從 archived 層 chunk 與 embed，先刪後插進 note_vectors_multimodal，並以 CAS 翻 embedded_status。
     """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")

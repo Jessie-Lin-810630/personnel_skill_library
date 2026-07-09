@@ -1,6 +1,6 @@
-"""把向量本體載入目的地 obsidian_vectors_v2（與 task01/task06 共用），並以 CAS 翻 embedded_status。
+"""把向量本體載入目的地 note_vectors_multimodal（與 task01/task06 共用），並以 CAS 翻 embedded_status。
 
-load_vectors_incremental_onenote 對每份筆記先刪後插 obsidian_vectors_v2（以 md_path 為鍵）、
+load_vectors_incremental_onenote 對每份筆記先刪後插 note_vectors_multimodal（以 md_path 為鍵）、
 以 md_md5_hash 守衛的 CAS 翻 onenote_note_metadata.embedded_status=true。
 OneNote 無軟刪除（版本以 review_closed 退役），故不含 purge 端。
 
@@ -16,7 +16,7 @@ from pymongo import MongoClient
 from pymongo.database import Database
 
 NOTE_METADATA = "onenote_note_metadata"
-VECTORS_V2 = "obsidian_vectors_v2"
+VECTORS_V2 = "note_vectors_multimodal"
 
 
 def get_db(mongo_uri: str, db_name: str):
@@ -38,7 +38,7 @@ def load_vectors_incremental_onenote(
     vector_docs: list[dict],
     embedded_md5_by_md_path: dict[str, str],
 ) -> None:
-    """把本次成功處理的每份 onenote 筆記寫進 obsidian_vectors_v2，並以帶 md5 守衛的 CAS 翻 embedded_status。
+    """把本次成功處理的每份 onenote 筆記寫進 note_vectors_multimodal，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
     1. 依 md_path（= md_archive_path）把 vector_docs 分組。
     2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重歸檔重切後 chunk 數變少也不會殘留孤兒，
@@ -50,7 +50,7 @@ def load_vectors_incremental_onenote(
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_onenote 產出、待寫入 obsidian_vectors_v2 的 chunk 向量清單。
+        vector_docs: t_chunk_and_embed_onenote 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單。
         embedded_md5_by_md_path: 本次成功處理的 md_archive_path 對到其 md_md5_hash，作 CAS 守衛值。
     """
     vectors = db[VECTORS_V2]
@@ -85,6 +85,6 @@ def load_vectors_incremental_onenote(
             logger.warning(f"CAS 未命中（embedding 期間 md_md5_hash 已變或已翻），留待下輪重做：{md_path}")
 
     logger.success(
-        f"obsidian_vectors_v2 增量寫入完成（onenote）| 檔案: {n_files} | 新插入 chunks: {n_chunks} | "
+        f"note_vectors_multimodal 增量寫入完成（onenote）| 檔案: {n_files} | 新插入 chunks: {n_chunks} | "
         f"翻 embedded: {n_flipped} | CAS 未命中: {n_cas_miss}"
     )

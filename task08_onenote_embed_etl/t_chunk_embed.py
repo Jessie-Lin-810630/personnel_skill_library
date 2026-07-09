@@ -264,7 +264,7 @@ def t_chunk_and_embed_onenote(
     """串接 fetch → chunk → embed，產出 vector docs 與 {md_archive_path: 本次 md_md5_hash}。
 
     回傳 (all_vector_docs, embedded_md5_by_md_path)：
-      - all_vector_docs：可寫入 obsidian_vectors_v2 的 list[dict]，每筆帶 md_path（= md_archive_path），
+      - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆帶 md_path（= md_archive_path），
         作為與 collection onenote_note_metadata 的數據血緣。
       - embedded_md5_by_md_path：本次成功處理（含切塊為空）的 {md_archive_path: md_md5_hash}，
         供 load 層做「先刪後插 + CAS 翻 embedded_status」只對成功的檔翻 done，

@@ -104,7 +104,7 @@ class ChunkAndEmbedTests(unittest.TestCase):
         self.assertEqual(md5map, {note["archived_md_path"]: "MD5"})
         self.assertTrue(docs)
         d = docs[0]
-        # 向量血緣欄 md_path（obsidian_vectors_v2 欄位）存 C3 的 archived_md_path 值
+        # 向量血緣欄 md_path（note_vectors_multimodal 欄位）存 C3 的 archived_md_path 值
         self.assertEqual(d["md_path"], note["archived_md_path"])
         self.assertEqual(d["file_name"], "python-note")
         self.assertEqual(d["tags"], ["python"])
@@ -137,7 +137,7 @@ class ChunkAndEmbedTests(unittest.TestCase):
 class LoadTests(unittest.TestCase):
     def _db(self):
         vectors, notes = MagicMock(), MagicMock()
-        return {"obsidian_vectors_v2": vectors, "onenote_note_metadata": notes}, vectors, notes
+        return {"note_vectors_multimodal": vectors, "onenote_note_metadata": notes}, vectors, notes
 
     def test_delete_before_insert_and_cas_flip(self):
         db, vectors, notes = self._db()
