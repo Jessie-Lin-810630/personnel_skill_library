@@ -396,7 +396,8 @@ poetry run python -m unittest discover -s tests
 
 **後續待開發**
 - [x] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
-- [x] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path`。回到 `dashboard-ui` 分支上開發使用頁面。
+- [x] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path`。
+- [ ] 回到 `dashboard-ui` 分支上開發使用頁面。
 - [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
 
 ---
