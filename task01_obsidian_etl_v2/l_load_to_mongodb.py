@@ -13,6 +13,7 @@ Required .env keys:
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import frontmatter
 from google.cloud.storage import Bucket
@@ -351,3 +352,168 @@ def build_and_upsert_summary(db: Database) -> dict:
     db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": summary}, upsert=True)
     logger.success(f"舊表 obsidian_summary 快照也已更新，快照日期：{today}")
     return summary
+
+
+def build_summary(
+    db: Database, snapshot_which_coll: Literal["obsidian_note_metadata", "onenote_note_metadata"]
+) -> dict:
+    """對 obsidian_note_metadata 或 onenote_note_metadata 的現況盤出當日快照的 docs。
+
+    1. 只統計 status 為 archived 的筆記，把 deleted 與 error 排除在進度之外。
+    2. 逐筆累加各 note_type 與各 topic 的計數、總筆數，以及已向量化的筆數。
+
+    **NOTE:**
+        目前尚在執行新舊表雙寫，舊表名稱 Obsidian_summary，待舊表的舊資料遷移到 notes_summary
+        且不影響前端呈現後，再讓前端去讀 notes_summary，確定穩定能讀取一段時間後，再刪舊表。
+
+    Args:
+        db: pymongo Database 物件。
+        snapshot_which_coll: 針對哪個 collection 做快照。
+
+    Returns:
+        本次寫入的快照字典，含全域的 embedded_notes，以及 archived 桶（archived_notes、
+        by_tag_in_archived_notes、by_topic_in_archived_notes、by_type_in_archived_notes）
+        與 rejected 桶（rejected_notes、by_tag_in_rejected_notes、
+        by_topic_in_rejected_notes、by_type_in_rejected_notes）。
+    """
+    collection = db[snapshot_which_coll]
+    embedded_notes = 0
+
+    # archived / rejected 兩桶，各自累計 count 與 tag／topic／type 分佈
+    def _new_bucket() -> dict:
+        return {"count": 0, "by_tag": defaultdict(int), "by_topic": defaultdict(int), "by_type": defaultdict(int)}
+
+    archived = _new_bucket()
+    rejected = _new_bucket()
+
+    query = {"$or": [{"status": "archived"}, {"status": "review_closed", "review_result": "rejected"}]}
+    if snapshot_which_coll == "obsidian_note_metadata":
+        frontmatter_column_name = "archived_md_frontmatter"
+    elif snapshot_which_coll == "onenote_note_metadata":
+        frontmatter_column_name = "md_frontmatter"
+    else:
+        logger.warning("快照來源指定錯誤，跳過快照，請檢查 collection 名稱是否傳入正確。")
+        return
+
+    projection = {
+        "status": 1,
+        "review_result": 1,
+        "topic": 1,
+        "embedded_status": 1,
+        f"{frontmatter_column_name}.type": 1,
+        f"{frontmatter_column_name}.tags": 1,
+    }
+
+    for doc in collection.find(query, projection):
+        status = doc.get("status")
+        is_archived = status == "archived"
+        is_rejected = status == "review_closed" and doc.get("review_result") == "rejected"
+        if not (is_archived or is_rejected):  # 排除 deleted / error / 尚未定案的 review
+            continue
+
+        meta = doc.get(frontmatter_column_name, {})
+        note_type = meta.get("type", "unknown")
+        topic = doc.get("topic", "other")
+
+        if doc.get("embedded_status"):
+            embedded_notes += 1
+
+        bucket = archived if is_archived else rejected
+        bucket["count"] += 1
+        bucket["by_type"][note_type] += 1
+        bucket["by_topic"][topic] += 1
+        for tag in meta.get("tags", []):
+            bucket["by_tag"][tag] += 1
+
+    summary = {
+        "snapshot_source": snapshot_which_coll,
+        "summary": {
+            "embedded_notes": embedded_notes,
+            "archived_notes": archived["count"],
+            "by_tag_in_archived_notes": archived["by_tag"],
+            "by_topic_in_archived_notes": archived["by_topic"],
+            "by_type_in_archived_notes": archived["by_type"],
+            "rejected_notes": rejected["count"],
+            "by_tag_in_rejected_notes": rejected["by_tag"],
+            "by_topic_in_rejected_notes": rejected["by_topic"],
+            "by_type_in_rejected_notes": rejected["by_type"],
+        },
+    }
+    return summary
+
+
+def upsert_summary(db: Database, summary: list[dict[str, str | dict[str, int | defaultdict]]]) -> None:
+    """將 obsidian_note_metadata 與 onenote_note_metadata 當日快照 doc (字典型別) 存入快照資料表。
+
+    1. 只統計 status 為 archived 的筆記，把 deleted 與 error 排除在進度之外。
+    2. 逐筆累加各 note_type 與各 topic 的計數、總筆數，以及已向量化的筆數。
+    3. 以截到日的 snapshot_date 為鍵 upsert，同一天重跑會覆蓋成最新值。
+
+    **NOTE:**
+        關於快照資料表，有兩種，因為目前尚在執行新舊表雙寫，舊表名稱 Obsidian_summary，
+        待舊表的舊資料遷移到新表 notes_summary，且不影響前端呈現後，再讓前端去讀 notes_summary，
+        確定穩定能讀取一段時間後，再刪舊表。
+
+    Args:
+        db: pymongo Database 物件。
+        summary: build_summary 回傳的的預計寫入 notes_summary 的資料。
+
+    Returns:
+        None
+    """
+    all_summary = {
+        "embedded_notes": 0,
+        "archived_notes": 0,
+        "rejected_notes": 0,
+        "by_tag_in_archived_notes": defaultdict(int),
+        "by_topic_in_archived_notes": defaultdict(int),
+        "by_type_in_archived_notes": defaultdict(int),
+        "by_tag_in_rejected_notes": defaultdict(int),
+        "by_topic_in_rejected_notes": defaultdict(int),
+        "by_type_in_rejected_notes": defaultdict(int),
+    }
+
+    for s in summary:
+        if s["snapshot_source"] in ("onenote_note_metadata", "obsidian_note_metadata"):
+            for k, v in s["summary"].items():
+                if isinstance(v, defaultdict):
+                    for k2, v2 in v.items():
+                        all_summary[k][k2] += v2
+                elif isinstance(v, int):
+                    all_summary[k] += v
+
+    by_topic = defaultdict(int)
+    for d in (all_summary["by_topic_in_archived_notes"], all_summary["by_topic_in_rejected_notes"]):
+        for k, v in d.items():
+            by_topic[k] += v
+
+    by_type = defaultdict(int)
+    for d in (all_summary["by_type_in_archived_notes"], all_summary["by_type_in_rejected_notes"]):
+        for k, v in d.items():
+            by_type[k] += v
+
+    final_summary = {
+        "by_topic": dict(by_type),
+        "by_type": dict(by_topic),
+        "total_notes": all_summary["rejected_notes"] + all_summary["archived_notes"],
+        "embedded_notes": all_summary["embedded_notes"],
+        "archived_notes": all_summary["archived_notes"],
+        "by_tag_in_archived_notes": dict(all_summary["by_tag_in_archived_notes"]),
+        "by_topic_in_archived_notes": dict(all_summary["by_topic_in_archived_notes"]),
+        "by_type_in_archived_notes": dict(all_summary["by_type_in_archived_notes"]),
+        "rejected_notes": all_summary["rejected_notes"],
+        "by_tag_in_rejected_notes": dict(all_summary["by_tag_in_rejected_notes"]),
+        "by_topic_in_rejected_notes": dict(all_summary["by_topic_in_rejected_notes"]),
+        "by_type_in_rejected_notes": dict(all_summary["by_type_in_rejected_notes"]),
+    }
+
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    db[NOTES_SUMMARY].update_one({"snapshot_date": today}, {"$set": final_summary}, upsert=True)
+
+    logger.success(f"notes_summary 快照已更新，快照日期：{today}")
+    # 舊表雙寫，待舊表的舊資料遷移到 db[NOTES_SUMMARY] 且不影響前端呈現後，
+    # 再讓前端去讀 db[NOTES_SUMMARY]，確定穩定能讀取一段時間後，
+    # 再刪舊表。
+    db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": final_summary}, upsert=True)
+    logger.success(f"舊表 obsidian_summary 快照也已更新，快照日期：{today}")
+    return None

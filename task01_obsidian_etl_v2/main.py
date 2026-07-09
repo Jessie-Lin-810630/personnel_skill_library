@@ -31,11 +31,12 @@ from .e_scan_obsidian import (
 )
 from .l_load_to_mongodb import (
     archive_note,
-    build_and_upsert_summary,
+    build_summary,
     get_db,
     mark_note_error,
     soft_delete_missing,
     upsert_note,
+    upsert_summary,
 )
 from .t_clean_obsidian import build_note_document
 
@@ -93,7 +94,7 @@ def run_task01_v2():
     n_deleted = soft_delete_missing(db, present_raw_paths)
 
     # Gold - Load: 每日快照
-    build_and_upsert_summary(db)
+    upsert_summary(db, [build_summary(db, "obsidian_note_metadata"), build_summary(db, "onenote_note_metadata")])
 
     n_skipped = len(md_blobs) - len(changed_blobs)
     logger.success(
