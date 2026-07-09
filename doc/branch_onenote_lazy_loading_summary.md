@@ -305,10 +305,8 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 | 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)`（非 wiki-link），以 basename 對上 `attached_images[].archived_image_path` |
 | embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize（逐 chunk 多模態） |
 | 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
-| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋蓋 `embedded_at` |
+| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
 | purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
-
-> **跨分支待辦**：`note_vectors_multimodal` 過渡期 task06_v2 仍寫 `raw_md_path`、task08 寫 `md_path`（值皆為 archived 路徑語意），兩欄暫並存；task06_v2 的 `raw_md_path`→`md_path` 收斂由另一分支處理。`archived_md_path`（完整 gs:// URI，跨 bucket 天然唯一）即向量表與兩張 metadata 的 join 鍵，不另設 source 判別欄。
 
 ---
 
@@ -397,10 +395,10 @@ poetry run python -m unittest discover -s tests
 - [x] Unit tests 全套 **154 個測試全數通過**
 
 **後續待開發**
-- [ ] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
-- [ ] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path` 收斂；RAG 檢索端知悉過渡期兩欄並存
+- [x] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
+- [x] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path`。回到 `dashboard-ui` 分支上開發使用頁面。
 - [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-08 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
+*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-09 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
