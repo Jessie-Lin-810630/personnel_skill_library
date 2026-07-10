@@ -1,7 +1,7 @@
 """負責把資料本體載入目的地：archived-notes 歸檔（GCS）與 obsidian_note_metadata/notes_summary（MongoDB）。
 
 archive_note 把清洗後 .md 與圖片 copy 到 archived-notes → upsert_note 以 raw_md_path 為鍵冪等寫入 →
-soft_delete_missing 對消失的 raw 標 deleted → build_and_upsert_summary 對現況做每日快照。
+soft_delete_missing 對消失的 raw 標 deleted → build_summary 與 upsert_summary 對現況做每日快照。
 
 CDC 的既有 md5 讀取（get_existing_md5_map）屬 ingestion 輔助、不寫入，歸 e_scan_obsidian。
 
@@ -493,8 +493,6 @@ def upsert_summary(db: Database, summary: list[dict[str, str | dict[str, int | d
             by_type[k] += v
 
     final_summary = {
-        "by_topic": dict(by_type),
-        "by_type": dict(by_topic),
         "total_notes": all_summary["rejected_notes"] + all_summary["archived_notes"],
         "embedded_notes": all_summary["embedded_notes"],
         "archived_notes": all_summary["archived_notes"],
@@ -514,6 +512,11 @@ def upsert_summary(db: Database, summary: list[dict[str, str | dict[str, int | d
     # 舊表雙寫，待舊表的舊資料遷移到 db[NOTES_SUMMARY] 且不影響前端呈現後，
     # 再讓前端去讀 db[NOTES_SUMMARY]，確定穩定能讀取一段時間後，
     # 再刪舊表。
-    db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": final_summary}, upsert=True)
+    final_summary_old = {
+        "by_topic": dict(by_type),
+        "by_type": dict(by_topic),
+        "total_notes": all_summary["rejected_notes"] + all_summary["archived_notes"],
+    }
+    db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": final_summary_old}, upsert=True)
     logger.success(f"舊表 obsidian_summary 快照也已更新，快照日期：{today}")
     return None
