@@ -26,14 +26,15 @@ context: |
   - l_*.py — Load
   - main.py — orchestrates E → T → L
 
-  ETL tasks and their MongoDB collections:
-  - task01: Obsidian .md from GCS → obsidian_notes, obsidian_summary
-  - task02: GitHub REST API → github_repos, github_summary
-  - task03: LeetCode GraphQL + ccClub REST API → solved_problems_on_ccClub, solved_problems_on_leetcode, ccClub&leetcode_summary
-  - task05: Google Sheets API → skill_scores_biotech, skill_scores_data_eng, skill_radar_summary
-  - task06: Obsidian .md → chunking → embedding → note_vectors_multimodal
-  - task07: OneNote HTML → Markdown, medallion lazy-loading split（Bronze ETL + Silver/Gold on-demand services）→ GCS data lake onenote-vaults + MongoDB onenote_note_metadata
-  - task08: OneNote archived .md → chunking → multimodal embedding → note_vectors_multimodal
+  ETL tasks and their MongoDB collections (canonical v2 / lazy-loading versions; v1 retired):
+  - task01 (task01_obsidian_etl_v2): Obsidian raw-notes/ .md from GCS (medallion, Object Versioning) → CDC gate → archived-notes/ → obsidian_note_metadata, notes_summary; dev branch feature/etl-pipeline
+  - task02: GitHub REST API → github_repos, github_summary; dev branch feature/etl-pipeline
+  - task03: LeetCode GraphQL + ccClub REST API → solved_problems_on_ccClub, solved_problems_on_leetcode, ccClub&leetcode_summary; dev branch feature/etl-pipeline
+  - task05: Google Sheets API → skill_scores_biotech, skill_scores_data_eng, skill_radar_summary; dev branch feature/etl-pipeline
+  - task06 (task06_obsidian_embed_etl_v2): Obsidian archived-notes/ .md → chunking → multimodal embedding → note_vectors_multimodal (md_path lineage); dev branch feature/etl-pipeline
+  - task07 (lazy_loading three services): OneNote HTML → Markdown, medallion lazy-loading split (Bronze ETL + Silver/Gold on-demand services) → GCS data lake onenote-vaults + onenote_note_metadata; Bronze on feature/html-to-markdown, Silver/Gold finalized on feature/dashboard-ui
+  - task08: OneNote archived .md → chunking → multimodal embedding → note_vectors_multimodal (md_path lineage, shared with task06); dev branch feature/html-to-markdown
+  # retired v1: task01_obsidian_etl (obsidian_notes/obsidian_summary), task06_obsidian_embed_etl, task07_onenote_to_markdown (local-disk, eager per-page LLM)
 
   Product language:
   - Write proposals and specs describing observable user-facing behavior and data contracts
@@ -55,4 +56,4 @@ rules:
     - Prefer MongoDB upsert over insert-or-update logic
     - Use service account JSON files under env/ for GCP auth; never embed credentials in code
     - Dashboard pages read from MongoDB only — no direct ETL calls from UI code
-    - Vector search uses $vectorSearch aggregation stage with the obsidian_vectors_index index
+    - Vector search uses $vectorSearch aggregation stage on note_vectors_multimodal with the obsidian_vectors_index2 index
