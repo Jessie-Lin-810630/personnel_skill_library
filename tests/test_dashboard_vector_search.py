@@ -1,195 +1,185 @@
-import importlib.util
+"""vector_search 測試：query 向量化 + $vectorSearch pipeline 組裝（v2）。
+
+以 Vertex AI gemini-embedding-2 為 embedding model、note_vectors_multimodal 為集合、
+血緣欄 md_path。_get_embed_client / _get_db 皆 mock，不打真實 API / DB。
+"""
+
+import math
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
+# Option A：把 dashboard_ui/ 加進 path，讓模組的裸 import 如 app 實際跑法般解析
+sys.path.insert(0, str(PROJECT_ROOT / "dashboard_ui"))
 
-# Satisfy `from ..utils.interact_with_mongodb import get_db_altas` before loading module
-sys.modules.setdefault(
-    "dashboard_ui",
-    MagicMock(__path__=[str(PROJECT_ROOT / "dashboard_ui")], __name__="dashboard_ui"),
-)
-sys.modules.setdefault(
-    "dashboard_ui.utils",
-    MagicMock(__path__=[str(PROJECT_ROOT / "dashboard_ui" / "utils")], __name__="dashboard_ui.utils"),
-)
-sys.modules.setdefault("dashboard_ui.utils.interact_with_mongodb", MagicMock())
-sys.modules.setdefault(
-    "dashboard_ui.agent_tools",
-    MagicMock(
-        __path__=[str(PROJECT_ROOT / "dashboard_ui" / "agent_tools")],
-        __name__="dashboard_ui.agent_tools",
-    ),
-)
+from agent_tools import query_with_vector_search as vs_mod
+from agent_tools.types_and_constants import EmbeddingModel, NoteCollections
 
-_spec = importlib.util.spec_from_file_location(
-    "dashboard_ui.agent_tools.query_with_vector_search",
-    str(PROJECT_ROOT / "dashboard_ui" / "agent_tools" / "query_with_vector_search.py"),
-)
-vs_mod = importlib.util.module_from_spec(_spec)
-vs_mod.__package__ = "dashboard_ui.agent_tools"
-sys.modules["dashboard_ui.agent_tools.query_with_vector_search"] = vs_mod
-_spec.loader.exec_module(vs_mod)
+# ── NormalizeTests ────────────────────────────────────────────────────────────
+
+
+class NormalizeTests(unittest.TestCase):
+    def test_zero_vector_returned_as_is(self):
+        self.assertEqual(vs_mod._normalize([0.0, 0.0]), [0.0, 0.0])
+
+    def test_empty_vector_returned_as_is(self):
+        self.assertEqual(vs_mod._normalize([]), [])
+
+    def test_result_is_unit_length(self):
+        v = vs_mod._normalize([3.0, 4.0])
+        self.assertEqual(v, [0.6, 0.8])
+        self.assertAlmostEqual(math.sqrt(sum(x * x for x in v)), 1.0)
 
 
 # ── VectorSearchPipelineTests ─────────────────────────────────────────────────
 
-class VectorSearchPipelineTests(unittest.TestCase):
 
-    FAKE_VECTOR = [float(i) / 1536 for i in range(1536)]  # deterministic 1536-dim vector
+class VectorSearchPipelineTests(unittest.TestCase):
+    FAKE_RAW = [3.0, 4.0]  # → _normalize → [0.6, 0.8]
 
     def setUp(self):
         self.mock_collection = MagicMock()
         self.mock_collection.aggregate.return_value = []
-        vs_mod._get_db = lambda: {"obsidian_vectors": self.mock_collection}
+        vs_mod._get_db = lambda: {vs_mod.VECTOR_COLLECTION: self.mock_collection}
 
-        # Mock _get_openai_client so no real API key is needed
-        self._client_patcher = patch.object(vs_mod, "_get_openai_client")
-        mock_get_client = self._client_patcher.start()
-        self.mock_openai_client = MagicMock()
-        self.mock_openai_client.embeddings.create.return_value.data = [
-            MagicMock(embedding=self.FAKE_VECTOR)
-        ]
-        mock_get_client.return_value = self.mock_openai_client
+        self.mock_embed_client = MagicMock()
+        self.mock_embed_client.models.embed_content.return_value = SimpleNamespace(
+            embeddings=[SimpleNamespace(values=list(self.FAKE_RAW))]
+        )
+        self._patcher = patch.object(vs_mod, "_get_embed_client", return_value=self.mock_embed_client)
+        self._patcher.start()
 
     def tearDown(self):
-        self._client_patcher.stop()
+        self._patcher.stop()
 
-    def _call_and_get_pipeline(self, **kwargs):
-        """Run vector_search and return the pipeline passed to aggregate()."""
+    def _pipeline(self, **kwargs):
         vs_mod.vector_search("test query", **kwargs)
         return self.mock_collection.aggregate.call_args[0][0]
 
-    # ── OpenAI embedding ──────────────────────────────────────────────────────
+    @property
+    def _expected_vector(self):
+        return vs_mod._normalize(list(self.FAKE_RAW))
 
-    def test_openai_embedding_called_with_query_text_and_correct_model(self):
+    # ── embedding ─────────────────────────────────────────────────────────────
+
+    def test_embed_uses_gemini_model_and_dim(self):
         vs_mod.vector_search("找尋PLC知識")
-        self.mock_openai_client.embeddings.create.assert_called_once_with(
-            model="text-embedding-3-small",
-            input=["找尋PLC知識"],
-            encoding_format="float",
-        )
+        kwargs = self.mock_embed_client.models.embed_content.call_args.kwargs
+        self.assertEqual(kwargs["model"], EmbeddingModel.MODEL)
+        self.assertEqual(kwargs["config"].output_dimensionality, EmbeddingModel.DIM)
 
-    # ── Pipeline structure ────────────────────────────────────────────────────
+    def test_query_vector_is_l2_normalized_embedding(self):
+        pipeline = self._pipeline()
+        self.assertEqual(pipeline[0]["$vectorSearch"]["queryVector"], self._expected_vector)
 
-    def test_pipeline_contains_exactly_two_stages(self):
-        pipeline = self._call_and_get_pipeline()
+    def test_uses_note_vectors_multimodal_collection(self):
+        captured = {}
+
+        class _DB:
+            def __getitem__(self, name):
+                captured["name"] = name
+                return MagicMock(aggregate=MagicMock(return_value=[]))
+
+        vs_mod._get_db = lambda: _DB()
+        vs_mod.vector_search("q")
+        self.assertEqual(captured["name"], NoteCollections.VECTOR)
+
+    # ── pipeline structure ────────────────────────────────────────────────────
+
+    def test_pipeline_has_two_stages(self):
+        pipeline = self._pipeline()
         self.assertEqual(len(pipeline), 2)
-
-    def test_first_stage_is_vectorsearch(self):
-        pipeline = self._call_and_get_pipeline()
         self.assertIn("$vectorSearch", pipeline[0])
-
-    def test_second_stage_is_project(self):
-        pipeline = self._call_and_get_pipeline()
         self.assertIn("$project", pipeline[1])
 
     # ── $vectorSearch stage ───────────────────────────────────────────────────
 
-    def test_vectorsearch_stage_uses_correct_index_name(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertEqual(pipeline[0]["$vectorSearch"]["index"], "obsidian_vectors_index")
+    def test_vectorsearch_uses_index2(self):
+        pipeline = self._pipeline()
+        self.assertEqual(pipeline[0]["$vectorSearch"]["index"], EmbeddingModel.VECTOR_INDEX)
 
-    def test_vectorsearch_stage_path_targets_embedding_field(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertEqual(pipeline[0]["$vectorSearch"]["path"], "embedding")
+    def test_vectorsearch_path_is_embedding(self):
+        self.assertEqual(self._pipeline()[0]["$vectorSearch"]["path"], "embedding")
 
-    def test_vectorsearch_stage_query_vector_matches_openai_output(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertEqual(pipeline[0]["$vectorSearch"]["queryVector"], self.FAKE_VECTOR)
+    def test_limit_equals_top_k(self):
+        self.assertEqual(self._pipeline(top_k=7)[0]["$vectorSearch"]["limit"], 7)
 
-    def test_vectorsearch_stage_num_candidates_is_10x_top_k(self):
-        pipeline = self._call_and_get_pipeline(top_k=5)
-        self.assertEqual(pipeline[0]["$vectorSearch"]["numCandidates"], 50)
+    def test_num_candidates_is_10x_top_k(self):
+        self.assertEqual(self._pipeline(top_k=5)[0]["$vectorSearch"]["numCandidates"], 50)
 
-    def test_vectorsearch_stage_limit_equals_top_k(self):
-        pipeline = self._call_and_get_pipeline(top_k=7)
-        self.assertEqual(pipeline[0]["$vectorSearch"]["limit"], 7)
+    def test_num_candidates_capped_at_10000(self):
+        self.assertEqual(self._pipeline(top_k=2000)[0]["$vectorSearch"]["numCandidates"], 10_000)
 
     # ── filter conditions ─────────────────────────────────────────────────────
 
-    def test_no_filter_key_when_no_filter_args_provided(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertNotIn("filter", pipeline[0]["$vectorSearch"])
+    def test_no_filter_key_when_no_args(self):
+        self.assertNotIn("filter", self._pipeline()[0]["$vectorSearch"])
 
-    def test_filter_tags_adds_tags_filter_to_vectorsearch_stage(self):
-        pipeline = self._call_and_get_pipeline(filter_tags="MySQL")
-        vs_filter = pipeline[0]["$vectorSearch"]["filter"]
-        self.assertEqual(vs_filter["tags"], "MySQL")
+    def test_filter_tags_wrapped_in_in(self):
+        vs_filter = self._pipeline(filter_tags=["MySQL"])[0]["$vectorSearch"]["filter"]
+        self.assertEqual(vs_filter["tags"], {"$in": ["MySQL"]})
         self.assertNotIn("note_type", vs_filter)
+        self.assertNotIn("md_path", vs_filter)
 
-    def test_filter_note_type_adds_note_type_filter_to_vectorsearch_stage(self):
-        pipeline = self._call_and_get_pipeline(filter_note_type="knowledge_summary")
-        vs_filter = pipeline[0]["$vectorSearch"]["filter"]
+    def test_filter_note_type_is_plain_value(self):
+        vs_filter = self._pipeline(filter_note_type="knowledge_summary")[0]["$vectorSearch"]["filter"]
         self.assertEqual(vs_filter["note_type"], "knowledge_summary")
         self.assertNotIn("tags", vs_filter)
 
-    def test_both_filters_merged_into_single_filter_dict(self):
-        """[提案] 同時提供兩個 filter 時，應合併為同一 filter dict，而非覆蓋。"""
-        pipeline = self._call_and_get_pipeline(
-            filter_tags="MySQL", filter_note_type="knowledge_summary"
-        )
-        vs_filter = pipeline[0]["$vectorSearch"]["filter"]
-        self.assertEqual(vs_filter["tags"], "MySQL")
+    def test_filter_file_path_targets_md_path_lineage(self):
+        vs_filter = self._pipeline(filter_file_path=["gs://v/a.md"])[0]["$vectorSearch"]["filter"]
+        self.assertEqual(vs_filter["md_path"], {"$in": ["gs://v/a.md"]})
+
+    def test_file_path_takes_precedence_over_tags(self):
+        # 程式碼為 if filter_file_path ... elif filter_tags：兩者並存時 tags 被略過
+        vs_filter = self._pipeline(filter_file_path=["x"], filter_tags=["MySQL"])[0]["$vectorSearch"]["filter"]
+        self.assertIn("md_path", vs_filter)
+        self.assertNotIn("tags", vs_filter)
+
+    def test_tags_and_note_type_merged(self):
+        vs_filter = self._pipeline(filter_tags=["MySQL"], filter_note_type="knowledge_summary")[0]["$vectorSearch"][
+            "filter"
+        ]
+        self.assertEqual(vs_filter["tags"], {"$in": ["MySQL"]})
         self.assertEqual(vs_filter["note_type"], "knowledge_summary")
-
-    # ── numCandidates cap ─────────────────────────────────────────────────────
-
-    def test_num_candidates_capped_at_10000_for_large_top_k(self):
-        """[提案] top_k=2000 時，numCandidates 不得超過 Atlas 上限 10000。"""
-        pipeline = self._call_and_get_pipeline(top_k=2000)
-        self.assertEqual(pipeline[0]["$vectorSearch"]["numCandidates"], 10_000)
-
-    def test_num_candidates_not_capped_when_top_k_is_small(self):
-        """[提案] top_k=10 時，numCandidates 為 100，不觸發上限。"""
-        pipeline = self._call_and_get_pipeline(top_k=10)
-        self.assertEqual(pipeline[0]["$vectorSearch"]["numCandidates"], 100)
 
     # ── $project stage ────────────────────────────────────────────────────────
 
-    def test_project_stage_excludes_id(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertEqual(pipeline[1]["$project"]["_id"], 0)
+    def test_project_excludes_id_and_embedding(self):
+        proj = self._pipeline()[1]["$project"]
+        self.assertEqual(proj["_id"], 0)
+        self.assertNotIn("embedding", proj)
 
-    def test_project_stage_includes_required_content_fields(self):
-        pipeline = self._call_and_get_pipeline()
-        proj = pipeline[1]["$project"]
-        for field in ("file_name", "file_path", "section", "content", "tags", "note_type"):
+    def test_project_uses_md_path_not_file_path(self):
+        proj = self._pipeline()[1]["$project"]
+        self.assertEqual(proj["md_path"], 1)
+        self.assertNotIn("file_path", proj)
+
+    def test_project_includes_required_content_fields(self):
+        proj = self._pipeline()[1]["$project"]
+        for field in ("file_name", "md_path", "chunk_index", "section", "content", "tags", "note_type"):
             with self.subTest(field=field):
                 self.assertEqual(proj[field], 1)
 
-    def test_project_stage_score_uses_vectorsearchscore_meta(self):
-        pipeline = self._call_and_get_pipeline()
-        self.assertEqual(
-            pipeline[1]["$project"]["score"],
-            {"$meta": "vectorSearchScore"},
-        )
-
-    def test_project_stage_does_not_include_embedding_field(self):
-        """[提案] embedding 欄位不應出現在 $project 中（省傳輸量）。"""
-        pipeline = self._call_and_get_pipeline()
-        self.assertNotIn("embedding", pipeline[1]["$project"])
+    def test_project_score_uses_vectorsearchscore_meta(self):
+        proj = self._pipeline()[1]["$project"]
+        self.assertEqual(proj["score"], {"$meta": "vectorSearchScore"})
 
     # ── return value ──────────────────────────────────────────────────────────
 
     def test_returns_aggregate_results_as_list(self):
-        fake_results = [
-            {"file_name": "sql.md", "content": "SELECT …", "score": 0.95},
-            {"file_name": "plc.md", "content": "PLC …", "score": 0.87},
-        ]
-        self.mock_collection.aggregate.return_value = fake_results
-        result = vs_mod.vector_search("test")
-        self.assertEqual(result, fake_results)
+        fake = [{"file_name": "sql.md", "md_path": "gs://v/sql.md", "score": 0.95}]
+        self.mock_collection.aggregate.return_value = fake
+        self.assertEqual(vs_mod.vector_search("test"), fake)
 
-    def test_returns_empty_list_when_no_matching_chunks(self):
-        """[提案] aggregate 無結果時回傳空 list，而非 None。"""
+    def test_returns_empty_list_when_no_matches(self):
         self.mock_collection.aggregate.return_value = []
-        result = vs_mod.vector_search("obscure non-existent topic")
+        result = vs_mod.vector_search("obscure topic")
         self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 0)
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":
