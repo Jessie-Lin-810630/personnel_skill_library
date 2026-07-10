@@ -34,14 +34,14 @@ poetry run python -m task07_silver_service.app
 # 審查頁 approve/reject 呼叫；與 dashboard、task07_silver_service 同時啟動
 poetry run python -m task07_gold_service.app
 
-# 執行個別 ETL task（從專案根目錄）
-poetry run python -m task01_obsidian_etl.main
+# 執行個別 ETL task（從專案根目錄；task01/06/07 為扶正後的 v2 / lazy_loading 版本，v1 已除役）
+poetry run python -m task01_obsidian_etl_v2.main
 poetry run python -m task02_github_restapi_etl.main
 poetry run python -m task03_leetcode_ccClub_etl.main
 poetry run python -m task05_googlesheet_skill_etl.main
-poetry run python -m task06_obsidian_embed_etl.main
-poetry run python -m task07_onenote_to_markdown.main
-poetry run python -m task08_onenote_embed_etl.main   # OneNote archived → note_vectors_multimodal（多模態向量化）
+poetry run python -m task06_obsidian_embed_etl_v2.main               # Obsidian archived → note_vectors_multimodal
+poetry run python -m task07_onenote_to_markdown_lazy_loading.main    # task07 Bronze ETL（只到 raw-notes，不呼叫 LLM；Silver/Gold 見上方 8002/8003 端點）
+poetry run python -m task08_onenote_embed_etl.main                   # OneNote archived → note_vectors_multimodal（多模態向量化）
 
 # 執行所有測試
 poetry run python -m unittest discover -s tests
@@ -97,31 +97,40 @@ Optional .env keys:
 
 ### ETL Tasks 與輸出目的地
 
-| Task | 資料來源 | 輸出目的地 |
-|------|---------|-----------|
-| task01 | 本地 / GCS Obsidian vault `.md` 檔 | MongoDB：`obsidian_notes`, `obsidian_summary` |
-| task02 | GitHub REST API | MongoDB：`github_repos`, `github_summary` |
-| task03 | LeetCode GraphQL API + ccClub REST API | MongoDB：`solved_problems_on_ccClub`, `solved_problems_on_leetcode`, `ccClub&leetcode_summary` |
-| task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` |
-| task06 | GCS Obsidian `.md` → chunking → embedding | MongoDB：`note_vectors_multimodal`（Atlas Vector Search） |
-| task07 | Microsoft OneNote（Graph API）→ HTML → Gemini LLM | 本地磁碟：`ONENOTE_OUTPUT_DIR/{帳號}/{筆記本}/{章節}/` 下的 `.md` 與 HTML；MongoDB：`onenote_graph_api_logs`、`gemini_llm_logs`、`onenote_page_metadata` |
-| task07（`task07_onenote_to_markdown_lazy_loading` + `task07_silver_service` + `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL（`task07_onenote_to_markdown_lazy_loading`）只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 歸檔/退件由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至 task08 |
-| task08（`task08_onenote_embed_etl`） | GCS `onenote-vaults/archived-notes/` 的歸檔 `.md`＋`_images/` → chunking → 多模態 embedding（`gemini-embedding-2`，1536 維、L2 normalize） | MongoDB：`note_vectors_multimodal`（與 task01/task06 共用同一張向量表）。gate 讀 `onenote_note_metadata`（`status=archived AND embedded_status=false`）；向量 doc 血緣欄 `md_path`=`md_archive_path`、`image_paths`=archived 圖片；以 `md_md5_hash` 守衛 CAS 翻 `embedded_status`；OneNote 無軟刪除故不含 purge |
+> 下表以扶正後的正宗版本為準（task01=`task01_obsidian_etl_v2`、task06=`task06_obsidian_embed_etl_v2`、task07=lazy_loading 三服務）；已除役的 v1 見表格下方註解。
+
+| Task | 資料來源 | 輸出目的地 | 開發分支 |
+|------|---------|-----------|---------|
+| task01（`task01_obsidian_etl_v2`） | GCS `personal-vaults` `raw-notes/` 的 `.md`＋圖片（Object Versioning 保歷史、刻意不做 `dt=` 分區）→ CDC gate 只抓新增/內文或引用圖片變更者 → 清洗歸檔到 `archived-notes/` | MongoDB：`obsidian_note_metadata`（唯一鍵 `raw_md_path`；`attached_images` 單表內嵌血緣、`archived_md_path`、`status` archived/deleted/error、`embedded_status`）、`notes_summary`（每週一次快照、唯一鍵 `snapshot_date`；Gold 層同時快照 obsidian＋onenote metadata 兩表）。軟刪除以 `status=deleted` 標記、保留 archived 副本供稽核 | `feature/etl-pipeline` |
+| task02 | GitHub REST API | MongoDB：`github_repos`, `github_summary` | `feature/etl-pipeline` |
+| task03 | LeetCode GraphQL API + ccClub REST API | MongoDB：`solved_problems_on_ccClub`, `solved_problems_on_leetcode`, `ccClub&leetcode_summary` | `feature/etl-pipeline` |
+| task05 | Google Sheets API（service account） | MongoDB：`skill_scores_biotech`, `skill_scores_data_eng`, `skill_radar_summary` | `feature/etl-pipeline` |
+| task06（`task06_obsidian_embed_etl_v2`） | GCS `archived-notes/` 的歸檔 `.md`＋圖片 → chunking → 多模態 embedding（`gemini-embedding-2`，1536 維、L2 normalize） | MongoDB：`note_vectors_multimodal`（Atlas Vector Search）。gate 讀 `obsidian_note_metadata`（`status=archived AND embedded_status=false`）；向量 doc 血緣欄 `md_path`＝archived md 路徑、`image_paths`＝archived 圖片；`md5` 守衛 CAS 翻 `embedded_status`；消費軟刪除訊號 purge | `feature/etl-pipeline` |
+| task07（`task07_onenote_to_markdown_lazy_loading` ＋ `task07_silver_service` ＋ `task07_gold_service`，共用 `task07_common`） | Microsoft OneNote（Graph API）→ HTML → 多模態 Gemini LLM（純 Lazy Loading，on-demand 觸發） | GCS 資料湖 `onenote-vaults`（Bronze `raw-notes/`、Silver `processed-notes/`、Gold `archived-notes/`，以 `dt=` 分區保留多版本）；MongoDB：`onenote_graph_api_logs`、`multimodal_llm_enrichment_logs`、`onenote_note_metadata`（主鍵 `page_id`+`dt`）。Bronze ETL 只到 raw-notes；Silver 由 `task07_silver_service`（8002）on-demand 觸發、Gold 由 `task07_gold_service`（8003）approve/reject 觸發；向量化解耦至 task08 | Bronze：`feature/html-to-markdown`；Silver/Gold：見下方「分支職責」註 |
+| task08（`task08_onenote_embed_etl`） | GCS `onenote-vaults/archived-notes/` 的歸檔 `.md`＋`_images/` → chunking → 多模態 embedding（`gemini-embedding-2`，1536 維、L2 normalize） | MongoDB：`note_vectors_multimodal`（與 task06 共用同一張向量表）。gate 讀 `onenote_note_metadata`（`status=archived AND embedded_status=false`）；向量 doc 血緣欄 `md_path`＝archived md 路徑、`image_paths`＝archived 圖片；`md_md5_hash` 守衛 CAS 翻 `embedded_status`；OneNote 無軟刪除故不含 purge | `feature/html-to-markdown` |
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
-> **task07/task01 兩來源共寫 `note_vectors_multimodal`**：OneNote（task07 歸檔）走 task08、Obsidian（task01_v2 歸檔）走 task06_v2，兩者向量化後寫入**同一張** `note_vectors_multimodal`（同一 Atlas index）。血緣鍵語意＝人工核可後的 archived md 路徑。過渡期 task06_v2 仍寫 `raw_md_path`、task08 寫 `md_path`（值為 archived 路徑），兩欄暫並存；task06_v2 的 `raw_md_path`→`md_path` 收斂由另一分支處理（本分支不碰 task06_v2）。
+> **v1 已除役、v2/lazy_loading 扶正**：`task01_obsidian_etl`（v1，寫 `obsidian_notes`／`obsidian_summary`、單次全量）、`task06_obsidian_embed_etl`（v1）、`task07_onenote_to_markdown`（v1，本機磁碟、ETL 主動逐頁呼叫 LLM）均已淘汰；上表 task01／06／07 各列即為扶正後的版本。task01 過渡期仍並寫 v1 的 `obsidian_summary`，待 backfill 到 `notes_summary` 後擇期淘汰。
 
-> **task07 已定案採 lazy_loading 變體、原版退役**：經審查 UI 遴選後，保留 GCS 資料湖多版本 × 純 on-demand 的變體，原版 `task07_onenote_to_markdown/`（本機磁碟、ETL 主動逐頁呼叫 LLM）已淘汰。變體拆成四個獨立執行環境（未來各自部署容器）：
+> **task06 與 task08 共寫 `note_vectors_multimodal`**：Obsidian（task01 歸檔）走 task06、OneNote（task07 歸檔）走 task08，兩者向量化後寫入**同一張** `note_vectors_multimodal`（同一 Atlas index `obsidian_vectors_index2`）。向量 doc 的血緣鍵統一為 `md_path`，值＝人工核可後的 archived md 路徑（已全面定調 `md_path`，無 `raw_md_path`／`md_path` 並存）。RAG 讀取端亦以 `md_path` 為血緣欄。
+
+> **task07 lazy_loading 三服務拆分**（未來各自部署容器）：
 > - `task07_onenote_to_markdown_lazy_loading/` — Bronze ETL（下載 html、算 hash、存 raw-notes、upsert C3，不呼叫 LLM）。
 > - `task07_silver_service/` — Silver enrich Flask 端點（`POST /enrich`，8002），on-demand 觸發 `t_enrich_html_to_markdown` 生成 md 到 processed-notes。
 > - `task07_gold_service/` — Gold Flask 端點（`POST /archive`，8003），approve 歸檔到 archived-notes、reject 標記；兩者都回寫 `md_frontmatter`。
 > - `task07_common/` — 三者共用的 `gcs.py`、`audit_log.py`、`hashing.py`。
 > Streamlit（`dashboard_ui/`）僅讀 MongoDB＋POST 上述端點，不 import 任何 `task07_*` 套件。
 
+> **分支職責**：
+> - task01–task06（含 task01_v2、task06_v2）：`feature/etl-pipeline`
+> - task07（lazy_loading）的 Bronze ETL、task08：`feature/html-to-markdown`
+> - task07（lazy_loading）的 Silver／Gold 服務本體：`feature/html-to-markdown` 起草 → `feature/dashboard-ui` 定稿 → 合併回 `feature/html-to-markdown`
+> - Streamlit、AI agent 串接、task07 Silver 端口（8002）與 Gold 端口（8003）實作：`feature/dashboard-ui`
+
 > **需要修改 task01–task06 時**，請先閱讀 [`doc/branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md) 了解各 task 的資料來源、ETL 邏輯與 MongoDB schema。
 >
-> **需要修改 task07 時**，讀 [`doc/branch_onenote_lazy_loading_summary.md`](doc/branch_onenote_lazy_loading_summary.md)（Bronze/Silver/Gold medallion 分層、`html_hash` 冪等快取、on-demand enrichment、LLM 服務級斷路器）；並先確認要動的是 Bronze ETL、`task07_silver_service`、`task07_gold_service` 還是共用的 `task07_common`。
+> **需要修改 task07 或 task08 時**（兩者前後依存、一邊更新時一起更新記憶），讀 [`doc/branch_onenote_lazy_loading_summary.md`](doc/branch_onenote_lazy_loading_summary.md)（Bronze/Silver/Gold medallion 分層、`html_hash` 冪等快取、on-demand enrichment、LLM 服務級斷路器、task08 向量化）；並先確認要動的是 Bronze ETL、`task07_silver_service`、`task07_gold_service`、共用的 `task07_common` 還是 `task08_onenote_embed_etl`。
 
 ### Dashboard UI（`dashboard_ui/`）
 
@@ -130,9 +139,10 @@ Optional .env keys:
 - `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）
 - `agents/` / `agent_tools/` — Phase III AI Agent（使用 Google Vertex AI Gemini + MongoDB Atlas Vector Search）
 
-### task06 向量搜尋
+### 向量搜尋（task06 / task08 共用）
 
 - Embedding model：`gemini-embedding-2`（Vertex AI，多模態，維度 1536、L2 normalize）
+- Vector collection：`note_vectors_multimodal`（task06 與 task08 共寫，血緣欄統一 `md_path`）
 - Vector index name：`obsidian_vectors_index2`，在 MongoDB Atlas Console 手動建立
 - 查詢方式：`$vectorSearch` stage，similarity = cosine
 
