@@ -1,4 +1,4 @@
-"""agents/intent_router_agent.py (v2 — 簡化版)
+"""意圖分類 router：判斷使用者輸入該交給 rag_agent 還是 planning_agent（v2 簡化版）。
 
 改版重點：
   舊版: route() 負責 intent 分類 + tag 抽取 + alias 比對 + file_path 繼承 + HyDE rewrite
@@ -18,52 +18,15 @@
   - 不需要 vector_search
 """
 
-import os
-
 from agent_tools.chat_history import load_chat_history, save_chat_history
 from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.types_and_constants import RouterAgent
 from google import genai
 from google.genai import types
 from loguru import logger
 
 # ── 常數 ──────────────────────────────────────────────────────────
-ROUTER_AGENT_MODEL = os.getenv("ROUTER_AGENT_MODEL", "gemini-2.5-flash-lite")
-CHAT_HISTORY_N = 3
-
 AgentTarget = str  # "rag_agent" | "planning_agent"
-
-# R1 關鍵字集合
-PLANNING_KEYWORDS = [
-    "學習路徑",
-    "學習地圖",
-    "學習計畫",
-    "怎麼學",
-    "如何學",
-    "建議學",
-    "規劃",
-    "路線圖",
-    "roadmap",
-    "學習建議",
-    "技能樹",
-    "往哪個方向",
-    "轉職",
-    "接下來學什麼",
-]
-RAG_KEYWORDS = [
-    "查詢",
-    "搜尋",
-    "找",
-    "有沒有",
-    "筆記裡",
-    "摘要",
-    "幫我看",
-    "有什麼",
-    "整理",
-    "列出",
-    "summary",
-    "search",
-    "retrieve",
-]
 
 R2_SYSTEM_PROMPT = """你是一個意圖分類器。
 根據使用者最新的輸入與對話歷史，判斷使用者想要:
@@ -77,16 +40,27 @@ R2_SYSTEM_PROMPT = """你是一個意圖分類器。
 
 
 def _r1_keyword_match(query: str) -> tuple[AgentTarget | None, float]:
+    """R1 關鍵字快篩：以 planning / rag 關鍵字比對 query，命中即回對應 agent 與信心分數。
+
+    先比 planning 關鍵字、再比 rag 關鍵字；任一命中即回 (agent_target, score)，
+    兩者皆未命中回 (None, 0.0)，交由 R2 LLM 補判。
+
+    Args:
+        query: 使用者原始輸入。
+
+    Returns:
+        (agent_target, score)：命中回 ("planning_agent" | "rag_agent", 分數)；未命中回 (None, 0.0)。
+    """
     query_lower = query.lower()
 
-    for kw in PLANNING_KEYWORDS:
-        if kw.lower() in query_lower:
+    for kw in RouterAgent.PLANNING_KEYWORDS:
+        if (kw.lower() in query_lower) or (query_lower in kw.lower()):
             score = round(len(kw) / len(query), 4) if query else 0
             logger.info(f"R1 命中 planning keyword: '{kw}' (score={score})")
             return "planning_agent", score
 
-    for kw in RAG_KEYWORDS:
-        if kw.lower() in query_lower:
+    for kw in RouterAgent.RAG_KEYWORDS:
+        if (kw.lower() in query_lower) or (query_lower in kw.lower()):
             score = round(len(kw) / len(query), 4) if query else 0
             logger.info(f"R1 命中 rag keyword: '{kw}' (score={score})")
             return "rag_agent", score
@@ -103,10 +77,22 @@ def _r2_llm_classify(
     session_id: str,
     client: genai.Client,
 ) -> tuple[AgentTarget, float]:
+    """R2 LLM 補判：R1 未命中時，帶入跨 agent 對話背景讓 LLM 分類意圖。
+
+    分別讀 rag 與 planning 歷史包成背景脈絡，連同最新 query 送 LLM，回傳分類結果與固定信心分數。
+
+    Args:
+        query:      使用者原始輸入。
+        session_id: 目前對話的 uuid4。
+        client:     google-genai Client 物件。
+
+    Returns:
+        (agent_target, score)：("planning_agent" | "rag_agent", 0.95)。
+    """
     # load_chat_history 以 agent_type 精確比對，不支援 None，
     # 故分別讀 rag 與 planning 歷史，再包成背景脈絡，讓 router 感知跨 agent 對話。
-    history_rag_msg = load_chat_history(session_id, agent_type="rag", n=CHAT_HISTORY_N)
-    history_planning_msg = load_chat_history(session_id, agent_type="planning", n=CHAT_HISTORY_N)
+    history_rag_msg = load_chat_history(session_id, agent_type="rag", n=RouterAgent.CHAT_HISTORY_N)
+    history_planning_msg = load_chat_history(session_id, agent_type="planning", n=RouterAgent.CHAT_HISTORY_N)
 
     context_parts = []
     if history_rag_msg:
@@ -140,7 +126,7 @@ def _r2_llm_classify(
     contents.append({"role": "user", "parts": [{"text": query}]})
 
     response = client.models.generate_content(
-        model=ROUTER_AGENT_MODEL,
+        model=RouterAgent.MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=R2_SYSTEM_PROMPT,
@@ -197,7 +183,7 @@ def route(query: str, session_id: str) -> dict:
         metadata={
             "method": "r2_llm",
             "intent_score": intent_score,
-            "model": ROUTER_AGENT_MODEL,
+            "model": RouterAgent.MODEL,
             "user_query": query,
         },
     )

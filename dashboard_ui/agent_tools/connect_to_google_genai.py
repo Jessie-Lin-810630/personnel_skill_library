@@ -1,3 +1,13 @@
+"""建立指向 Vertex AI（location=us-central1）的 google-genai client，供 chat 類模型呼叫。
+
+以 service account 憑證初始化 genai.Client；與 query_with_vector_search 的 embedding client（location=us）
+分開，因兩者所在 region 不同。
+
+Required .env keys:
+    GCP_PROJECT_ID                    Vertex AI project id.
+    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI service account JSON path.
+"""
+
 import os
 
 from google import genai

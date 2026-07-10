@@ -2,7 +2,7 @@
 
 職責: 接收使用者輸入的 query 文字，
       呼叫 Vertex AI gemini-embedding-2 將其向量化（與 ETL task06 同一向量空間），
-      再對 MongoDB Atlas obsidian_vectors_multimodal 執行 $vectorSearch，
+      再對 MongoDB Atlas note_vectors_multimodal 執行 $vectorSearch，
       回傳 top-K 筆相關 chunk。
 
 依賴:
@@ -22,6 +22,7 @@
 import math
 import os
 
+from agent_tools.types_and_constants import EmbeddingModel, NoteCollections
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -33,13 +34,9 @@ from utils.interact_with_mongodb import get_db_atlas
 _get_db = get_db_atlas
 load_dotenv()
 
-# ── 常數 ──────────────────────────────────────────────────────────
-EMBEDDING_MODEL = "gemini-embedding-2"
-EMBED_DIM = 1536
+# ── 常數（共用 config 見 agent_tools/types_and_constants.py）──────────────────────────
 QUERY_PROMPT_TEMPLATE = "task: search result | query: {query}"  # 查詢側任務格式，與入庫側 document 格式配對
-
-VECTOR_COLLECTION = "obsidian_vectors_multimodal"
-VECTOR_INDEX = "obsidian_vectors_index2"
+VECTOR_COLLECTION = NoteCollections.VECTOR
 
 
 def _get_embed_client() -> genai.Client:
@@ -85,7 +82,7 @@ def _embed_query(query: str, embed_client: genai.Client) -> list[float]:
     """將單一 query 字串向量化。
 
     使用與 ETL task06 相同的 embedding model 與查詢側任務格式，
-    確保 query vector 與 obsidian_vectors_multimodal 的 embedding 在同一向量空間。
+    確保 query vector 與 note_vectors_multimodal 的 embedding 在同一向量空間。
 
     Args:
         query:        使用者輸入的自然語言查詢字串。
@@ -96,9 +93,9 @@ def _embed_query(query: str, embed_client: genai.Client) -> list[float]:
     """
     prompt_text = QUERY_PROMPT_TEMPLATE.format(query=query)
     response = embed_client.models.embed_content(
-        model=EMBEDDING_MODEL,
+        model=EmbeddingModel.MODEL,
         contents=[types.Content(parts=[types.Part.from_text(text=prompt_text)])],
-        config=types.EmbedContentConfig(output_dimensionality=EMBED_DIM),
+        config=types.EmbedContentConfig(output_dimensionality=EmbeddingModel.DIM),
     )
     return _normalize(response.embeddings[0].values)  # list[float]，長度 1536，已 L2 normalize
 
@@ -110,19 +107,19 @@ def vector_search(
     filter_file_path: str | None = None,
     filter_note_type: str | None = None,
 ) -> list[dict]:
-    """對 MongoDB Atlas obsidian_vectors_multimodal 執行語意搜尋。
+    """對 MongoDB Atlas note_vectors_multimodal 執行語意搜尋。
 
     Args:
         query:            使用者輸入的自然語言問題或主題描述
-        top_k:            回傳幾筆最相關的 chunk (Agent 1 預設 5，Agent 2 預設 10)
+        top_k:            回傳幾筆最相關的 chunk ，預設 5 筆，也可傳入 RagAgent.TOP_K | PlanningAgent.TOP_K | 自訂整數。
         filter_tags:      可選，限定搜尋範圍，例如 ["MySQL"] (對應 Atlas pre-filter: tags)
-        filter_file_path: 可選，限定筆記路徑，例如 "MySQL Window Function.md"
+        filter_file_path: 可選，限定筆記路徑（比對向量 doc 的 md_path 血緣欄），例如 "MySQL Window Function.md"
         filter_note_type: 可選，限定筆記種類，例如 "Knowledge_summary"
 
     Returns:
         list[dict]，每筆包含:
             - file_name:  筆記檔名
-            - file_path:  GCS 路徑
+            - md_path:    血緣鍵（人工核可後 archived md 的 gs:// 路徑）
             - chunk_index: 筆記檔中的第幾個資料塊
             - section:    標題路徑，例如 "SQL > DQL > SELECT"
             - content:    chunk 純文字
@@ -144,7 +141,7 @@ def vector_search(
 
     vector_search_stage = {
         "$vectorSearch": {
-            "index": VECTOR_INDEX,
+            "index": EmbeddingModel.VECTOR_INDEX,
             "path": "embedding",
             "queryVector": query_vector,
             "numCandidates": num_candidates,
@@ -156,7 +153,8 @@ def vector_search(
     # 對應 task06 建立 index 時定義的 filter: tags、filter: note_type
     vector_search_filter = {}
     if filter_file_path:
-        vector_search_filter["file_path"] = {"$in": filter_file_path}
+        # 血緣欄在 v2/task08 向量 doc 已由 file_path 收斂為 md_path（值＝archived md 路徑）
+        vector_search_filter["md_path"] = {"$in": filter_file_path}
     elif filter_tags:
         vector_search_filter["tags"] = {"$in": filter_tags}
 
@@ -166,12 +164,12 @@ def vector_search(
     if vector_search_filter:
         vector_search_stage["$vectorSearch"]["filter"] = vector_search_filter
 
-    # Step 3: $project，只取需要的欄位，embedding 不回傳（省傳輸量）
+    # Step 3: $project，只取需要的欄位，embedding 不回傳
     project_stage = {
         "$project": {
             "_id": 0,
             "file_name": 1,
-            "file_path": 1,
+            "md_path": 1,
             "chunk_index": 1,
             "section": 1,
             "content": 1,

@@ -1,8 +1,8 @@
-"""agents/rag_agent.py (v2 — rewrite → search → rerank → generate)
+"""筆記語意查詢 RAG agent：rewrite → vector_search → rerank → LLM 生成（v2）。
 
 改版重點：
   舊版: prefilter (tags/file_paths) → vector_search(top_k=5) → LLM 生成
-  新版: query_rewrite → vector_search(expanded_query, 無 prefilter, top_k=10)
+  新版: query_rewrite → vector_search(expanded_query, 無 prefilter, top_k=5)
         → Cohere rerank(rewritten_query, top_n=5) → LLM 生成
 
 設計決策：
@@ -22,13 +22,9 @@ from agent_tools.connect_to_google_genai import _get_genai_client
 from agent_tools.query_rewriter import rewrite_query
 from agent_tools.query_with_vector_search import vector_search
 from agent_tools.reranker import rerank_chunks
+from agent_tools.types_and_constants import RagAgent, Reranker
 from google.genai import types
 from loguru import logger
-
-# ── 常數 ─────────────────────────────────────────────────────────
-RAG_AGENT1_MODEL = "gemini-2.5-flash-lite"
-RAG_TOP_K = 10
-RERANK_TOP_N = 5
 
 SYSTEM_PROMPT = (
     "你是一位筆記查詢助理。\n"
@@ -54,7 +50,7 @@ def rag_query(
     Args:
         query:            使用者的原始提問文字
         session_id:       目前對話的 uuid4 (用於讀寫 chat_history)
-        alias_tag_pairs:  筆記 alias-tag 對照表 (從collection obsidian_notes 撈取)
+        alias_tag_pairs:  筆記 alias-tag 對照表 (從collection obsidian_note_metadata 撈取)
         known_tags:       向量資料庫裡實際存在的 tag set
 
     Returns:
@@ -76,7 +72,7 @@ def rag_query(
 
     # ── Step 2: 讀取對話歷史 ──────────────────────────────────
     history_user_model_msg = load_chat_history(
-        session_id=session_id, agent_type="rag", n=3
+        session_id=session_id, agent_type="rag", n=RagAgent.CHAT_HISTORY_N
     )  # 最近 3 輪 (user + model 各一筆 = 6 筆)
 
     # ── Step 3: Query Rewrite ─────────────────────────────────
@@ -101,10 +97,10 @@ def rag_query(
     )
 
     # ── Step 4: 向量搜尋，取得相關 chunks ─────────────────────────────────
-    logger.info(f"執行 vector_search, top_k={RAG_TOP_K}...")
+    logger.info(f"執行 vector_search, top_k={RagAgent.TOP_K}...")
     chunks = vector_search(
         query=expanded_query,
-        top_k=RAG_TOP_K,
+        top_k=RagAgent.TOP_K,
         filter_tags=None,  # 關鍵：已不做 prefilter
         filter_file_path=None,
     )
@@ -123,11 +119,11 @@ def rag_query(
     # ── Step 5: Rerank Chunks ─────────────────────────────────
     # reranker 需要看的是「使用者真正想問什麼」跟「這個 chunk 有多相關」，
     # tag 關鍵字反而會干擾 cross-encoder 的判斷，故用 rewritten_query 而不是 expanded
-    logger.info(f"調用 Cohere reranker, {len(chunks)} candidates → top_n={RERANK_TOP_N}")
+    logger.info(f"調用 Cohere reranker, {len(chunks)} candidates → top_n={Reranker.TOP_N}")
     reranked_chunks = rerank_chunks(
         query=rewritten_query,
         chunks=chunks,
-        top_n=RERANK_TOP_N,
+        top_n=Reranker.TOP_N,
     )
     logger.success(f"Cohere rerank 完成: chunk_amount={len(reranked_chunks)}")
 
@@ -145,10 +141,10 @@ def rag_query(
 
     # ── Step 8: 呼叫 LLM，等待其回應 ────────────────────────────
     logger.info(
-        f"呼叫模型 {RAG_AGENT1_MODEL}, 挾帶 {len(history_user_model_msg)} 歷史對話紀錄 {len(reranked_chunks)} 筆文件"
+        f"呼叫模型 {RagAgent.MODEL}, 挾帶 {len(history_user_model_msg)} 歷史對話紀錄 {len(reranked_chunks)} 筆文件"
     )
     response = client.models.generate_content(
-        model=RAG_AGENT1_MODEL,
+        model=RagAgent.MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -166,10 +162,10 @@ def rag_query(
         role="model",
         message_text=answer,
         metadata={
-            "model": RAG_AGENT1_MODEL,
+            "model": RagAgent.MODEL,
             "retrieved_chunks": [
                 {
-                    "file_path": c.get("file_path", ""),
+                    "file_path": c.get("md_path", ""),
                     "chunk_index": c.get("chunk_index"),
                     "score": round(c.get("score", 0), 4),
                     "rerank_score": round(c.get("rerank_score", 0), 4),

@@ -4,7 +4,7 @@
     1. _load_known_tags():
         讀取 MongoDB 向量資料庫取出真實存在的資料 tags
     2. _load_alias_to_tags_map():
-        讀取 MonogoDB 筆記元數據資料庫取出筆記名稱 (alias) 與對應的 tags
+        讀取 MongoDB 筆記元數據資料庫取出筆記名稱 (alias) 與對應的 tags
     3. _format_history_for_prompt():
         將 agent_tools.chat_history() 回傳的歷史問答脈絡，拼成 model 看得懂的 user prompt 字串
     4. rewrite_query():
@@ -18,24 +18,22 @@
   - rewritten_query 用於 reranker 根據語意關聯度做排序，但不摻 tag 雜訊避免關鍵字干擾 cross-encoder 判斷
 """
 
+from agent_tools.types_and_constants import NoteCollectionBeforeEmbedding, NoteCollections, RewriterAgent
 from google import genai
 from google.genai import types
 from loguru import logger
 from pymongo.database import Database
 
-# ── 常數 ────────────────────────────────────────────────────────
-REWRITE_MODEL = "gemini-2.5-flash-lite"
-
 
 # ── 參考資料載入（rewriter 的 tag 字典來源）──────────────────────
-def _load_known_tags(db: Database, collection: str = "obsidian_vectors_multimodal") -> set[str]:
+def _load_known_tags(db: Database, collection: NoteCollections = NoteCollections.VECTOR) -> set[str]:
     """從向量庫撈出所有出現過的 tag，做為合法 tag 字典。
 
     用於校驗 LLM 推薦的 tags，避免 LLM 自發創意產出不存在的 tags。
 
     Args:
         db:         pymongo Database 物件。
-        collection: 向量集合名稱，預設 "obsidian_vectors_multimodal"。
+        collection: 向量集合名稱，預設 NoteCollections.VECTOR，即 "note_vectors_multimodal"。
 
     Returns:
         該集合 tags 欄位所有出現過的 tag 字串集合。
@@ -44,9 +42,13 @@ def _load_known_tags(db: Database, collection: str = "obsidian_vectors_multimoda
     return set(coll.distinct("tags"))
 
 
-def _load_alias_to_tags_map(db: Database, collection: str = "obsidian_notes") -> list[dict]:
-    """從 obsidian_notes 撈出 {alias: [tags]} 的對照表。
+def _load_alias_to_tags_map(
+    db: Database, collection: NoteCollectionBeforeEmbedding = NoteCollections.OBSIDIAN
+) -> list[dict]:
+    """從 obsidian_note_metadata 或 onenote_note_metadata 撈出 {alias: [tags]} 的對照表。
 
+    僅撈 status=archived 且 embedded_status=True（已歸檔且已向量化）的筆記；alias/tags 取自各自的
+    frontmatter（obsidian 為 archived_md_frontmatter、onenote 為 md_frontmatter），file_path 回填 archived_md_path。
     若一篇筆記有多個 alias，回傳時會攤平成獨立 pair 方便後續比對，例如：
         [ {alias-1 of note-1: [tagA, B, C]},
           {alias-2 of note-1: [tagA, B, C]},
@@ -55,14 +57,37 @@ def _load_alias_to_tags_map(db: Database, collection: str = "obsidian_notes") ->
 
     Args:
         db:         pymongo Database 物件。
-        collection: 筆記集合名稱，預設 "obsidian_notes"。
+        collection: NoteCollectionBeforeEmbedding 筆記所在集合名稱，可選傳入
+        NoteCollections.OBSIDIAN ("obsidian_note_metadata") 或
+        NoteCollections.ONENOTE ("onenote_note_metadata")。
 
     Returns:
         攤平後的 alias-tag pair list，每筆為
         {"alias": str, "tags": list[str], "file_path": str}。
     """
     coll = db[collection]
-    cursor = coll.find({}, {"_id": 0, "alias": 1, "tags": 1, "file_name": 1, "file_path": 1})
+    if collection == "obsidian_note_metadata":
+        projection = {
+            "_id": 0,
+            "alias": "$archived_md_frontmatter.alias",
+            "tags": "$archived_md_frontmatter.tags",
+            "file_name": 1,
+            "file_path": "$archived_md_path",
+        }
+
+    elif collection == "onenote_note_metadata":
+        projection = {
+            "_id": 0,
+            "alias": "$md_frontmatter.alias",
+            "tags": "$md_frontmatter.tags",
+            "file_name": "$page_title",
+            "file_path": "$archived_md_path",
+        }
+
+    else:
+        projection = {"_id": 0, "alias": 1, "tags": 1, "file_name": 1, "file_path": 1}
+
+    cursor = coll.find({"status": "archived", "embedded_status": True}, projection)
     alias_tag_pairs = []
     for doc in cursor:
         file_path = doc.get("file_path", "")
@@ -181,7 +206,7 @@ def rewrite_query(
     # 組裝 system prompt
     pairs_str = "\n".join(
         f"- alias: {p.get('alias', '')} → tags: {p.get('tags', [])}"
-        for p in alias_tag_pairs[:100]  # 限制數量，避免 prompt 過長
+        for p in alias_tag_pairs[:100]  # ⚠️ 限制數量，避免 prompt 過長，但有優化空間
     )
     system_prompt = REWRITE_SYSTEM_PROMPT.format(pairs=pairs_str)
 
@@ -191,7 +216,7 @@ def rewrite_query(
 
     try:
         response = client.models.generate_content(
-            model=REWRITE_MODEL,
+            model=RewriterAgent.MODEL,
             contents=[{"role": "user", "parts": [{"text": user_content}]}],
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,

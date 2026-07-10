@@ -23,11 +23,11 @@
 import os
 
 import cohere
+from agent_tools.types_and_constants import Reranker
 from loguru import logger
 
 # ── 常數 ────────────────────────────────────────────────────────
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")
-RERANK_MODEL = "rerank-v3.5"
 
 
 def _get_cohere_client() -> cohere.ClientV2:
@@ -47,7 +47,7 @@ def _get_cohere_client() -> cohere.ClientV2:
 def rerank_chunks(
     query: str,
     chunks: list[dict],
-    top_n: int = 5,  # rerank 後只保留幾筆
+    top_n: int = Reranker.TOP_N,  # rerank 後只保留幾筆
 ) -> list[dict]:
     """用 Cohere Rerank 對 vector_search 回傳的 chunks 做 cross-encoder 精排。
 
@@ -57,7 +57,7 @@ def rerank_chunks(
     Args:
         query:   用來做 rerank 的查詢文字，可以是原始 query 或是 rewritten_query
         chunks:  vector_search() 回傳的 list[dict]
-        top_n:   rerank 後保留幾筆，預設 5 筆
+        top_n:   rerank 後保留幾筆，預設 Reranker.TOP_N = 5
 
     Returns:
         list[dict]，格式同 vector_search() 回傳值，但：
@@ -67,9 +67,9 @@ def rerank_chunks(
         - 只保留 top_n 筆
 
     **Example of returns:**
-        [{
-        file_name:  "20260507 MySQL Query.md"
-         file_path:  "...01-daily-logs/20260507 MySQL Query.md"
+    >>> [{
+         file_name:  "20260507 MySQL Query.md"
+         md_path:    "...01-daily-logs/20260507 MySQL Query.md"
          chunk_index: 2
          section:    "SQL > DQL > SELECT"
          content:    "SELECT * FROM ... means ...."
@@ -102,7 +102,7 @@ def rerank_chunks(
         logger.debug(f"執行 rerank: query='{query[:50]}', \ndocs amount={len(documents)}....")
 
         response = client.rerank(
-            model=RERANK_MODEL,
+            model=Reranker.MODEL,
             query=query,
             documents=documents,
             top_n=min(top_n, len(documents)),
@@ -110,7 +110,10 @@ def rerank_chunks(
 
         # 依 rerank score 重新排序 chunks
         reranked_chunks = []
+        chunk = {}
         for result in response.results:
+            if round(result.relevance_score, 4) < 0.1000:
+                continue
             idx = result.index
             chunk = chunks[idx].copy()  # 不改動原始 dict
             chunk["rerank_score"] = round(result.relevance_score, 4)

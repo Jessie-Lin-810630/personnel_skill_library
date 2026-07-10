@@ -1,4 +1,4 @@
-"""agents 共用的格式化輔助函式，集中 rag_agent / planning_agent / intent_router
+"""agents 共用的格式化輔助函式（context 組裝、來源清單、歷史脈絡），供 rag_agent / planning_agent 使用。
 
 職責：
     1. build_context():

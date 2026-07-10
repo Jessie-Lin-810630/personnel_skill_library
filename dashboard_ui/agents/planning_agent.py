@@ -1,5 +1,3 @@
-# agents/planning_agent.py
-
 """Planning Agent：個人化學習路徑生成與多輪追問調整。
 
 職責:
@@ -11,19 +9,17 @@
 
 依賴:
   - google-genai SDK (Vertex AI)
-  - tools/vector_search.py
-  - tools/chat_history.py
+  - agent_tools/query_with_vector_search.py
+  - agent_tools/chat_history.py
 """
 
 from agent_tools.agent_helpers import build_context, build_history_context_message, build_source_list
 from agent_tools.chat_history import save_chat_history
 from agent_tools.connect_to_google_genai import _get_genai_client
 from agent_tools.query_with_vector_search import vector_search
+from agent_tools.types_and_constants import PlanningAgent
 from google.genai import types
 from loguru import logger
-
-# ── 常數 ──────────────────────────────────────────────────────────
-PLANNING_AGENT_MODEL = "gemini-2.5-flash"  # 推理能力更強模型
 
 SYSTEM_PROMPT = """你是一位跨領域的學習路徑規劃師，專長橫跨生物科技 (Biotech) 與資料工程 (Data Engineering) 兩個領域。
 
@@ -43,15 +39,14 @@ SYSTEM_PROMPT = """你是一位跨領域的學習路徑規劃師，專長橫跨�
 PLANNING_HISTORY_INTRO = "以下是這個 session 過去的學習地圖討論紀錄，供你接續調整時參考："
 
 
-def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, chat_history_n: int = 5) -> dict:
+def generate_learning_map(query: str, session_id: str, planning_top_k: int = PlanningAgent.TOP_K) -> dict:
     """學習地圖初版生成。
 
     Args:
         query:      使用者描述目標方向與現有背景，例如
                     「我想從生技轉資料工程，目前熟 Python 與 SQL，請給我學習建議」
         session_id: 目前對話的 uuid4
-        planning_top_k: vector_search 取回的 chunk 數量，預設 5
-        chat_history_n: 回讀幾輪 planning 歷史作為背景，預設 5
+        planning_top_k: vector_search 取回的 chunk 數量，預設使用 PlanningAgent.TOP_K = 10
 
     Returns:
         {
@@ -69,7 +64,7 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, 
         message_text=query,
     )
 
-    # ── Step 2: 向量搜尋，取得更廣的 context（top_k=10，跨 domain）──
+    # ── Step 2: 向量搜尋，取得更廣的 context ──
     logger.info(f"generate_learning_map: 執行 vector_search, query='{query[:40]}...'")
     chunks = vector_search(query=query, top_k=planning_top_k)
 
@@ -90,7 +85,7 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, 
     # 雖然這函式用於初版生成，理論上不需要過去的 planning history，
     # 但若使用者是在既有 session 重新觸發初版生成，仍保留讀取以策安全
     history_user_model_msg = build_history_context_message(
-        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=chat_history_n
+        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=PlanningAgent.CHAT_HISTORY_N
     )
 
     # ── Step 5: 組裝本輪 user message，包含 history + context，包成 contents 餵給 LLM 摘要。
@@ -101,9 +96,9 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, 
     contents = history_user_model_msg + [current_user_msg]
 
     # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
-    logger.info(f"呼叫模型 {PLANNING_AGENT_MODEL}，挾帶 {len(chunks)} 筆 chunks")
+    logger.info(f"呼叫模型 {PlanningAgent.MODEL}，挾帶 {len(chunks)} 筆 chunks")
     response = client.models.generate_content(
-        model=PLANNING_AGENT_MODEL,
+        model=PlanningAgent.MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -121,11 +116,11 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, 
         role="model",
         message_text=answer,
         metadata={
-            "model": PLANNING_AGENT_MODEL,
+            "model": PlanningAgent.MODEL,
             "stage": "initial_map",
             "retrieved_chunks": [
                 {
-                    "file_path": c.get("file_path", ""),
+                    "file_path": c.get("md_path", ""),
                     "chunk_index": c.get("chunk_index"),
                     "score": c.get("score", 0),
                 }
@@ -139,13 +134,13 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = 5, 
     return {"answer": answer, "sources": source_list}
 
 
-def refine_learning_map(followup_query: str, session_id: str, planning_top_k: int = 5) -> dict:
+def refine_learning_map(followup_query: str, session_id: str, planning_top_k: int = PlanningAgent.TOP_K) -> dict:
     """多輪追問調整。
 
     Args:
         followup_query:      使用者的追問或調整需求，例如「把 MLOps 的部分展開」
         session_id: 目前對話的 uuid4（沿用初版生成時的同一個 session）
-        planning_top_k: vector_search 取回的 chunk 數量，預設 5
+        planning_top_k: vector_search 取回的 chunk 數量，預設使用 PlanningAgent.TOP_K = 10
 
     Returns:
         {
@@ -172,7 +167,7 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
 
     # ── Step 4: 讀取過去的 planning 對話歷史（這裡才是「多輪」的關鍵）
     history_user_model_msg = build_history_context_message(
-        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=5
+        session_id, "planning", PLANNING_HISTORY_INTRO, chat_history_n=PlanningAgent.CHAT_HISTORY_N
     )
 
     # ── Step 5: 組裝本輪 user message，包含 history + context，包成 contents 餵給 LLM 摘要。
@@ -183,9 +178,9 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
     contents = history_user_model_msg + [current_user_msg]
 
     # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
-    logger.info(f"呼叫模型 {PLANNING_AGENT_MODEL}，多輪追問調整")
+    logger.info(f"呼叫模型 {PlanningAgent.MODEL}，多輪追問調整")
     response = client.models.generate_content(
-        model=PLANNING_AGENT_MODEL,
+        model=PlanningAgent.MODEL,
         contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -203,11 +198,11 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
         role="model",
         message_text=answer,
         metadata={
-            "model": PLANNING_AGENT_MODEL,
+            "model": PlanningAgent.MODEL,
             "stage": "refinement",
             "retrieved_chunks": [
                 {
-                    "file_path": c.get("file_path", ""),
+                    "file_path": c.get("md_path", ""),
                     "chunk_index": c.get("chunk_index"),
                     "score": c.get("score", 0),
                 }
@@ -219,35 +214,3 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
 
     logger.info("refine_learning_map: 追問調整完成")
     return {"answer": answer, "sources": source_list}
-
-
-if __name__ == "__main__":
-    # 測試重點：同一 session_id 跑滿 3 輪，觀察 history 是否正確累積、追問是否真的聚焦
-    session_id = "test_docker_learning_map_0620-run3"
-
-    # # ── 第 1 輪：初版生成 ──────────────────────────────
-    # result1 = generate_learning_map(
-    #     "我目前熟悉 Linux 基本指令和 Python，完全沒用過 Kubernetes，"
-    #     "想學會在資料工程的場景下用 Kubernetes，例如把資料處理腳本容器化部署。",
-    #     session_id
-    # )
-    # print(result1["answer"])
-    # print(result1["sources"])
-
-    # ── 第 2 輪：針對某一階段要求展開 ──────────────────────
-    # 驗證點：模型是否記得第一輪提到的階段名稱，並且只展開該階段，不是整份重講
-    # result2 = refine_learning_map(
-    #     "可以把 Kubernetes 核心概念與本地環境建置 那個階段展開講細一點嗎？",
-    #     session_id
-    # )
-    # print(result2["answer"])
-    # print(result2["sources"])
-
-    # ── 第 3 輪：改變約束條件，要求取捨 ─────────────────────
-    # 驗證點：模型是否在前兩輪基礎上做精簡，而非忽略歷史重新規劃一份
-    # result3 = refine_learning_map(
-    #     "我只有 2 週時間，能不能幫我把學習路徑壓縮成最關鍵的部分就好？",
-    #     session_id
-    # )
-    # print(result3["answer"])
-    # print(result3["sources"])
