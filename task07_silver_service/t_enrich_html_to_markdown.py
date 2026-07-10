@@ -144,14 +144,14 @@ def _get_genai_client() -> genai.Client:
 
 
 def _classify_note_type(filename: str) -> str:
-    """依檔名是否含日期字樣分類：有日期為 daily_log，否則 knowledge_summary。"""
+    """依檔名是否含日期字樣分類：有日期為 daily-log，否則 knowledge-summary。"""
     DATE_IN_FILENAME = re.compile(
         r"\d{4}-\d{2}-\d{2}|"
         r"\d{4}_\d{2}_\d{2}|"
         r"\d{8}(?!\d)|"
         r"\d{4}年\d{1,2}月\d{1,2}日"
     )
-    return "daily_log" if DATE_IN_FILENAME.search(filename) else "knowledge_summary"
+    return "daily-log" if DATE_IN_FILENAME.search(filename) else "knowledge-summary"
 
 
 def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
