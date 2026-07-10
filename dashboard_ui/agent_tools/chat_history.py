@@ -15,16 +15,12 @@
 """
 
 from datetime import datetime, timezone
-from typing import Literal
 
+from agent_tools.types_and_constants import CHAT_HISTORY_COLLECTION, AgentType, Role
 from dotenv import load_dotenv
 from loguru import logger
 from pymongo import DESCENDING
 from utils.interact_with_mongodb import get_db_atlas
-
-# ── 常數 ──────────────────────────────────────────────────────────
-AgentType = Literal["router", "rag", "planning"]
-Role = Literal["user", "model"]
 
 # ── 資料庫連線函式與環境變數呼叫 ──────────────────────────────────────────────────────────
 _get_db = get_db_atlas
@@ -46,7 +42,8 @@ def load_chat_history(
         agent_type (AgentType):  "router" | "rag" | "planning"
             各 Agent 只讀自己的歷史，避免 rag 脈絡污染 planning 推理
         role (Role | None): 可選，只讀特定 role ("user" | "model") 的紀錄；None 則 user/model 都讀
-        n (int): 輪數 (1 輪 = 1 筆 user + 1 筆 model)，預設 3 輪，實際讀取筆數 = n*2
+        n (int): 輪數 (1 輪 = 1 筆 user + 1 筆 model)，預設 3 輪，實際讀取筆數 = n*2。
+        亦可傳入 RouterAgent.CHAT_HISTORY_N | RagAgent.CHAT_HISTORY_N | PlanningAgent.CHAT_HISTORY_N | 自訂整數。
 
     Returns:
         list[dict]，格式對齊 google-genai SDK 的 contents 參數:
@@ -62,7 +59,7 @@ def load_chat_history(
         呼叫方不需要做 None 檢查。
     """
     db = _get_db()
-    collection = db["chat_history"]
+    collection = db[CHAT_HISTORY_COLLECTION]
 
     # 讀取條件: 同 session_id + 同 agent_type
     # 排序: timestamp 降冪排列（最近的排第一筆），取前 n*2 筆
@@ -97,6 +94,7 @@ def load_chat_history(
         logger.error(
             f"load_chat_history 失敗: (session={session_id[:8]}..., agent={agent_type}, role={role}), \nmsg= {e}"
         )
+        return []  # DB 出錯回空歷史，避免 docs 未定義而 UnboundLocalError，讓該輪 agent 照常繼續
 
     # 再反轉成升冪，符合 google-genai contents 的時間順序
     docs.reverse()
@@ -146,7 +144,7 @@ def save_chat_history(
     SESSION_MAX_DOCS = 100  # 安全防護：單一 session 上限
 
     db = _get_db()
-    collection = db["chat_history"]
+    collection = db[CHAT_HISTORY_COLLECTION]
 
     # ── 防護 1：message_text 長度截斷 ──────────────────────────────────
     if len(message_text) > CONTENT_MAX_CHARS:
