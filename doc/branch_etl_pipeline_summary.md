@@ -163,7 +163,7 @@ OBSIDIAN_VAULT_PATH=              # 僅 legacy 本地 scan_vault() 使用
 
 ## Task 01 v2 — Obsidian Vault Medallion ETL（變體，與 Task 01 並存）
 
-> 為對照兩種設計而建的 medallion 分層變體，程式在 `task01_obsidian_etl_v2/`，與現行 `task01_obsidian_etl` 並存、不互相取代。刻意不做 `dt=` 分區，改用 GCS Object Versioning 保留歷史版本，藉此與 task07 的 `dt=` 分區做設計對照。
+> 為對照兩種設計而建的 medallion 分層變體，程式在 `task01_obsidian_etl_v2/`，與現行 `task01_obsidian_etl` 檔案並存，但對於整個專案來說先以 task01 v2 優先往後串接其他任務。刻意不做 `dt=` 分區，改用 GCS Object Versioning 保留歷史版本，藉此與 task07 的 `dt=` 分區做設計對照。
 
 ### 資料來源
 GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcloud storage rsync` 覆蓋同步上雲。以 section 資料夾前綴過濾三類 `.md`：
@@ -180,13 +180,16 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
 - **(Silver) Transform**：`build_note_document()` 沿用 v1 清洗邏輯推導 note_type／topic／date／word_count，並解析 `![[ ]]` 組出單表內嵌的 `attached_images` 血緣；已於函式內預留 LLM enrichment 掛載點，本次不實作。
 - **(Silver) Load**：`archive_note()` 把清洗後 `.md` 與其圖片 `copy_blob` 到 **`archived-notes/`** 乾淨隔離層並回填 archived 端 path／md5；`upsert_note()` 以 `raw_md_path` 為唯一鍵冪等 upsert `obsidian_note_metadata`；任一步失敗以 `mark_note_error()` 記 `status="error"` 與 `error_msg` 落地稽核。
 - **軟刪除**：`soft_delete_missing()` 對「DB 有、raw-notes live listing 已無」的筆記標 `status="deleted"`，保留 archived 副本供稽核與供 task06 v2 purge；`present_raw_paths` 為空時防呆跳過，避免上游掃空誤刪全表。
-- **(Gold)**：`build_and_upsert_summary()` 對現況做每日快照 `notes_summary`，只計 `status="archived"` 者。
+- **(Gold)**：`build_summary` 與 `upsert_summary()` 對現況做每日快照 `notes_summary`，只計 `status="archived"` 者。
+> 由於 task07 oneone-to-markdown 採用 lazy loading 設計，onenote 筆記只會在人工審閱後觸發歸檔或退件的紀錄，這行為沒有保證週期性、沒有保證 `onenote_notes_metadata` 的快照也會像 task01 v2 的 `obsidian_notes_metadata` 快照日固定，因此目前借用定期執行的 task01 v2 的 gold 層任務，來同時快照 `obsidian_notes_metadata` 與 `onenote_notes_metadata` 兩張表，將快照結果彙整一起存入 `notes_summary`，以跟隨追蹤 task07 gold 層做歸檔、退件的進度，預計 task07 gold 層執行速度會比 task01 v2 慢上許多。
+> 待解決：目前，暫時維持同時寫入 `notes_summary` 與 task01 v1 的 `obsidian_summary` (follow 各自的 schema)，待 `obsidian_summary` 的舊資料 backfill 到 `notes_summary` 完全後，再視穩定性擇期淘汰 `obsidian_summary` (需修改 task01 v2 的 l_load_to_mongodb.py)。
 
 ### MongoDB Collections
 
 **`obsidian_note_metadata`**（每筆 = 一份 `.md`，唯一鍵 `raw_md_path`）
 ```json
 {
+  "_id" : ObjectId("6a4f4f4820b3b24ebe23b72f"),
   "note_user_id": "lucky460721",
   "notebook": "data-engineering",
   "section": "01-daily-logs",
@@ -215,7 +218,32 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
 ```
 > 決策：attachment 改**單表內嵌**而非 v1 之外的獨立 collection 加 `_id` 參考。因圖片掛在各筆記自己的 `_attachment/`、天然不跨筆記共用，正規化去重的效益低，卻要固定擔 join 與 N+1 成本。
 
-**`notes_summary`**（每日快照，唯一鍵 `snapshot_date`）：`by_type`、`by_topic`、`total_notes`、`embedded_notes`。
+**`notes_summary`**（固定每週一次快照，快照日之日期部分作為唯一鍵 `snapshot_date`，快照日當天只存最後一次快照資料）
+```json
+  {
+    "_id" : ObjectId("6a4f4f4820b3b24ebe23b72f"),
+    "snapshot_date" : ISODate("2026-07-09T00:00:00.000+0000"),  // 快照日當天只認一筆，故不存時、分、秒、毫秒。
+    "archived_notes" : 84,
+    "by_tag_in_archived_notes" : {
+                                "python-installation" : 1,
+                                "apple-mac" : 1,
+                                },
+    "by_tag_in_rejected_notes" : {},
+    "by_topic_in_archived_notes" : {
+                                "python" : 21,
+                                "ml" : 2
+                                },
+    "by_topic_in_rejected_notes" : {},
+    "by_type_in_archived_notes" : {
+                                "daily-log" : 27,
+                                "knowledge-summary" : 50,
+                                },
+    "by_type_in_rejected_notes" : {},
+    "embedded_notes" : 4,
+    "rejected_notes" : 0,
+    "total_notes" : 84,
+    }
+```
 
 ### 套件依賴
 ```
@@ -720,10 +748,10 @@ MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內�
 
 ### MongoDB Collections
 
-**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `raw_md_path`）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`）
 ```json
 {
-  "raw_md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
+  "md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
   "file_name": "xxx.md",
   "chunk_index": 0,
   "chunk_total": 6,
