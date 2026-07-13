@@ -12,7 +12,7 @@
 > - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 主鍵為 `page_id`，一個筆記只存一個版本。
 > - v02 改存 onenote 筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；ETL 只做到 Bronze layer；呼叫 LLM 生成 markdown 由前端 on-demand 觸發 (Silver layer)；人工核可後歸檔 (Gold layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
 
-> **三服務拆分（未來各自部署容器）**：v02 已從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點 8002）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點 8003）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化再解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task01_v2/task06_v2）共寫同一張向量表 `obsidian_vectors_v2`。
+> **三服務拆分（未來各自部署容器）**：v02 已從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點 8002）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點 8003）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化再解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task01_v2/task06_v2）共寫同一張向量表 `note_vectors_multimodal`。
 
 ---
 
@@ -50,11 +50,11 @@ feature/html-to-markdown/
 │   │                                                 # 回寫 md_frontmatter/md_body/dismatched/topic
 │   └── app.py                                        # Flask POST /archive（approved / rejected）
 │
-├── task08_onenote_embed_etl/                         # 向量化（解耦，寫 obsidian_vectors_v2）
+├── task08_onenote_embed_etl/                         # 向量化（解耦，寫 note_vectors_multimodal）
 │   ├── __init__.py
 │   ├── e_scan_metadata.py                            # gate 讀 C3（archived + 未向量化）、取歸檔 md
 │   ├── t_chunk_embed.py                              # chunk + 多模態 gemini-embedding-2（1536+L2）
-│   ├── l_load_to_mongodb.py                          # 先刪後插 obsidian_vectors_v2 + md_md5_hash CAS
+│   ├── l_load_to_mongodb.py                          # 先刪後插 note_vectors_multimodal + md_md5_hash CAS
 │   └── main.py                                       # E→T→L 入口（無 purge）
 │
 └── tests/
@@ -296,7 +296,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 ## Task 08 — OneNote 向量化（`task08_onenote_embed_etl/`）
 
-向量化從 task07 解耦成獨立 pipeline，目標是讓 **OneNote（task07 歸檔）** 與 **Obsidian（task01_v2 歸檔）** 兩種來源，向量化後寫入**同一張** `obsidian_vectors_v2`（同一 Atlas Vector Search index），供同一條 RAG 檢索。chunk/embed/normalize 邏輯 copy 自 `task06_obsidian_embed_etl_v2`，僅替換 ingestion 與圖片解析；`task06_v2` 本分支完全不動。
+向量化從 task07 解耦成獨立 pipeline，目標是讓 **OneNote（task07 歸檔）** 與 **Obsidian（task01_v2 歸檔）** 兩種來源，向量化後寫入**同一張** `note_vectors_multimodal`（同一 Atlas Vector Search index），供同一條 RAG 檢索。chunk/embed/normalize 邏輯 copy 自 `task06_obsidian_embed_etl_v2`，僅替換 ingestion 與圖片解析；`task06_v2` 本分支完全不動。
 
 | 面向 | 設計 |
 |------|------|
@@ -304,11 +304,9 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 | 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
 | 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)`（非 wiki-link），以 basename 對上 `attached_images[].archived_image_path` |
 | embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize（逐 chunk 多模態） |
-| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `obsidian_vectors_v2`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
-| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋蓋 `embedded_at` |
+| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
+| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
 | purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
-
-> **跨分支待辦**：`obsidian_vectors_v2` 過渡期 task06_v2 仍寫 `raw_md_path`、task08 寫 `md_path`（值皆為 archived 路徑語意），兩欄暫並存；task06_v2 的 `raw_md_path`→`md_path` 收斂由另一分支處理。`archived_md_path`（完整 gs:// URI，跨 bucket 天然唯一）即向量表與兩張 metadata 的 join 鍵，不另設 source 判別欄。
 
 ---
 
@@ -391,16 +389,17 @@ poetry run python -m unittest discover -s tests
 - [x] Silver Transform + 端點（8002）：on-demand `t_enrich_html_to_markdown()` + `html_sha_hash` 冪等快取 + LLM 服務級斷路器 + 多模態圖片判讀 + regenerate 配額 + C2 稽核
 - [x] Silver Load：enriched md 寫 GCS + upsert C3（`enriched_md_path`、`pending_review`）
 - [x] Gold 端點（8003）：approve 歸檔 archived-notes（回填 `attached_images` archived 端）/ reject 標記；退役同頁候選版本；回寫 `md_frontmatter`/`md_body`/`dismatched_*`/`topic`
-- [x] task08 向量化：gate C3（archived+未向量化）→ chunk + `gemini-embedding-2` → 先刪後插 `obsidian_vectors_v2` + `md_md5_hash` CAS 翻 `embedded_status`
+- [x] task08 向量化：gate C3（archived+未向量化）→ chunk + `gemini-embedding-2` → 先刪後插 `note_vectors_multimodal` + `md_md5_hash` CAS 翻 `embedded_status`
 - [x] `task07_common`：`audit_log.py`（C1/C2/C3 + 集中時間戳）、`gcs.py`、`hashing.py`、`topic.py`
 - [x] C3 欄位對齊 hand-over v2 定稿（第 303–347 行）；`l_archive_note.py` 的 `except (ValueError, TypeError)` 語法 bug 修正
 - [x] Unit tests 全套 **154 個測試全數通過**
 
 **後續待開發**
-- [ ] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
-- [ ] 跨分支：`obsidian_vectors_v2` 的 task06_v2 `raw_md_path`→`md_path` 收斂；RAG 檢索端知悉過渡期兩欄並存
+- [x] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
+- [x] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path`。
+- [ ] 回到 `dashboard-ui` 分支上開發使用頁面。
 - [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-08 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
+*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-09 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
