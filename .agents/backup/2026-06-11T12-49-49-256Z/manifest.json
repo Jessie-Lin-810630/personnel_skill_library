@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-11T12:49:50.466Z",
+  "scope": "project",
+  "operation": "change-to-agents",
+  "entries": [
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.agents/commands",
+      "kind": "dir",
+      "action": "create"
+    },
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.claude/commands",
+      "kind": "symlink",
+      "action": "create"
+    },
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.agents/hooks",
+      "kind": "dir",
+      "action": "create"
+    },
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.claude/hooks",
+      "kind": "symlink",
+      "action": "create"
+    },
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.agents/skills",
+      "kind": "dir",
+      "action": "create"
+    },
+    {
+      "originalPath": "/Users/little_po/Desktop/Project/06_personnel_skill_library/.claude/skills",
+      "kind": "symlink",
+      "action": "create"
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+schema: spec-driven
+
+context: |
+  Project: 個人技能看板（Personnel Skill Dashboard）
+  A Streamlit dashboard with three pages: HOME（personal skill overview）,
+  Knowledge Factory（ETL pipeline history）, and AI Knowledge Agent（Phase III）.
+  All data flows through ETL pipelines and is persisted to MongoDB Atlas.
+
+  Tech stack:
+  - Language: Python >= 3.14
+  - Environment: pyenv + Poetry
+  - Web framework: Streamlit
+  - Database: MongoDB Atlas（upsert-idempotent writes）
+  - Vector search: MongoDB Atlas Vector Search（cosine similarity, dim=1536）
+  - Embedding model: Vertex AI gemini-embedding-2（multimodal, dim=1536, L2 normalized）
+  - Cloud storage: GCP Cloud Storage（bucket: personal-vaults）
+  - AI Agent: Google Vertex AI Gemini（Phase III）
+  - Visualization: Plotly
+  - Deployment: Docker → GCP Artifact Registry → Cloud Run（Jobs for ETL, Service for dashboard）
+  - CI/CD: GitHub Actions
+  - Secrets: GCP Secret Manager（prod） / .env file（local dev）
+
+  ETL naming convention inside each task folder:
+  - e_*.py — Extract
+  - t_*.py — Transform
+  - l_*.py — Load
+  - main.py — orchestrates E → T → L
+
+  ETL tasks and their MongoDB collections (canonical v2 / lazy-loading versions; v1 retired):
+  - task01 (task01_obsidian_etl_v2): Obsidian raw-notes/ .md from GCS (medallion, Object Versioning) → CDC gate → archived-notes/ → obsidian_note_metadata, notes_summary; dev branch feature/etl-pipeline
+  - task02: GitHub REST API → github_repos, github_summary; dev branch feature/etl-pipeline
+  - task03: LeetCode GraphQL + ccClub REST API → solved_problems_on_ccClub, solved_problems_on_leetcode, ccClub&leetcode_summary; dev branch feature/etl-pipeline
+  - task05: Google Sheets API → skill_scores_biotech, skill_scores_data_eng, skill_radar_summary; dev branch feature/etl-pipeline
+  - task06 (task06_obsidian_embed_etl_v2): Obsidian archived-notes/ .md → chunking → multimodal embedding → note_vectors_multimodal (md_path lineage); dev branch feature/etl-pipeline
+  - task07 (lazy_loading three services): OneNote HTML → Markdown, medallion lazy-loading split (Bronze ETL + Silver/Gold on-demand services) → GCS data lake onenote-vaults + onenote_note_metadata; Bronze on feature/html-to-markdown, Silver/Gold finalized on feature/dashboard-ui
+  - task08: OneNote archived .md → chunking → multimodal embedding → note_vectors_multimodal (md_path lineage, shared with task06); dev branch feature/html-to-markdown
+  # retired v1: task01_obsidian_etl (obsidian_notes/obsidian_summary), task06_obsidian_embed_etl, task07_onenote_to_markdown (local-disk, eager per-page LLM)
+
+  Product language:
+  - Write proposals and specs describing observable user-facing behavior and data contracts
+  - Avoid exposing internal ETL mechanics unless they are part of the user-facing contract
+  - Put implementation details in design.md or tasks.md
+
+rules:
+  specs:
+    - Describe what data enters and exits each ETL stage, not how it is processed internally
+    - All Load steps must be upsert-idempotent; specs must state the unique key used for upsert
+    - MongoDB collection names are fixed constants; specs must reference them by their exact name
+    - Secrets must never be hardcoded; specs must specify which env var or Secret Manager key is used
+    - If a new ETL task is introduced, specify its task folder name, MongoDB collections, and upsert key
+  tasks:
+    - Each task that touches MongoDB must include a test for idempotent re-runs
+    - Each task that reads from GCS must include credential/auth setup steps
+    - New ETL tasks must add a corresponding entry to the ETL table in CLAUDE.md
+  design:
+    - Prefer MongoDB upsert over insert-or-update logic
+    - Use service account JSON files under env/ for GCP auth; never embed credentials in code
+    - Dashboard pages read from MongoDB only — no direct ETL calls from UI code
+    - Vector search uses $vectorSearch aggregation stage on note_vectors_multimodal with the obsidian_vectors_index2 index
