@@ -513,8 +513,8 @@ def upsert_summary(db: Database, summary: list[dict[str, str | dict[str, int | d
     # 再讓前端去讀 db[NOTES_SUMMARY]，確定穩定能讀取一段時間後，
     # 再刪舊表。
     final_summary_old = {
-        "by_topic": dict(by_type),
-        "by_type": dict(by_topic),
+        "by_topic": dict(by_topic),
+        "by_type": dict(by_type),
         "total_notes": all_summary["rejected_notes"] + all_summary["archived_notes"],
     }
     db["obsidian_summary"].update_one({"snapshot_date": today}, {"$set": final_summary_old}, upsert=True)
