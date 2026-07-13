@@ -391,10 +391,10 @@ class CircuitGuardTests(unittest.TestCase):
 
 class ClassifyNoteTypeTests(unittest.TestCase):
     def test_daily_log_detected(self):
-        self.assertEqual(t._classify_note_type("2026-06-30 meeting"), "daily_log")
+        self.assertEqual(t._classify_note_type("2026-06-30 meeting"), "daily-log")
 
     def test_knowledge_summary_default(self):
-        self.assertEqual(t._classify_note_type("RAG architecture"), "knowledge_summary")
+        self.assertEqual(t._classify_note_type("RAG architecture"), "knowledge-summary")
 
 
 class ConvertImgTagTests(unittest.TestCase):
