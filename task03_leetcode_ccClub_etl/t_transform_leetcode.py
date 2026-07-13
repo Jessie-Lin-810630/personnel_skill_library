@@ -11,7 +11,7 @@ Transform：接收 e_query_leetcode_graphql 所抓取的 用戶已解題清單 �
 
 函式設計：
 (1) build_problem_feat_documents(): 從用戶已解題清單擷取需要的題型特徵與題號，
-    以其符合自定義的 MongoDB schema(document)。
+以其符合自定義的 MongoDB schema(document)。
 (2) build_leetcode_summary_partial(): 接收上一支函式清洗出來的題型特徵文檔、
 以及 e_query_leetcode_graphql 任務爬取到的統計結果，產出leetcode刷題進度彙整文檔。
 """
@@ -52,6 +52,13 @@ def build_leetcode_summary_partial(
     }
     """
     logger.info("Building partial summary documents for leetcode...")
+
+    if len(feature_docs) == 0 and solved_problem_stats[0].get("count", 0) != 0:
+        logger.warning(
+            "Feature_docs is empty list while there are some solved problems. "
+            "Information is not consistent. Please check the upstream task result."
+        )
+        return {}
 
     # 統計 topic 出現次數後轉百分比
     topic_count = defaultdict(int)

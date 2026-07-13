@@ -334,6 +334,15 @@ class LeetCodeTransformTests(unittest.TestCase):
         self.assertEqual(summary["problemDifficultyOnLeetcode"], solved_problem_stats)
         self.assertEqual(summary["topicsPercentOnLeetcode"], {"Array": 66.67, "DP": 33.33})
 
+    def test_build_leetcode_summary_partial_returns_empty_when_features_empty_but_stats_nonzero(self):
+        # cookies 過期時上游帶空 feature_docs，但 stats 仍反映有解題數，判定資料不一致，回傳空 dict
+        feature_docs = []
+        solved_problem_stats = [{"difficulty": "All", "count": 15}]
+
+        summary = t_transform_leetcode.build_leetcode_summary_partial(feature_docs, solved_problem_stats)
+
+        self.assertEqual(summary, {})
+
 
 class CcClubTransformTests(unittest.TestCase):
     def test_build_ccclub_problem_documents_normalizes_missing_fields(self):
@@ -463,6 +472,14 @@ class LeetCodeLoadTests(unittest.TestCase):
         self.assertEqual(collection.update_filter, {"snapshot_date": "2026-05-05"})
         self.assertEqual(collection.update_doc, {"$set": summary})
         self.assertTrue(collection.update_upsert)
+
+    def test_upsert_leetcode_summary_partial_skips_when_summary_empty(self):
+        # 上游回傳空 dict（資料不一致）時，直接跳過 upsert，不觸碰 collection
+        db = FakeDb()
+
+        l_load_leetcode_doc_to_mongodb.upsert_leetcode_summary_partial(db, {})
+
+        self.assertNotIn("ccClub&leetcode_summary", db.collections)
 
 
 class CcClubLoadTests(unittest.TestCase):
