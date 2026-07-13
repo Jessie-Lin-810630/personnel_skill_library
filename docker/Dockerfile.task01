@@ -8,6 +8,6 @@ COPY requirements.txt .
 RUN python -m pip install  --no-cache-dir -U pip setuptools wheel && \
     python -m pip install --no-cache-dir -r requirements.txt
 
-COPY task01_obsidian_etl/ ./task01_obsidian_etl/
+COPY task01_obsidian_etl_v2/ ./task01_obsidian_etl_v2/
 
-CMD ["python", "-m", "task01_obsidian_etl.main"]
+CMD ["python", "-m", "task01_obsidian_etl_v2.main"]
