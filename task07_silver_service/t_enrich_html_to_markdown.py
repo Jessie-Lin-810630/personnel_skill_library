@@ -416,12 +416,3 @@ def t_enrich_html_to_markdown(
     md_path, _ = save_enriched_md(page_id, dt, page_title, processed_prefix, md_content)
     logger.success(f"enriched {page_title}（{usage['total_tokens']} tokens）")
     return {"status": "pending_review", "cache_hit": False, "md_path": md_path, "circuit_open": False}
-
-
-# if __name__ == "__main__":
-#     client = _get_genai_client()
-#     result = t_enrich_html_to_markdown("0-b43f9de7dc534591aefa34e1f6fb45b7!1-A5F7F5395D4FB9F!209", "2026-07-01")
-#     print(result)
-#     md_path = result.get("md_path")
-#     processed_md = gcs.download_text(md_path)
-#     print(processed_md)
