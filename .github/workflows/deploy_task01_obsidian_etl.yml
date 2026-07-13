@@ -4,7 +4,7 @@ on:
   push:
     branches: [develop]
     paths:
-      - 'task01_obsidian_etl/**'
+      - 'task01_obsidian_etl_v2/**'
       - 'docker/Dockerfile.task01'
       - 'requirements.txt'
 
