@@ -66,18 +66,4 @@ def run_task06_v2():
 
 
 if __name__ == "__main__":
-    from pathlib import Path
-
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    # 將路徑轉為絕對路徑，確保不論在哪個目錄執行都不會出錯
-    json_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not json_path:
-        logger.error("請確認 .env 已設定 GOOGLE_APPLICATION_CREDENTIALS")
-        raise EnvironmentError("請確認 .env 已設定 GOOGLE_APPLICATION_CREDENTIALS")
-    absolute_path = Path(json_path).resolve()
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(absolute_path)
-
     run_task06_v2()
