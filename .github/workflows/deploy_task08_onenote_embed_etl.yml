@@ -1,0 +1,38 @@
+name: Deploy task08-onenote-embed-etl
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'task08_onenote_embed_etl/**'
+      - 'docker/Dockerfile.task08'
+      - 'requirements.txt'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
+
+      - name: Build and Push
+        run: |
+          docker build \
+            --platform=linux/amd64 \
+            -f docker/Dockerfile.task08 \
+            -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task08-onenote-embed-etl:latest \
+            .
+          docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task08-onenote-embed-etl:latest
