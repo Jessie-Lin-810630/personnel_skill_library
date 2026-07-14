@@ -35,7 +35,7 @@ SILVER_URL = os.getenv("SILVER_ENDPOINT_URL", "")
 GOLD_URL = os.getenv("GOLD_ENDPOINT_URL", "")
 
 st.set_page_config(
-    page_title="RAG 檢索資料庫協作平台",
+    page_title="企業知識資料庫協作平台",
     page_icon="🗂️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -65,17 +65,49 @@ if not st.session_state.get("authenticated"):
 ">
     <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; font-weight:800;
         margin:0 0 0.6rem 0; line-height:1.1;">
-        🧠 RAG 檢索資料庫協作平台
+        🧠 企業知識資料庫協作平台
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
-        從日常筆記到企業智慧的關鍵一步
+        從日常工作筆記到企業智慧的關鍵一步
     </p>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    # ── 兩欄：左邊文案 / 右邊登入表單 ──
+    # ── 引言（獨立一區，全寬）──
+    st.markdown(
+        f"""
+<div style="color:{color_map["FONT_CLR"]}; line-height:1.85; font-size:0.95rem;">
+
+<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 0.6rem 0;">
+    這個頁面在做什麼？
+</p>
+
+<p>多數人在日常工作中會使用公司購買的企業版帳號，登入筆記簿來記載工作歷程、會議記錄、案例經驗，例如 Microsoft OneNote，
+而這些經常蘊藏了部門歷經無數專案累積下來的珍貴實力之結晶，然而，
+部分筆記軟體的存放文本與圖片的格式，並非對 AI 工具的模型友善，
+<strong style="color:{color_map["ORANGE"]};">您或許不知道 OneNote 背後採用的是 HTML 標記式語言排版，
+雖然對人類視覺上來說負擔較輕鬆，但對 AI 模型輸入時卻充滿「雜訊」。</strong>
+直接倒入企業共用知識庫，讓模型去檢索時，可能產生誤解、遺漏甚至幻覺、雜訊也浪費上下文空間，推高組織的金錢成本。
+或退一步來說，人類隨手記錄的文本也可能因為原始語意不全，而不適合直接餵給模型去檢索。<br><br>
+<strong>—— 因此需要在整合 AI 工具、打破數據孤島前，透過一條穩健的數據管道來強壯您的資料，
+不因資料的品質而衝擊未來對系統的信任度。</strong><br><br>
+管道採用獎章架構（Medallion Architecture)，透過銅、銀、金三層：<br>
+🥉 自動把筆記從 OneNote 萃取下來。<br>
+🥈 擴寫語意，補強人類在忙碌之中來不及表達完善的上下文，讓原始資料要呈現的故事更健壯。<br>
+<strong style="color:{color_map["ORANGE"]};">🏅 轉換為對模型負擔最小的的純文字結構 (Markdown)</strong>，
+<strong>但 LLM 生成的內容不會直接進入企業知識庫，它必須先通過這裡的人工審核，核可後才會歸檔，
+自動被引入企業檢索系統，成為系統背後的 Grounding Truth，
+<strong style="color:{color_map["ORANGE"]};">以透明可見的 human-in-loop 協作，避免衍生對 AI 工具的不信任。</strong><br>
+—— 這個頁面，就是負責把關的金牌閘門。</p>
+
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    st.divider()
+    # ── 兩欄：左下說明＋卡片 / 右下登入表單 ──
     content_col, form_col = st.columns([3, 2], gap="large")
 
     with content_col:
@@ -83,22 +115,22 @@ if not st.session_state.get("authenticated"):
             f"""
 <div style="color:{color_map["FONT_CLR"]}; line-height:1.85; font-size:0.95rem;">
 
-<p>在 AI 浪潮湧現的時代，企業數位轉型的關鍵往往不在於引進多強大的 AI 模型，而是在於
-<strong style="color:{color_map["TEAL"]};">我們如何餵養它正確的知識</strong>。</p>
-
-<p>您在 OneNote 中記錄的點點滴滴，是部門歷經無數專案累積下來的珍貴業務結晶。然而，OneNote
-背後隱藏的大量 HTML 程式碼，對人類好看的格式，卻會成為 AI 閱讀時的「雜訊」，導致 AI
-在檢索時產生誤解、遺漏甚至胡言亂語。</p>
-
-<p>這個系統透過自動化 ETL 數據管道，將 OneNote 筆記萃取、清洗並轉換為
-<strong style="color:{color_map["TEAL"]};">AI 最喜歡的純淨結構（Markdown）</strong>。</p>
-
-<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin-top:1.4rem;">
-    為什麼需要您的參與？
+<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 0.6rem 0;">
+    登入後，您會做什麼？
 </p>
 
-<p>AI 雖然運算快速，但它不懂您部門的真實業務邏輯。與其擔心被 AI 取代，我們更應該成為
-<strong>「督導 AI 的決策者」</strong>。當您在審核時，請帶著以下三個眼光做最後把關：</p>
+<p>依序選擇 <strong>筆記本 → 章節 → 頁面</strong> 叫出待審筆記，左側是原始 OneNote 內容、右側是
+LLM 擴寫後的版本，逐頁比對。滿意就點 <strong>核可（Approve）</strong> 送進知識庫；擴寫得不理想可點
+<strong>重新生成（Regenerate）</strong> 讓模型再試一次（有次數上限）；內容不適合收錄則
+<strong>退件（Reject）</strong>。同一頁的舊版本也可切換回看，方便追溯。</p>
+
+<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin-top:1.4rem;">
+    審核時，建議守住這三條原則
+</p>
+
+<p>模型運算輸出高速，但不懂您部門的真實業務邏輯。與其擔心被 AI 取代，不如成為
+<strong>「督導 AI 的決策者」</strong>—— 每次核可，都請對照以下三個眼光把關，這不只是形式，
+而是知識庫品質與資訊安全的最後一道防線：</p>
 
 </div>
 """,
@@ -170,7 +202,7 @@ if not st.session_state.get("authenticated"):
     padding: 2rem 2rem 1.5rem;
 ">
     <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
-        🔐 知識把關者登入
+        🔐 治理人員登入
     </p>
 """,
             unsafe_allow_html=True,
@@ -325,7 +357,7 @@ page_versions.sort(key=lambda v: str(v.get("html_downloaded_at", "")), reverse=T
 def _version_label(v: dict) -> str:
     """圓鈕顯示文字：dt + 下載時間 + 是否已生成 md。"""
     dt = v.get("dt", "?")
-    mark = "✅ 已生成，可審閱" if v.get("md_path") else "🟠 尚未生成，切換版本後觸發生成即可開始審閱"
+    mark = "✅ 已生成，可審閱" if v.get("enriched_md_path") else "🟠 尚未生成，切換版本後觸發生成即可開始審閱"
     return f"{dt}　{mark}"
 
 
@@ -339,7 +371,7 @@ version = page_versions[selected_idx]
 page_id = version.get("page_id", "")
 dt = version.get("dt", "")
 html_uri = version.get("html_path", "")
-md_uri = version.get("md_path")
+md_uri = version.get("enriched_md_path")
 status = version.get("status", "")
 
 # 逐版本判斷：只有選中版本自己已歸檔時，該版唯讀、按鈕失效（不影響其他版本）。
