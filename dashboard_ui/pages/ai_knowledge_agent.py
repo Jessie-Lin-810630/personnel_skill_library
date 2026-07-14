@@ -10,8 +10,10 @@ import uuid
 
 import streamlit as st
 from agent_tools.query_rewriter import _load_alias_to_tags_map, _load_known_tags
+from agent_tools.types_and_constants import NoteCollections
 from agents import planning_agent, rag_agent
 from agents.intent_router_agent import route
+from dotenv import load_dotenv
 from utils.interact_with_mongodb import get_db_atlas
 from utils.ui_elements import _render_side_bar, color_map
 
@@ -30,13 +32,95 @@ from utils.ui_elements import _render_side_bar, color_map
 #        st.stop()
 # 官方文件: https://docs.streamlit.io/develop/api-reference/user/st.login
 
+load_dotenv()
+
 # ── Page config（必須是第一個 Streamlit 指令）───────────────────────────────
 st.set_page_config(
-    page_title="AI Knowledge Agent",
+    page_title="",
     page_icon="🤖",
     layout="wide",
 )
 _render_side_bar()
+
+# ─────────────────────────────────────────
+# Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）
+# 暫時方案：待上方 TODO（第 19-33 行）的 Google OAuth（st.login）設定完成後，
+# 即可移除本區塊、改回 st.login("google") 流程。
+# ─────────────────────────────────────────
+CREDENTIALS = [
+    (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
+    (os.getenv("ROLE_OWNER_USERNAME", ""), os.getenv("ROLE_OWNER_PASSWORD", ""), "Note Owner"),
+    (os.getenv("ROLE_SENIOR_USERNAME", ""), os.getenv("ROLE_SENIOR_PASSWORD", ""), "Dept. Senior Specialist"),
+]
+
+if not st.session_state.get("authenticated"):
+    st.markdown(
+        f"""
+<div style="
+    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
+    border-radius: 16px;
+    padding: 2rem 3rem;
+    margin-bottom: 1.8rem;
+    border: 1px solid #2a3550;
+    text-align: center;
+">
+    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.6rem 0; font-weight:800;">
+        🤖 AI Knowledge Agent
+    </h1>
+    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
+        筆記語意查詢 · 摘要 · 個人化學習路徑規劃
+    </p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    _, form_col, _ = st.columns([1, 2, 1])
+    with form_col:
+        st.markdown(
+            f"""
+<div style="
+    background: rgba(255,255,255,0.03);
+    border: 1px solid #2a3550;
+    border-radius: 16px;
+    padding: 2rem 2rem 1.5rem;
+">
+    <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
+        🔐 授權人員登入
+    </p>
+""",
+            unsafe_allow_html=True,
+        )
+
+        username = st.text_input("帳號", key="login_user", placeholder="輸入您的帳號")
+        password = st.text_input("密碼", type="password", key="login_pwd", placeholder="輸入您的密碼")
+
+        if st.button("登入", width="stretch", type="primary"):
+            if not username or not password:
+                st.warning("請輸入帳號與密碼。")
+            else:
+                matched_role = next(
+                    (role for u, p, role in CREDENTIALS if u and p and u == username and p == password),
+                    None,
+                )
+                if matched_role:
+                    st.session_state.authenticated = True
+                    st.session_state.role = matched_role
+                    st.rerun()
+                else:
+                    st.error("帳號或密碼錯誤，請重試。")
+
+        st.markdown(
+            """
+    <p style="color:#4a5568; font-size:0.78rem; text-align:center; margin-top:1rem;">
+        此平台僅供授權人員使用<br>登入即代表您同意以指定角色進行操作
+    </p>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    st.stop()
 
 # ── Rate limit（環境變數可覆蓋，fallback = 20）──────────────────────────────
 RATE_LIMIT = int(os.getenv("AI_AGENT_RATE_LIMIT", "20"))
@@ -55,8 +139,8 @@ if "planning_map_generated" not in st.session_state:
 # 每個 session 只查一次 MongoDB，快取進 session_state 避免每輪重查。
 if "alias_tag_pairs" not in st.session_state:
     _db = get_db_atlas()
-    st.session_state["alias_tag_pairs"] = _load_alias_to_tags_map(_db, "obsidian_notes")
-    st.session_state["known_tags"] = _load_known_tags(_db, "obsidian_vectors_multimodal")
+    st.session_state["alias_tag_pairs"] = _load_alias_to_tags_map(_db, NoteCollections.OBSIDIAN)
+    st.session_state["known_tags"] = _load_known_tags(_db, NoteCollections.VECTOR)
 
 # ── Sidebar 控制區 ───────────────────────────────────────────────────────────
 with st.sidebar:
@@ -91,6 +175,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# 左側留白把「角色 + 登出」推到右上角並貼近，減少視覺跨度；vertical center 讓文字與按鈕同高
+_spacer, role_col, logout_col = st.columns([7, 2, 1], vertical_alignment="center")
+with role_col:
+    st.markdown(
+        f"<div style='text-align:right;'>目前角色：<b>{st.session_state.role}</b></div>",
+        unsafe_allow_html=True,
+    )
+with logout_col:
+    if st.button("登出", width="stretch"):
+        st.session_state.pop("authenticated", None)
+        st.session_state.pop("role", None)
+        st.rerun()
+
 
 # ── Helper：來源清單渲染 ──────────────────────────────────────────────────────
 def _render_sources(sources: list[dict]) -> None:
@@ -118,7 +215,7 @@ if st.session_state["api_call_count"] >= RATE_LIMIT:
     st.stop()
 
 # ── Chat input ───────────────────────────────────────────────────────────────
-query = st.chat_input("輸入問題....可以詢問（筆記查詢 / 摘要 / 學習路徑）")
+query = st.chat_input("輸入問題....可以詢問（筆記查詢 / 筆記摘要）")
 
 if query:
     # 1. 立即顯示使用者訊息
