@@ -76,7 +76,7 @@ topic_features = {
 # 頁面設定
 # ─────────────────────────────────────────
 st.set_page_config(
-    page_title="Jessie Lin技能儀表與知識庫",
+    page_title="From Jessie-BIO to Jessie-DE",
     page_icon="⚡️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -89,8 +89,6 @@ _render_side_bar()
 st.markdown(
     """
             <style>
-            /* 移除 Streamlit 預設上方留白 */
-            .block-container { padding-top: 2rem; padding-bottom: 2rem; }
             /* metric 數值字體放大 */
             [data-testid="stMetricValue"] { font-size: 2.5rem !important; }
             /* KPI 卡片底色 */
@@ -126,27 +124,33 @@ st.markdown(
     border: 1px solid #2a3550;
     text-align: center;
 ">
-    <p style="color:#7a9cc0; font-size:0.95rem; margin:0 0 0.3rem 0; letter-spacing:3px;">
-        PERSONAL SKILLS DASHBOARD
     </p>
-    <h1 style="color:#e0e8f8; font-size:2.2rem; margin:0 0 0.4rem 0; font-weight:800;">
-        Jessie Lin 生技製藥 x 資料工程雙棲夢
+    <h1 style="color:#e0e8f8; font-size:2.2rem; margin:0 0 0.5rem 0; font-weight:1000;">
+        From 生物製藥製程 to 資料工程
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
-        我是 Jessie，一個沈浸 8 年生技製藥產業，領悟對數據的熱忱，並且在未來
-        10 年追求極致有效率的資料治理工程的化工人。<br>
-        這裡紀錄著我的學習歷程、實作產出，與知識庫問答機器。
+        我是 Jessie，在生技製藥產業工作 9 年的化工畢業生，<br>
+        以前我忙碌於技術移轉、跨部門業務語意對齊、資料探勘、挖掘數據價值。<br>
+        但對自己下一段旅途的承諾，是從使用數據的人，成為為數據造橋的人。<br>
     </p>
-    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
+    <p style="color:{color_map["GREEN"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
+        9 年以來，讓我有動力已不是分析本身，而是更前面的一步 —— <br>
+        那些散落在不同系統、不同格式裡的資料，怎麼有效率被收攏、不會在過程中漏接。<br>
+        這些任務可能不總是令人稱羨，但我就是覺得，把橋造好，後面的人才走得穩。<br>
+        <br>
+    </p>
+    <p style="color:{color_map["PINK"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
+        這裡是新旅途起步的地方，紀錄著我實作產出紀錄與知識問答庫，如果想多認識我也歡迎逛逛我的
         <a href="https://github.com/Jessie-Lin-810630"
         target="_blank"
-        style="color:#90c2ff; text-decoration:none;">
+        style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
         Github
         </a>
+          |
         <a href="https://www.linkedin.com/in/shu-jyuan-lin-6195b8130"
         target="_blank"
-        style="color:#90c2ff; text-decoration:none;">
-          |  LinkedIn
+        style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
+        LinkedIn
     </p>
 </div>
 """,
