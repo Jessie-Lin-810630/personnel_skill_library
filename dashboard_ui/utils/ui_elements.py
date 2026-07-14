@@ -11,13 +11,17 @@ from utils.precomputing import _normalize_radar_label
 color_map = dict(
     BG="#0d1526",
     CARD_BG="#55575AD8",
+    GRAY="#7a9cc0",
+    GREEN="#1baf7a",
+    RED="#e34948",
     TEAL="#00d4c8",
     PURPLE="#9b6dff",
     PINK="#ff6dbd",
-    FONT_CLR="#e0e8f8",
     ORANGE="#f97316",
     WHITE="#ffffff",
     LIGHTBLUE="#90c2ff",
+    SKYBLUE="#2f8fca",
+    FONT_CLR="#e0e8f8",
 )
 
 plotly_layout_base = dict(
@@ -39,8 +43,14 @@ def _render_side_bar():
     """
     st.sidebar.page_link("app.py", label="HOME", icon="🏠")
     st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
-    st.sidebar.page_link("pages/onenote_review.py", label="OneNote Review", icon="🔍")
-    st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI Knowledge Agent", icon="🤖")
+    st.sidebar.page_link("pages/knowledge_factory2.py", label="Chasing Data Engineering", icon="🏭")
+    with st.sidebar:
+        st.divider()
+        st.caption("My artifacts")
+        st.sidebar.page_link("pages/onenote_review.py", label="OneNote Review System for RAG", icon="🔍")
+        st.sidebar.page_link("pages/ingestion_data_quality.py", label="Data Ingestion Quality", icon="📦")
+        st.sidebar.page_link("pages/retrieval_search_quality.py", label="RAG - Retrieval Quality", icon="🎯")
+        st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI Agent - Query and Answering", icon="🤖")
     return None
 
 
