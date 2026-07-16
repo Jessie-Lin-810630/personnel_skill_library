@@ -20,6 +20,8 @@ Optional .env keys:
 import os
 import re
 
+import google.auth.transport.requests
+import google.oauth2.id_token
 import markdown as md_lib
 import requests
 import streamlit as st
@@ -396,11 +398,16 @@ def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
     """POST Silver enrich 端點，回傳 (result_dict, error_msg)。"""
     if not SILVER_URL:
         return None, "SILVER_ENDPOINT_URL 未設定，無法呼叫 Silver 端點。"
+
+    auth_req = google.auth.transport.requests.Request()
+    token = google.oauth2.id_token.fetch_id_token(auth_req, SILVER_URL)
+
     try:
         resp = requests.post(
             SILVER_URL,
             json={"page_id": page_id, "dt": dt, "trigger": trigger},
             timeout=180,
+            headers={"Authorization": f"Bearer {token}"},
         )
     except requests.exceptions.ReadTimeout:
         return None, "端點回應逾時（LLM 生成耗時，請稍後重新整理確認）。"
@@ -547,11 +554,15 @@ def _call_gold(action: str) -> None:
         st.error("找不到GOLD URL！")
         return
     with st.spinner(f"{action} 任務執行中..."):
+        auth_req = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(auth_req, GOLD_URL)
+
         try:
             resp = requests.post(
                 GOLD_URL,
                 json={"page_id": page_id, "dt": dt, "role": st.session_state.role, "action": action},
                 timeout=180,
+                headers={"Authorization": f"Bearer {token}"},
             )
         except requests.exceptions.ReadTimeout:
             st.error("回應逾時 (GCS 複製耗時，請聯繫客服，重新整理確認是否已歸檔)。")
