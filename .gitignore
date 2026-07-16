@@ -221,3 +221,7 @@ googlesheet-user.json
 # log stuff generated during testing python scripts
 doc/*.jsonl
 */logs/*.jsonl
+
+# some stuff should personal-use or learning local
+dashboard_ui/images/
+explain_by_skill
