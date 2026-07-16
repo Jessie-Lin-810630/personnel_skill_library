@@ -1,22 +1,28 @@
-import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
 import textwrap
-from utils.precomputing import (_normalize_radar_label)
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from utils.precomputing import _normalize_radar_label
 
 # ─────────────────────────────────────────
 # Plotly 色條
 # ─────────────────────────────────────────
-color_map = dict(BG="#0d1526",
-                 CARD_BG="#55575AD8",
-                 TEAL="#00d4c8",
-                 PURPLE="#9b6dff",
-                 PINK="#ff6dbd",
-                 FONT_CLR="#e0e8f8",
-                 ORANGE="#f97316",
-                 WHITE="#ffffff",
-                 LIGHTBLUE="#90c2ff")
+color_map = dict(
+    BG="#0d1526",
+    CARD_BG="#55575AD8",
+    GRAY="#7a9cc0",
+    GREEN="#1baf7a",
+    RED="#e34948",
+    TEAL="#00d4c8",
+    PURPLE="#9b6dff",
+    PINK="#ff6dbd",
+    ORANGE="#f97316",
+    WHITE="#ffffff",
+    LIGHTBLUE="#90c2ff",
+    SKYBLUE="#2f8fca",
+    FONT_CLR="#e0e8f8",
+)
 
 plotly_layout_base = dict(
     paper_bgcolor="rgba(0,0,0,0)",  # 代表完全透明 (Alpha = 0)
@@ -31,11 +37,19 @@ plotly_layout_base = dict(
 
 
 def _render_side_bar():
-    """Customize demonstrating style of the nevigation bar after switch off 
-        `showSidebarNavigation` in .streamlit/config.toml.
+    """Customize demonstrating style of the nevigation bar.
+
+    Applies after switching off `showSidebarNavigation` in .streamlit/config.toml.
     """
     st.sidebar.page_link("app.py", label="HOME", icon="🏠")
-    st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
+    st.sidebar.page_link("pages/knowledge_factory.py", label="Chasing Great Data Engineering", icon="🏭")
+    with st.sidebar:
+        st.divider()
+        st.caption("My artifacts")
+        st.sidebar.page_link("pages/onenote_review.py", label="OneNote Review System for RAG", icon="🔍")
+        st.sidebar.page_link("pages/ingestion_data_quality.py", label="Data Ingestion Quality", icon="📦")
+        st.sidebar.page_link("pages/retrieval_search_quality.py", label="RAG - Retrieval Quality", icon="🎯")
+        st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI Agent - Query and Answering", icon="🤖")
     return None
 
 
@@ -82,37 +96,45 @@ def _selected_axis_from_event(event):
     return _normalize_radar_label(customdata or theta)
 
 
-def _render_task_detail(title, labels, tasks_dict, chart_event, key_prefix):
+def _render_task_selectbox(labels, tasks_dict, chart_event, key_prefix):
     axis_options = _radar_axis_options(labels)
     selected_from_chart = _selected_axis_from_event(chart_event)
-    default_axis = selected_from_chart if selected_from_chart in axis_options else axis_options[0]
 
-    st.markdown(f"##### {title}")
     fallback_axis = st.selectbox(
-        "點擊下拉式選單決定軸向：",
+        "點擊下拉式選單決定軸向",
         options=axis_options,
-        index=axis_options.index(default_axis),
+        index=None,
+        placeholder="點擊下拉式選單決定軸向",
+        label_visibility="collapsed",
         key=f"{key_prefix}_axis_select",
     )
     selected_axis = selected_from_chart if selected_from_chart in axis_options else fallback_axis
+    return selected_axis, tasks_dict
+
+
+def _render_task_table(selected_axis, tasks_dict):
     task_df = _task_dataframe(selected_axis, tasks_dict)
-    st.dataframe(
-        task_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "經手任務": st.column_config.TextColumn(
-                "經手任務",
-                width="large",
+    with st.expander("收合/展開", expanded=True, type="compact"):
+        if task_df.empty:
+            st.info("點擊上方的下拉式選單決定軸向")
+        else:
+            st.dataframe(
+                task_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "經手任務": st.column_config.TextColumn(
+                        "經手任務",
+                        width="large",
+                    )
+                },
+                row_height=80,
             )
-        },
-        row_height=80,
-    )
 
 
 def make_radar(labels, values, color, title, tasks_dict):
-    """
-    tasks_dict: { label_str: [task1, task2, ...] }
+    """繪製雷達圖，tasks_dict 格式為 { label_str: [task1, task2, ...] }。
+
     Hover tooltip 顯示該軸向的代表任務清單。
     """
     # 組合 hover 文字（每個軸向）
@@ -132,19 +154,21 @@ def make_radar(labels, values, color, title, tasks_dict):
     customdata_closed = customdata + [customdata[0]]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatterpolar(
-        mode="lines+markers",
-        marker=dict(size=9, color=color),
-        r=values + [values[0]],
-        theta=labels + [labels[0]],
-        fill="toself",
-        fillcolor=color.replace(")", ", 0.25)").replace("rgb", "rgba"),
-        line=dict(color=color, width=2.5),
-        name=title,
-        text=hover_texts_closed,
-        customdata=customdata_closed,
-        hovertemplate="%{text}<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatterpolar(
+            mode="lines+markers",
+            marker=dict(size=9, color=color),
+            r=values + [values[0]],
+            theta=labels + [labels[0]],
+            fill="toself",
+            fillcolor=color.replace(")", ", 0.25)").replace("rgb", "rgba"),
+            line=dict(color=color, width=2.5),
+            name=title,
+            text=hover_texts_closed,
+            customdata=customdata_closed,
+            hovertemplate="%{text}<extra></extra>",
+        )
+    )
     radar_layout = {**plotly_layout_base, "margin": dict(l=70, r=70, t=30, b=20)}
     fig.update_layout(
         **radar_layout,
@@ -153,7 +177,8 @@ def make_radar(labels, values, color, title, tasks_dict):
             domain=dict(x=[0.18, 0.82], y=[0.08, 0.95]),
             bgcolor="rgba(255,255,255,0.03)",
             radialaxis=dict(
-                visible=True, range=[0, 5],
+                visible=True,
+                range=[0, 5],
                 tickvals=[1, 2, 3, 4, 5],
                 ticktext=["Lv1", "Lv2", "Lv3", "Lv4", "Lv5"],
                 tickfont=dict(size=10, color="#dfe1e6"),

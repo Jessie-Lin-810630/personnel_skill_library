@@ -1801,10 +1801,30 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 1. In the branch `feature/html-to-markdown`, revised the [task07](../task07_onenote_to_markdown_lazy_loading/) to reduce the difference of schema designs between task01 that ingested the notes from Obsidian App and this task07 that ingested the notes from OneNote App. Most of columns in [task07](../doc/task07_onenote_versioned_etl_hand_over_v2.md) were all almost similar except for the hash calculation for raw-notes and existence of columns to address the metadata of processed-notes in Silver layer. The gold layer, storing the archived-notes prior to embedding to RAG, are described in the same business meaning in their individual tables.
     > Next Step: *`dashboard_ui/pages/onenote_review.py` 第 328,342 行應使用enriched_md_path，否則版本清單會誤判尚未生成。*
 2. Estabslished [task08](../task08_onenote_embed_etl/) for embedding the OneNote archived-note markdown files to vector database. The design of the task08 almost the same as the embedding task06 that handles the archived-notes from Obsidian.
-    > Next Step: Minor correct the column name of vector database collection `note_vectors_multimodal` from `raw_md_path` to `md_path` in order to correct the business meaning:
+    > Next Step: Minor correct the column name of vector database collection `obsidian_vectors_v2` from `raw_md_path` to `md_path` in order to correct the business meaning:
     > - Source of any embed should be archived notes in markdown file and no longer raw notes or processed notes. The latter two only valued in bronze and silver layer. Source of embed should come from gold layer (i.e., archived notes).
     > - To accommodate the archived .md from both task07 (handling OneNote) and task01 (handling Obsidian), the column name of `md_path` does not specifiy the note APP name. (Neither `onenote_md_path` nor `obsidian_md_path` were used. Just `md_path`).
     > - Same requirements for the column `image_paths`. This column point to the paths of archived images of a note without limiting to any specific note APP.
+
+3. 修正 [task01-v2 `l_load_to_mongodb.py`](../task01_obsidian_etl_v2/l_load_to_mongodb.py) 歸檔 `.md` 帶著髒 frontmatter 的問題。
+    - **問題**：`t_clean_obsidian.py` 已在 `build_note_document` 算出乾淨的 `archived_md_frontmatter`（tags/date/type/alias 四欄），但 `archive_note` 原本用 `_copy_blob()` 直接把 raw `.md` 原樣複製到 `archived-notes/`，等於把未清洗的原始 frontmatter 一起搬進 Gold 層。
+    - **修法**：新增 `_upload_clean_md()` 取代 `.md` 那段的 `_copy_blob()`——download raw → `frontmatter.loads` → `post.metadata.update(乾淨 frontmatter)` → `frontmatter.dumps` → `upload_from_string` 到 archived 路徑，回傳 archived 端 md5。圖片仍走 `_copy_blob`（二進位原樣搬）。
+    - **取捨**：直接沿用 `note_doc["archived_md_frontmatter"]` 而非在 Load 層重呼叫 `_extract_frontmatter`，避免重算、也避免 `l_` 反向 import `t_`；並保證寫進 GCS 檔案的 frontmatter 與寫進 MongoDB 的欄位為單一事實來源。
+    > **延伸設計討論（未實作，記錄結論）**：此修法讓 raw `.md` 在一次 loop iteration 內被 `download_as_text` 兩次（Transform 一次、Load 的 `_upload_clean_md` 一次），連帶 `frontmatter.loads` 也 parse 兩次。討論過的優化方向：
+    > - **A. 把 `text` 往下傳給 `archive_note`**：消掉第 2 次下載，改動最小，維持分層。
+    > - **B. 傳已 parse 的 `frontmatter.Post` 物件**：下載與 parse 都省，但**否決**——部分 orchestration tool 不接受傳遞這類物件，換工具跑腳本會踩坑。
+    > - **C. 在 Transform 就產好「乾淨 frontmatter 的 md 字串」、Load 退化成純 writer**：語意最貼合 repo 的 `t_`/`l_` 归类准则（改寫 body 屬 Transform），但需改 `build_note_document` 回傳合約（tuple/dataclass），連動 `main.py` 與測試。
+    > - **關鍵洞見**：A 與 C 都會讓「長文本」穿過 task 邊界，一旦上 Airflow 會撞 **XCom 長度限制**（預設約 48KB）。真正的約束不是 T/L 概念線，而是 orchestration 的 task 邊界＝什麼 payload 過 XCom。
+    > - **結論**：**單 process** 就 collapse 掉重複下載（A/C 皆可）；**一旦上 orchestration**，把 `build_note_document + archive_note` 綁成同一個 T unit，長文本全程留在 unit 內、只吐小 dict（`note_doc`）給 L（`upsert_note`）——同時避開重複下載與 XCom 限制。代價是 DAG 節點跨了 t/l 概念階段（職責略模糊）＋犧牲 L 獨立重試粒度（但兩者皆冪等、成本低，可接受）。檔名前綴（概念意圖）與 DAG task 分組（執行時 payload 邊界）本是兩條可不對齊的軸，只要函式命名對「寫入＝Load」保持誠實即可。
+    > - **caveat**：`note_doc` 內嵌的 `attached_images` 血緣 list 才是可能撐大 payload 的地方（非 frontmatter），圖多的極端筆記要留意 XCom 上限。
+
+## 20260709 Work log
+1. Since the embed from Task08 (handling the notes from OneNote APP) and from Task06_v2 (handling the notes from Obsidian APP) were successfully loaded to the same collection as vector database. The name of collection should renamed from `obsidian_vectors_v2` to `note_vectors_multimodal` to avoid confusion. The vector searching in this collection has not deployed to the cloud run along with RAG agent. So, there was not needed to consider how to swamp tables. So far, the clarified evolution of vector table was `obsidian_vectors (using text-only embedding model for practice)` -> `obsidian_vectors_multimodal (using multimodal embedding model)` -> `note_vectors_multimodal (using same multimodal embedding model and writting the embed from the notes of Obsidian and OneNote)`.
+
+2. Aligned the field name in the query string in [agent tool](../dashboard_ui/agent_tools/) with the new schema of collection `note_vectors_multimodal`. This included the to-do item mentioned in [20260708 Work log](#20260708-work-log) (`dashboard_ui/pages/onenote_review.py` 第 328,342 行應使用enriched_md_path...).
+
+## 20260712 Work log
+1. Established two new streamlit pages, `ingestion_data_quality` and `retrieval_search_quality`.
 
 ## 20260713 Work log
 1. Switched to the branch `develop`, merged task01, task01_v2, task06_v2, byproject.toml, openspec/changes, .env.example, and CLAUDE.md, from the branch 'feature/etl-pipeline' to the branch 'Develop'. The openspec/changes, .env.example, and CLAUDE.md in were 'feature/etl-pipeline' especially synchronzied to the latest version as that in the branch 'feature/dashboard-ui' before hand, so merging from 'feature/etl-pipeline' would not led to the commit version of CLAUDE.md behind the 'feature/dashboard-ui'.
@@ -1821,3 +1841,6 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 5. Manually deployed the task06 on cloud run job. All the steps worked smoothly. Additionally, minor revised the passed argument to the function `_get_genai_client()` in [the connection with agent platform](../task06_obsidian_embed_etl_v2/t_chunk_embed.py). Cloud run job container use service account to generate `genai.client()` in the google agent platform so the credentials with json key was commented out. The codes to create credentials was left for execution on-premise or 3rd-part cloud services only.
 
 6. Same jobs were done for [task08](../task08_onenote_embed_etl/t_chunk_embed.py). Deployment onto GCP cloud run job went well.
+
+## 20260716 Work log
+1. 翻修 `knowledge_factory.py` ，因為前一版是寫死的 stacks list 排 8 張技術類別卡片，再用一個寫死的 ETL_TASKS list 排 5 張 pipeline 卡片，全部靠 st.markdown 手刻 HTML。它沒有任何外部資料來源，也沒有互動。本次變更把它整頁換掉。

@@ -1,5 +1,5 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 
 def _format_delta(value, suffix=""):
@@ -52,21 +52,22 @@ def _radar_tasks_from_df(df: pd.DataFrame):
             task_items = task
         else:
             task_items = [task]
-        tasks.setdefault(_normalize_radar_label(axis), []).extend(
-            str(item) for item in task_items if item
-        )
+        tasks.setdefault(_normalize_radar_label(axis), []).extend(str(item) for item in task_items if item)
     return tasks
 
 
 def _github_repos_for_cards(repos):
     cards = []
     for repo in repos:
-        cards.append({"name": repo.get("repo_name", ""),
-                      "lang": repo.get("language") or "N/A",
-                      "commits": repo.get("commit_counts", 0),
-                      "pushed": str(repo.get("pushed_at", ""))[:10],
-                      "readme_url": repo.get("readme_url") or "#",
-                      })
+        cards.append(
+            {
+                "name": repo.get("repo_name", ""),
+                "lang": repo.get("language") or "N/A",
+                "commits": repo.get("commit_counts", 0),
+                "pushed": str(repo.get("pushed_at", ""))[:10],
+                "readme_url": repo.get("readme_url") or "#",
+            }
+        )
     return cards
 
 

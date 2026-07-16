@@ -135,8 +135,8 @@ Optional .env keys:
 ### Dashboard UI（`dashboard_ui/`）
 
 - `app.py` — 首頁（HOME）：讀取所有 MongoDB collections，繪製雷達圖（plotly）、KPI 卡片、GitHub 最近專案、刷題三相 donut chart
-- `pages/knowledge_factory.py` — 第二頁：ETL pipeline 架構圖與專案里程碑
-- `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）
+- `pages/knowledge_factory.py` — 第二頁「Chasing Data Engineering」：Tech Stack Overview（13 層技術堆疊卡片，見 `utils/tech_stack_diagram.py`）＋ Data Lineage（9 張 DAG SVG，從 GCS `personal-vaults` 讀取並以 `st.cache_data` 快取、失敗顯示 Image Not Found）。此頁為原 `knowledge_factory2.py` 扶正而來，舊版 `knowledge_factory.py`（ETL 架構圖／里程碑）已除役
+- `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）、Tech Stack 技術堆疊圖（`tech_stack_diagram.py`，純 inline style + base64 SVG，供 `st.html`）、GCS 讀取（`gcs_reader.py`，`read_text` / `read_bytes_as_base64`）
 - `agents/` / `agent_tools/` — Phase III AI Agent（使用 Google Vertex AI Gemini + MongoDB Atlas Vector Search）
 
 ### 向量搜尋（task06 / task08 共用）
