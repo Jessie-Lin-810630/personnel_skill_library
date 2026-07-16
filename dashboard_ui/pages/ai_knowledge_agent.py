@@ -14,6 +14,7 @@ from agent_tools.types_and_constants import NoteCollections
 from agents import planning_agent, rag_agent
 from agents.intent_router_agent import route
 from dotenv import load_dotenv
+from loguru import logger
 from utils.interact_with_mongodb import get_db_atlas
 from utils.ui_elements import _render_side_bar, color_map
 
@@ -275,4 +276,6 @@ if query:
             _render_sources(sources)
 
     except Exception as e:
+        # 完整 traceback 進 stderr → Cloud Run logs 便於排查；前端只留友善訊息
+        logger.exception("Agent 呼叫失敗")
         st.error(f"Agent 呼叫失敗，請稍後再試。錯誤：{e}")
