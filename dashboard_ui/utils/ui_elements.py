@@ -42,8 +42,7 @@ def _render_side_bar():
     Applies after switching off `showSidebarNavigation` in .streamlit/config.toml.
     """
     st.sidebar.page_link("app.py", label="HOME", icon="🏠")
-    st.sidebar.page_link("pages/knowledge_factory.py", label="knowledge factory", icon="🏭")
-    st.sidebar.page_link("pages/knowledge_factory2.py", label="Chasing Data Engineering", icon="🏭")
+    st.sidebar.page_link("pages/knowledge_factory.py", label="Chasing Great Data Engineering", icon="🏭")
     with st.sidebar:
         st.divider()
         st.caption("My artifacts")
