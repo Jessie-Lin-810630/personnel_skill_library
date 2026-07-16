@@ -144,37 +144,37 @@ k1.metric(
     "📓 Total documents",
     latest.get("total_notes", 0),
     delta=_delta("total_notes"),
-    delta_color="normal",
-    delta_description="vs. last week",
+    delta_color="normal" if (_delta("total_notes") != 0) else "off",
+    delta_arrow="auto" if (_delta("total_notes") != 0) else "off",
+    delta_description="份 vs. last week",
     help="Obsidian + OneNote 元數據表中記載的所有歸檔與被退件之筆記總數",
-    format=f"{latest.get('total_notes', 0)} 份",
 )
 k2.metric(
     "✅ Archived documents",
     latest.get("archived_notes", 0),
     delta=_delta("archived_notes"),
-    delta_color="normal",
-    delta_description="vs. last week",
+    delta_color="normal" if (_delta("archived_notes") != 0) else "off",
+    delta_arrow="auto" if (_delta("archived_notes") != 0) else "off",
+    delta_description="份 vs. last week",
     help="已被歸檔的 Obsidian / OneNote 的文件數",
-    format=f"{latest.get('archived_notes', 0)} 份",
 )
 k3.metric(
     "🚫 Rejected documents",
     latest.get("rejected_notes", 0),
     delta=_delta("rejected_notes"),
-    delta_color="normal",
-    delta_description="vs. last week",
+    delta_color="normal" if (_delta("rejected_notes") != 0) else "off",
+    delta_arrow="auto" if (_delta("rejected_notes") != 0) else "off",
+    delta_description="份 vs. last week",
     help="被退件的 Obsidian / OneNote 的文件數（越少越好）",
-    format=f"{latest.get('rejected_notes', 0)} 份",
 )
 k4.metric(
     "🧬 Embedded documents",
     latest.get("embedded_notes", 0),
     delta=_delta("embedded_notes"),
-    delta_color="normal",
-    delta_description="vs. last week",
+    delta_color="normal" if (_delta("embedded_notes") != 0) else "off",
+    delta_arrow="auto" if (_delta("embedded_notes") != 0) else "off",
+    delta_description="份 vs. last week",
     help="已進入向量資料庫的文件數",
-    format=f"{latest.get('embedded_notes', 0)} 份",
 )
 
 
