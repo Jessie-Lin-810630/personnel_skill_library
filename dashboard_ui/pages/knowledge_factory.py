@@ -41,7 +41,7 @@ st.markdown(
 ">
     <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; font-weight:800;
         margin:0 0 0.6rem 0; line-height:1.1;">
-        Chasing Data Engineering
+        Chasing Great Data Engineering
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
         以資料工程面向介紹此網站的架構，如願意交流歡迎透過
