@@ -1,12 +1,14 @@
 name: Deploy task02-github-restapi-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task02_github_restapi_etl/**'
       - 'docker/Dockerfile.task02'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task02_github_restapi_etl.yml'
 
 jobs:
   build-and-push:
@@ -36,3 +38,12 @@ jobs:
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest
+
+      - name: Deploy to Cloud Run Job
+        run: |
+          gcloud run jobs deploy task02-github-restapi-etl \
+            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest \
+            --region asia-east1 \
+            --project causal-inquiry-484423-e7 \
+            --service-account psd-no-gcs-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,GITHUB_USERNAME=GITHUB_USERNAME:latest,GITHUB_MAIL=GITHUB_MAIL:latest

@@ -1,12 +1,14 @@
 name: Deploy task08-onenote-embed-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task08_onenote_embed_etl/**'
       - 'docker/Dockerfile.task08'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task08_onenote_embed_etl.yml'
 
 jobs:
   build-and-push:
@@ -36,3 +38,13 @@ jobs:
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task08-onenote-embed-etl:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task08-onenote-embed-etl:latest
+
+      - name: Deploy to Cloud Run Job
+        run: |
+          gcloud run jobs deploy task08-onenote-embed-etl \
+            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task08-onenote-embed-etl:latest \
+            --region asia-east1 \
+            --project causal-inquiry-484423-e7 \
+            --service-account psd-embedding-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+            --set-env-vars GCP_PROJECT_ID=causal-inquiry-484423-e7 \
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest

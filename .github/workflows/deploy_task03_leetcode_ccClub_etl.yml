@@ -1,12 +1,14 @@
 name: Deploy task03-leetcode-ccClub-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task03_leetcode_ccClub_etl/**'
       - 'docker/Dockerfile.task03'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task03_leetcode_ccClub_etl.yml'
 
 jobs:
   build-and-push:
@@ -36,3 +38,12 @@ jobs:
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccclub-etl:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccclub-etl:latest
+
+      - name: Deploy to Cloud Run Job
+        run: |
+          gcloud run jobs deploy task03-leetcode-ccclub-etl \
+            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task03-leetcode-ccclub-etl:latest \
+            --region asia-east1 \
+            --project causal-inquiry-484423-e7 \
+            --service-account psd-no-gcs-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,CCCLUB_USERNAME=CCCLUB_USERNAME:latest,CCCLUB_PASSWORD=CCCLUB_PASSWORD:latest,LEETCODE_USERNAME=LEETCODE_USERNAME:latest,LEETCODE_SESSION=LEETCODE_SESSION:latest,CSRF_TOKEN=CSRF_TOKEN:latest

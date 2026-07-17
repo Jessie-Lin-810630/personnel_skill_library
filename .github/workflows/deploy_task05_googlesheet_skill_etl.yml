@@ -1,12 +1,14 @@
 name: Deploy task05-googlesheet-skill-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task05_googlesheet_skill_etl/**'
       - 'docker/Dockerfile.task05'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task05_googlesheet_skill_etl.yml'
 
 jobs:
   build-and-push:
@@ -36,3 +38,12 @@ jobs:
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task05-googlesheet-skill-etl:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task05-googlesheet-skill-etl:latest
+
+      - name: Deploy to Cloud Run Job
+        run: |
+          gcloud run jobs deploy task05-googlesheet-skill-etl \
+            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task05-googlesheet-skill-etl:latest \
+            --region asia-east1 \
+            --project causal-inquiry-484423-e7 \
+            --service-account psd-no-gcs-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GOOGLE_SHEET_KEY=GOOGLE_SHEET_KEY:latest

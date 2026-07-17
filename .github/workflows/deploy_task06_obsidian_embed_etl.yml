@@ -1,12 +1,14 @@
 name: Deploy task06-obsidian-embed-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task06_obsidian_embed_etl_v2/**'
       - 'docker/Dockerfile.task06'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task06_obsidian_embed_etl.yml'
 
 jobs:
   build-and-push:
@@ -36,3 +38,13 @@ jobs:
             -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task06-obsidian-embed-etl:latest \
             .
           docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task06-obsidian-embed-etl:latest
+
+      - name: Deploy to Cloud Run Job
+        run: |
+          gcloud run jobs deploy task06-obsidian-embed-etl \
+            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task06-obsidian-embed-etl:latest \
+            --region asia-east1 \
+            --project causal-inquiry-484423-e7 \
+            --service-account psd-embedding-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+            --set-env-vars GCP_PROJECT_ID=causal-inquiry-484423-e7 \
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest
