@@ -46,5 +46,4 @@ jobs:
             --region asia-east1 \
             --project causal-inquiry-484423-e7 \
             --service-account psd-embedding-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
-            --set-env-vars GCP_PROJECT_ID=causal-inquiry-484423-e7 \
-            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest
