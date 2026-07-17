@@ -1,12 +1,14 @@
 name: Deploy task01-obsidian-etl
 
 on:
+  workflow_dispatch:
   push:
     branches: [develop]
     paths:
       - 'task01_obsidian_etl_v2/**'
       - 'docker/Dockerfile.task01'
       - 'requirements.txt'
+      - '.github/workflows/deploy_task01_obsidian_etl.yml'
 
 jobs:
   build-and-push:
