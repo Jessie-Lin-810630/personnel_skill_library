@@ -1844,3 +1844,60 @@ The testing results were listed as follows. Particulary in the Sample 10 and 11,
 
 ## 20260716 Work log
 1. 翻修 `knowledge_factory.py` ，因為前一版是寫死的 stacks list 排 8 張技術類別卡片，再用一個寫死的 ETL_TASKS list 排 5 張 pipeline 卡片，全部靠 st.markdown 手刻 HTML。它沒有任何外部資料來源，也沒有互動。本次變更把它整頁換掉。
+
+2. 部署踩過的坑
+
+- call silver 端點沒有回應，一直在轉 enrichment: 檢查log是寫在前端還是silver端點，如果是前端呼叫的 endpoint url定錯，則log會在前端。
+- cloud run services交換訊息需要oidc token，如果沒有，silver端點會出現：
+```
+
+{
+httpRequest: {9}
+insertId: "6a58a8ff00035d100d4db2fc"
+logName: "projects/causal-inquiry-12131-e7/logs/run.googleapis.com%2Frequests"
+receiveTimestamp: "2026-07-16T09:48:47.226779110Z"
+resource: {2}
+severity: "WARNING"
+spanId: "d2f79374b895818c"
+textPayload: "The request was not authenticated. Either allow unauthenticated invocations or set the proper Authorization header. Empty Authorization header value. Read more at https://cloud.google.com/run/docs/securing/authenticating Additional troubleshooting documentation can be found at: https://cloud.google.com/run/docs/troubleshooting#unauthorized-client"
+timestamp: "2026-07-16T09:48:46.927150Z"
+trace: "projects/causal-inquiry-12131-e7/traces/6bb1a8b750d445b628c4b670ee0d152b"
+traceSampled: true
+}
+```
+    - 而前端會出現
+    ```
+        raceback (most recent call last):
+  File "/usr/local/lib/python3.14/site-packages/requests/models.py", line 1116, in json
+    return complexjson.loads(self.text, **kwargs)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/local/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 2 column 1 (char 1)
+    ```
+
+- agent_platform key 在地端才需要，上雲之後可以使用 service account、IAM、各 cloud API 的 permissions 來做各個 cloud run jobs/services 的溝通。
+
+## 20260717 Work log
+- Narrowed down the permission roles of service accounts for each cloud run services. As per the principle of least privilege (PoLP), the latest distribution of SAs and roles are summarized as follows.
+
+| Service Name  | Artifact Factory  | Google Sheet API  | Cloud Run  | Cloud Storage  | AI Agent Platform  | Grant what roles to service  | Service Account Name  |
+|--|--|--|--|--|--|--|--|
+| GitHub Actions  | push images to AF  | no interaction  | deploy the container firstly (trigger by `cloud scheduler`)  | no interaction  | no interaction  | - Artifact Registry Reader<br>- Artifact Registry Writer<br>- Workload Identity User<br>- Cloud Run Admin<br>- Service Account User (Granted to *`SA-level` resource: `psd-task01`, `psd-no-gcs-task`, and `psd-embedding-task`*)  | github-cloud-run-deployer  |
+| Cloud Scheduler  | no interaction  | no interaction  | trigger the cloud run [job](https://docs.cloud.google.com/iam/docs/roles-permissions/run#run.developer) as scheduled once deployment  | no interaction  | no interaction  | - Cloud Run Developer (Granted to *`job-level` resource: `psd-task01`, `psd-no-gcs-task`, and `psd-embedding-task`*)  | cloud-scheduler-trigger |
+| Cloud Run Service Instance -<br>Dashboard-UI (frontend)  | pull images from AF  | no interaction  | invoke the other cloud run instances  | view and download (read) the objects  | call model (LLM, embedding model) to<br>generate result of queries routing, rewrite queries,<br>generate answer in neutral languages.  | - Agent Platform User<br>- Cloud Run Invoker<br>- Secret Manager Secret Accessor<br>- Storage Object Viewer  | person-skill-dashboard  |
+| Cloud Run Job Instance -<br>Task01 (DAG01)  | pull images from AF  | no interaction  | no interaction  | list, view, download (read) and create the objects<br>and view objects' metadata in the same bucket  | no interaction  | - Secret Manager Secret Accessor<br>- Storage Object User  | task01  |
+| Cloud Run Job Instance -<br>Task02 (DAG02)  | pull images from AF  | no interaction  | no interaction  | no interaction  | no interaction  | - Secret Manager Secret Accessor  | psd-no-gcs-task  |
+| Cloud Run Job Instance -<br>Task03 (DAG03)  | pull images from AF  | no interaction  | no interaction  | no interaction  | no interaction  | - Secret Manager Secret Accessor  | psd-no-gcs-task  |
+| Cloud Run Job Instance -<br>Task05 (DAG05)  | pull images from AF  | view and edit the sheets on<br>google drive  | no interaction  | no interaction  | no interaction  | - Secret Manager Secret Accessor<br>- Google sheet Editor (從google sheet端啟動'共用'，非 IAM 介面)  | psd-no-gcs-task  |
+| Cloud Run Job Instance -<br>Task06 (DAG06)  | pull images from AF  | no interaction  | no interaction  | view and download (read) the objects<br>and view objects' metadata in the same bucket  | call model (embedding model) to<br>generate embeds.  | - Agent Platform User<br>- Secret Manager Secret Accessor<br>- Storage Object Viewer  | psd-embedding-task  |
+| Bronze of Task07 (Bronze of DAG07)  | no interaction  | no interaction  | no interaction  | no interaction  | no interaction  | no role  | -  |
+| Cloud Run Service Instance -<br>Silver of Task07 (Silver of DAG07)  | pull images from AF  | no interaction  | no interaction  | view, download (read), create and update the objects<br>and view objects' metadata in the same bucket  | call model (LLM) to<br>generate enriched context in neutral languages.  | - Agent Platform User<br>- Secret Manager Secret Accessor<br>- Storage Object User  | psd-enrich-task  |
+| Cloud Run Service Instance -<br>Gold of Task07 (Gold of DAG07)  | pull images from AF  | no interaction  | no interaction  | view, download (read) and copy (create) the objects<br>and view objects' metadata in the same bucket  | no interaction  | - Secret Manager Secret Accessor<br>- Storage Object Viewer<br>- Storage Object Creator  | psd-archive-task  |
+| Cloud Run Job Instance -<br>Task08 (DAG08)  | pull images from AF  | no interaction  | no interaction  | view and download (read) the objects<br>and view objects' metadata in the same bucket  | call model (embedding model) to<br>generate embeds.  | - Agent Platform User<br>- Secret Manager Secret Accessor<br>- Storage Object Viewer  | psd-embedding-task  |
