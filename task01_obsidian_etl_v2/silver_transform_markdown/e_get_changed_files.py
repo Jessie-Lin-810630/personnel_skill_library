@@ -1,13 +1,16 @@
-"""掃描 GCS Bronze 層 raw-notes、以 md5 做 CDC gate，只挑出新增/變更的 .md 供下載。
+"""掃描 GCS Bronze 層 gs://<bucket>/raw-notes、以 md5 做 CDC gate，只挑出新增/變更的 .md 供下載。
 
-列出 raw-notes/ 下的 .md 與 _attachment 圖片並取 md5 → 從 MongoDB 撈既有 md5 map（CDC 輔助讀取）→
-比對挑出新增/變更清單。get_existing_md5_map 雖讀 MongoDB，但回傳值只服務 GCS blob 的 ingestion 判斷、
-不寫入任何 collection，故歸 Extract（e_）而非 Load（l_）。
+1. 列出 gs://<bucket>/raw-notes/ 下的 .md 與 _attachment 圖片並取 md5。
+2. 從 MongoDB 撈既有 md5 map。
+3. 以既有 md5 map 為基準，比對挑出現在 GCS 上屬於新增/變更的 blob 有哪些，最後回傳清單。
+
+db 由頂層 `main.py` 傳入，不是這層資料夾的 `main.py` 傳入。
+本檔同時定義 silver/gold 共用的 GCS 前綴與 collection 常數，供同層其他 t_/l_ 模組 import。
 
 Required .env keys:
-    GOOGLE_APPLICATION_CREDENTIALS   GCS service account JSON path (list / download blobs).
+    GOOGLE_APPLICATION_CREDENTIALS   (On-premise only) GCS service account JSON path (list / download blobs).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string (read existing md5 map).
-    MONGO_DB_NAME                    Target database name (skill_dashboard).
+    MONGO_DB_NAME                    Target database name.
 """
 
 from pathlib import Path
@@ -17,13 +20,13 @@ from google.cloud.storage import Blob
 from loguru import logger
 from pymongo.database import Database
 
-# Bronze layer GCS 前綴
+# Bronze layer GCS gs://<bucket>/ 的 blob 前綴
 RAW_PREFIX = "raw-notes/"
 
 # Gold layer GCS 前綴
 ARCHIVED_PREFIX = "archived-notes/"
 
-# raw-notes/ 下方需要搜索以下 subfolders 來執行 Silver & Gold tasks
+# gs://<bucket>/raw-notes/ 下方需要搜索以下 subfolders 來執行 Silver & Gold tasks
 # key 為 subfolder 前綴關鍵字，value 為 subfolder 下的檔案歸類在哪個 note type
 FOLDER_TYPE_MAP = {
     "01": "daily-log",
@@ -31,43 +34,17 @@ FOLDER_TYPE_MAP = {
     "04": "project",
 }
 
-# 搜索 raw-notes/ 下方的 subfolders 的時候，鎖定以下檔案為合法圖檔。
+# 搜索 gs://<bucket>/raw-notes/ 下方的 subfolders 的時候，鎖定以下檔案為合法圖檔。
 _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 # CDC gate 做判斷前需要的參考點從以下 collection 取
 NOTE_METADATA = "obsidian_note_metadata"
 
 
-def parse_note_path(blob_name: str) -> dict[str, str]:
-    """把 raw-notes/ 的 blob 名稱拆解成 note_user_id、notebook、section、file_name 四段。
-
-    1. 若名稱開頭是 raw-notes/ 前綴，先去掉前綴只留相對路徑。
-    2. 以路徑分隔切成各段，第一段是使用者、第二段是筆記本、倒數第二段是章節、最後一段是檔名。
-    3. 路徑段數不足時，對應欄位以空字串補上，不拋錯。
-
-    以 raw-notes/lucky460721/data-engineering/01-daily-logs/x.md 為例，會得到 note_user_id 為
-    lucky460721、notebook 為 data-engineering、section 為 01-daily-logs、file_name 為 x.md。
-
-    Args:
-        blob_name: GCS 上該 .md 的 blob 名稱，可含或不含 raw-notes/ 前綴。
-
-    Returns:
-        含 note_user_id、notebook、section、file_name 四個鍵的字典。
-    """
-    rel = blob_name[len(RAW_PREFIX) :] if blob_name.startswith(RAW_PREFIX) else blob_name
-    parts = Path(rel).parts
-    return {
-        "note_user_id": parts[0] if len(parts) > 0 else "",
-        "notebook": parts[1] if len(parts) > 1 else "",
-        "section": parts[-2] if len(parts) >= 2 else "",
-        "file_name": parts[-1] if parts else "",
-    }
-
-
 def list_raw_blobs(bucket_name: str = "personal-vaults") -> tuple[list, dict[str, str]]:
-    """掃 raw-notes/ 下 FOLDER_TYPE_MAP 鎖定的資料夾，一次收齊待處理的 .md blob 與圖片 md5。
+    """掃 gs://<bucket>/raw-notes/ 下 FOLDER_TYPE_MAP 鎖定的資料夾，一次收齊待處理的 .md blob 與圖片 md5。
 
-    1. 列出 raw-notes/ 前綴下的所有 blob，此時 metadata 已帶 md5，不必下載內容。
+    1. 列出 gs://<bucket>/raw-notes/ 前綴下的所有 blob，此時 metadata 已帶 md5，不必下載內容。
     2. 副檔名為 .md 且其上層資料夾前兩碼落在 FOLDER_TYPE_MAP 內者，收進 md_blobs。
     3. 其餘副檔名屬合法圖檔者，把 blob 名稱對應到它的 md5，收進 image_md5_index 供圖片血緣查用。
 
@@ -142,10 +119,10 @@ def select_changed_blobs(
       3. 圖片變更：.md 內文本身沒變，但它 wiki-link 指到的圖片 md5 被換掉、或圖片已從 GCS 消失。
          這種情況仍要重跑，才能刷新 attached_images 血緣與 archived 端的圖片副本。
 
-    比對時以 gs://<bucket>/<blob.name> 為鍵去對齊 DB 的 raw_md_path，對不上就當成新增。
+    比對時以 gs://<bucket>/<blob.name> 為鍵去對齊 DB 的 raw_md_path，對不上就判 GCS 有新增檔案。
 
     Args:
-        md_blobs: raw-notes/ 下所有目標 .md 的 blob 物件清單。
+        md_blobs: gs://<bucket>/raw-notes/ 下所有目標 .md 的 blob 物件清單。
         existing_md5_map: get_existing_md5_map 的回傳，以 raw_md_path 為鍵、值含 md_md5 與 images。
         image_md5_index: GCS 現況的圖片路徑對 md5 字典，來自 list_raw_blobs。
         bucket_name: raw-notes/ 所在的 GCS bucket 名稱，預設 "personal-vaults"。
