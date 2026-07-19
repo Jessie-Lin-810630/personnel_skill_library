@@ -26,9 +26,20 @@ from .t_transform_frontmatter import extract_frontmatter
 # 追蹤的主題關鍵字，key 順序有意義（越前面越優先匹配），供 Streamlit 畫雷達圖
 TOPIC_KEYWORDS = {
     "python": ["python", "pandas", "numpy", "poetry", "pyenv", "pymongo", "sqlalchemy", "flask", "streamlit"],
-    "database": ["sql", "mysql", "mongodb", "redis", "mongodb atlas"],
-    "gcp": ["google-cloud-platform", "gcs", "bigquery", "vm", "compute-engine", "cloud-run", "artifact-registry"],
-    "data-warehouse": ["hive", "bigquery"],
+    "database": ["sql", "mysql", "mongodb", "redis", "mongodb atlas", "oltp"],
+    "gcp": [
+        "gcp",
+        "google-cloud-platform",
+        "gcs",
+        "bigquery",
+        "vm",
+        "compute-engine",
+        "cloud-run",
+        "artifact-registry",
+    ],
+    "data-warehouse": ["data-warehouse", "hive", "bigquery", "olap"],
+    "data-lake": ["s3", "gcs", "data-lake", "data-lakehouse"],
+    "data-governance": ["data-governance", "data-modeling", "data-engineering"],
     "distribution-architecture": ["kafka", "producer", "consumer", "cap"],
     "orchestration": ["airflow", "cloud-run", "cloud-scheduler"],
     "etl": ["etl", "elt", "pipeline", "medallion-architecture", "dbt"],
@@ -105,7 +116,7 @@ def _infer_topic(tags: list[str], md_file_path: str) -> str:
         for kw in keywords:
             if any(kw in target for target in search_targets):
                 return topic
-    return "other"
+    return "other-in-de"
 
 
 def build_note_document(blob: Blob, text: str, bucket_name: str, image_md5_index: dict[str, str]) -> dict:
