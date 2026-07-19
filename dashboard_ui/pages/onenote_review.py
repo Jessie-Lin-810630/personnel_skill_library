@@ -36,6 +36,11 @@ PLACEHOLDER = "請選擇"
 SILVER_URL = os.getenv("SILVER_ENDPOINT_URL", "")
 GOLD_URL = os.getenv("GOLD_ENDPOINT_URL", "")
 
+# Guest 為示範帳號：僅能瀏覽下列筆記本／章節，且 approve/reject 只呈現表象、後端不寫入
+GUEST_ROLE = "Guest"
+GUEST_ALLOWED_NOTEBOOK = "生物製藥相關"
+GUEST_ALLOWED_SECTION = ["General technical knowledge", "法規"]
+
 st.set_page_config(
     page_title="企業知識資料庫協作平台",
     page_icon="🗂️",
@@ -51,6 +56,7 @@ CREDENTIALS = [
     (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
     (os.getenv("ROLE_OWNER_USERNAME", ""), os.getenv("ROLE_OWNER_PASSWORD", ""), "Note Owner"),
     (os.getenv("ROLE_SENIOR_USERNAME", ""), os.getenv("ROLE_SENIOR_PASSWORD", ""), "Dept. Senior Specialist"),
+    (os.getenv("ROLE_GUEST_USERNAME", ""), os.getenv("ROLE_GUEST_PASSWORD", ""), "Guest"),
 ]
 
 if not st.session_state.get("authenticated"):
@@ -224,6 +230,8 @@ LLM 擴寫後的版本，逐頁比對。滿意就點 <strong>核可（Approve）
                 if matched_role:
                     st.session_state.authenticated = True
                     st.session_state.role = matched_role
+                    # 每次登入都重置 Guest 已操作紀錄，回到可再次點選的假象狀態
+                    st.session_state.guest_reviewed = set()
                     st.rerun()
                 else:
                     st.error("帳號或密碼錯誤，請重試。")
@@ -298,6 +306,15 @@ def _load_versions() -> list[dict]:
 
 
 versions_all = _load_versions()
+
+# Guest 僅能看到指定筆記本／章節的筆記；過濾在此，下游三層下拉自然只呈現允許範圍
+is_guest = st.session_state.get("role") == GUEST_ROLE
+if is_guest:
+    versions_all = [
+        v
+        for v in versions_all
+        if v.get("notebook") == GUEST_ALLOWED_NOTEBOOK and v.get("section") in GUEST_ALLOWED_SECTION
+    ]
 
 if not versions_all:
     st.warning("尚無 Bronze 資料，請先執行 task07 lazy_loading Bronze ETL。")
@@ -392,6 +409,10 @@ st.divider()
 # ─────────────────────────────────────────
 if "enrich_attempted" not in st.session_state:
     st.session_state.enrich_attempted = {}  # {(page_id, dt): error_msg or None}
+
+# Guest 於本 session 已操作過 approve/reject 的版本（(page_id, dt) 集合），用來禁用按鈕；重新登入時清空
+if "guest_reviewed" not in st.session_state:
+    st.session_state.guest_reviewed = set()
 
 
 def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
@@ -550,6 +571,13 @@ with col_md:
 
 def _call_gold(action: str) -> None:
     """POST Gold 端點執行 approve 歸檔 / reject 標記；成功清快取重載。"""
+    # Guest 為示範帳號：只呈現操作成功的表象，完全不呼叫 Gold 端點、後端 MongoDB 不做任何寫入
+    if is_guest:
+        # 記住此版本已操作 → 下方按鈕禁用；toast 可跨 rerun 顯示成功假象
+        st.session_state.guest_reviewed.add((page_id, dt))
+        st.toast("✅ 歸檔成功" if action == "approved" else "✅ 退件成功", icon="✅")
+        st.rerun()
+        return
     if not GOLD_URL:
         st.error("找不到GOLD URL！")
         return
@@ -583,7 +611,9 @@ def _call_gold(action: str) -> None:
 
 
 st.markdown("#### 針對語義增強筆記 (右側筆記)，請點選審核結果：", text_alignment="center")
-_btns_disabled = (not md_uri) or is_version_archived
+# Guest 已對此版本操作過 approve/reject → 禁用按鈕（重新登入會清空 guest_reviewed 而復原）
+_guest_done = is_guest and (page_id, dt) in st.session_state.guest_reviewed
+_btns_disabled = (not md_uri) or is_version_archived or _guest_done
 _, b1, b2, b3, _ = st.columns([1, 2, 2, 2, 1])
 
 with b1:

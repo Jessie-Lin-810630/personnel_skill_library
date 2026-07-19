@@ -52,7 +52,11 @@ CREDENTIALS = [
     (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
     (os.getenv("ROLE_OWNER_USERNAME", ""), os.getenv("ROLE_OWNER_PASSWORD", ""), "Note Owner"),
     (os.getenv("ROLE_SENIOR_USERNAME", ""), os.getenv("ROLE_SENIOR_PASSWORD", ""), "Dept. Senior Specialist"),
+    (os.getenv("ROLE_GUEST_USERNAME", ""), os.getenv("ROLE_GUEST_PASSWORD", ""), "Guest"),
 ]
+
+# Guest 角色只看得到來源清單，看不到 vector/rerank 分數（見 _render_sources）
+GUEST_ROLE = "Guest"
 
 if not st.session_state.get("authenticated"):
     st.markdown(
@@ -169,7 +173,7 @@ st.markdown(
         🤖 AI Knowledge Agent
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
-        筆記語意查詢 · 摘要 · 個人化學習路徑規劃
+        筆記語意查詢 · 摘要
     </p>
 </div>
 """,
@@ -195,6 +199,18 @@ def _render_sources(sources: list[dict]) -> None:
     if not sources:
         return
     with st.expander("📎 來源筆記"):
+        # Guest 只看得到有哪些來源，不揭露向量/rerank 分數；同名同章節去重後只列一次
+        if st.session_state.get("role") == GUEST_ROLE:
+            seen = set()
+            idx = 1
+            for src in sources:
+                key = (src["file_name"], src["section"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                st.markdown(f"{idx}.  **{src['file_name']}** ｜ {src['section']}")
+                idx += 1
+            return
         for i, src in enumerate(sources, 1):
             line = f"{i}.  **{src['file_name']}** ｜ {src['section']} ｜ 向量: `{src.get('vector_score', 0)}`"
             # rag 經過 reranker 才有意義；planning 的 rerank_score 為 0 不顯示
