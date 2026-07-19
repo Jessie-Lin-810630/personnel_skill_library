@@ -4,9 +4,9 @@
 → L2 normalize → 組 vector doc。
 
 Required .env keys:
-    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI gemini-embedding-2 service account key.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI gemini-embedding-2 service account key.
     GCP_PROJECT_ID                    Vertex AI project.
-    GOOGLE_APPLICATION_CREDENTIALS    path to GCS service account JSON (for checking archived images exist).
+    GCS_USER_CREDENTIALS              (On-premise only) GCS service account JSON path (check archived images exist).
 """
 
 import math

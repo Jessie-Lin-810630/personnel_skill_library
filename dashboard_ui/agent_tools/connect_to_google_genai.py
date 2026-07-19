@@ -5,7 +5,7 @@
 
 Required .env keys:
     GCP_PROJECT_ID                    Vertex AI project id.
-    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI service account JSON path.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI service account JSON path.
 """
 
 import os
@@ -26,6 +26,7 @@ def _get_genai_client() -> genai.Client:
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
+    # from google.oauth2.service_account import Credentials
     # json_path = os.getenv("AGENT_PLATFORM_USER_CREDENTIALS")
     # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
     # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)

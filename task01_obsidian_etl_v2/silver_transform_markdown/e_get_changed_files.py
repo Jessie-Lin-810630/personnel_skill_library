@@ -8,7 +8,7 @@ db 由頂層 `main.py` 傳入，不是這層資料夾的 `main.py` 傳入。
 本檔同時定義 silver/gold 共用的 GCS 前綴與 collection 常數，供同層其他 t_/l_ 模組 import。
 
 Required .env keys:
-    GOOGLE_APPLICATION_CREDENTIALS   (On-premise only) GCS service account JSON path (list / download blobs).
+    GCS_USER_CREDENTIALS             (On-premise only) GCS service account JSON path (list / download blobs).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string (read existing md5 map).
     MONGO_DB_NAME                    Target database name.
 """

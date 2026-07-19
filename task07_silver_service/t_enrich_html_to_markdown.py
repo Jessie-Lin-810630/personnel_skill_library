@@ -12,7 +12,7 @@
 - regenerate quota：同一 html_hash 最多 regenerate 2 次 (per-note 成本上限)。
 
 Required .env keys:
-    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI Gemini service account JSON.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI Gemini service account JSON.
     GCP_PROJECT_ID                    GCP project ID for Vertex AI.
 """
 
@@ -132,6 +132,7 @@ def _get_genai_client() -> genai.Client:
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
+    # from google.oauth2.service_account import Credentials
     # json_path = os.getenv("AGENT_PLATFORM_USER_CREDENTIALS")
     # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
     # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)

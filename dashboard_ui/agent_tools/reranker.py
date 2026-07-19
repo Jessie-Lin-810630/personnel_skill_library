@@ -11,9 +11,8 @@
   - rerank score 取代原本的 vectorSearchScore，成為最終排序依據。
   - 如果 Cohere API 呼叫失敗，fallback 回傳原始的 vector search 結果 (不做 rerank)。
 
-依賴：
-  - cohere SDK (pip install cohere)
-  - 環境變數 COHERE_API_KEY
+Required .env keys:
+    COHERE_API_KEY                    COHERE reranker mode API key
 
 參考：
   - Cohere Rerank docs: https://docs.cohere.com/reference/rerank

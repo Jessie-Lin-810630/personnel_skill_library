@@ -6,9 +6,9 @@ chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy �
 與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、血緣欄命名 md_path（存 archived md 路徑）。
 
 Required .env keys:
-    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI gemini-embedding-2 service account key.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI gemini-embedding-2 service account key.
     GCP_PROJECT_ID                    Vertex AI project.
-    GOOGLE_APPLICATION_CREDENTIALS    path to GCS service account JSON (for downloading archived md).
+    GCS_USER_CREDENTIALS              (On-premise only) path to GCS service account JSON (for downloading archived md).
 
 Optional .env keys:
     ONENOTE_GCS_BUCKET                GCS data lake bucket (defaults to onenote-vaults).

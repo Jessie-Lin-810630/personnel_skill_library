@@ -5,7 +5,7 @@
 gate 邏輯沿用 task06_obsidian_embed_etl_v2（copy 而非 import，讓 obsidian/onenote 兩來源各自演化）。
 
 Required .env keys:
-    GOOGLE_APPLICATION_CREDENTIALS   path to GCS service account JSON (for download archived md).
+    GCS_USER_CREDENTIALS             (On-premise only) path to GCS service account JSON (for download archived md).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string.
     MONGO_DB_NAME                    Target database name (skill_dashboard).
 

@@ -9,6 +9,10 @@
   - google-genai SDK（Vertex AI，與 ETL task06 相同 embedding model，確保向量空間一致）
   - pymongo (MongoDB 連線)
 
+Required .env keys:
+    GCP_PROJECT_ID                    Vertex AI project id.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI service account JSON path.
+
 注意:
   embedding model 與入庫側（task06_obsidian_embed_etl/t_chunk_embed.py）必須 1:1 對齊：
     - model = "gemini-embedding-2"
@@ -51,6 +55,7 @@ def _get_embed_client() -> genai.Client:
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
+    # from google.oauth2.service_account import Credentials
     # json_path = os.getenv("AGENT_PLATFORM_USER_CREDENTIALS")
     # project = os.getenv("GCP_PROJECT_ID")
     # if not json_path or not project:

@@ -11,10 +11,10 @@ Usage:
     poetry run python -m task07_silver_service.app
 
 Required .env keys:
-    MONGO_ALTAS_URI                MongoDB Atlas connection URI.
-    MONGO_DB_NAME                  MongoDB database name.
-    AGENT_PLATFORM_USER_CREDENTIALS  Vertex AI Gemini service account JSON.
-    GCP_PROJECT_ID                 GCP project ID for Vertex AI.
+    MONGO_ALTAS_URI                  MongoDB Atlas connection URI.
+    MONGO_DB_NAME                    MongoDB database name.
+    AGENT_PLATFORM_USER_CREDENTIALS  (On-premise only) Vertex AI Gemini service account JSON.
+    GCP_PROJECT_ID                   GCP project ID for Vertex AI.
 
 Optional .env keys:
     ONENOTE_GCS_BUCKET             GCS data lake bucket (defaults to onenote-vaults).

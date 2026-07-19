@@ -12,7 +12,7 @@
 Required .env keys:
     MONGO_ALTAS_URI                 MongoDB Atlas connection string.
     MONGO_DB_NAME                   Target database name.
-    GOOGLE_APPLICATION_CREDENTIALS  (On-premise only) GCS service account JSON path.
+    GCS_USER_CREDENTIALS            (On-premise only) GCS service account JSON path.
 """
 
 from google.cloud import storage

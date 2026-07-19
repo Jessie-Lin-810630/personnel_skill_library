@@ -5,7 +5,7 @@
 3. 回填 archived_md_path/md5/archived_at；整段採覆蓋語意，重跑同版本結果一致。
 
 Required .env keys:
-    GOOGLE_APPLICATION_CREDENTIALS   (On-premise only) GCS service account JSON path (copy / upload blobs).
+    GCS_USER_CREDENTIALS   (On-premise only) GCS service account JSON path (copy / upload blobs).
 """
 
 from datetime import datetime, timezone

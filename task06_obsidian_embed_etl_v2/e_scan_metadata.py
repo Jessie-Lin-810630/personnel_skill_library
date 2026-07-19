@@ -4,7 +4,7 @@
 → 依 archived_md_path 從 archived-notes/ 下載 md body 清洗。此為 embedding 的 ingestion 端。
 
 Required .env keys:
-    GOOGLE_APPLICATION_CREDENTIALS   path to GCS service account JSON (for download md).
+    GCS_USER_CREDENTIALS            (On-premise only) path to GCS service account JSON (for download md).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string.
     MONGO_DB_NAME                    Target database name (skill_dashboard).
 """

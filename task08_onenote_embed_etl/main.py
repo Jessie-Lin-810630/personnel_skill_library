@@ -10,8 +10,8 @@ Usage:
 Required .env keys:
     MONGO_ALTAS_URI                   MongoDB Atlas connection string.
     MONGO_DB_NAME                     Target database name (skill_dashboard).
-    GOOGLE_APPLICATION_CREDENTIALS    GCS service account JSON path.
-    AGENT_PLATFORM_USER_CREDENTIALS   Vertex AI gemini-embedding-2 service account key.
+    GCS_USER_CREDENTIALS              (On-premise only) GCS service account JSON path.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI gemini-embedding-2 service account key.
     GCP_PROJECT_ID                    Vertex AI project.
 
 Optional .env keys:

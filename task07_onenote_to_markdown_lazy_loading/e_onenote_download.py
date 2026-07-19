@@ -11,7 +11,7 @@ Usage:
 Required .env keys:
     ONENOTE_CLIENT_ID                Azure App Registration Client ID (public client, Notes.Read scope).
     ONENOTE_GCS_BUCKET               GCS bucket serving as the data lake.
-    GOOGLE_APPLICATION_CREDENTIALS   GCS service account JSON.
+    GCS_USER_CREDENTIALS   (On-premise only) GCS service account JSON.
 
 Optional .env keys:
     ONENOTE_NOTEBOOK_IDS   JSON array of notebook IDs; interactive select if omitted.
