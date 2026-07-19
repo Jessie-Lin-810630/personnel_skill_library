@@ -2,7 +2,8 @@
 
 從 tags 與檔名/標題比對 TOPIC_KEYWORDS 推斷 topic：把 tags 轉小寫並補上檔名一起當比對目標 →
 依鍵順序逐一比對，任一關鍵字命中就回該 topic → 全不中回 other。分類邏輯 copy 自
-task01_obsidian_etl_v2/t_clean_obsidian（copy 而非 import，讓 task01/task07 各自獨立演化），
+task01_obsidian_etl_v2/silver_transform_markdown/t_build_metadata_docs
+（copy 而非 import，讓 task01/task07 各自獨立演化），
 確保 onenote 與 obsidian 兩來源在同一份向量表下 topic 語意一致。
 """
 
@@ -10,14 +11,18 @@ from pathlib import Path
 
 # 追蹤的主題關鍵字，key 順序有意義（越前面越優先匹配），供 Streamlit 畫雷達圖
 TOPIC_KEYWORDS = {
-    "python": ["python", "pandas", "numpy", "poetry", "flask", "streamlit"],
-    "database": ["sql", "mysql", "mongodb", "redis", "distribution-architecture"],
-    "gcp": ["google-cloud-platform", "gcs", "bigquery", "vm", "compute-engine", "cloud-run"],
+    "python": ["python", "pandas", "numpy", "poetry", "pyenv", "pymongo", "sqlalchemy", "flask", "streamlit"],
+    "database": ["sql", "mysql", "mongodb", "redis", "mongodb atlas"],
+    "gcp": ["google-cloud-platform", "gcs", "bigquery", "vm", "compute-engine", "cloud-run", "artifact-registry"],
     "data-warehouse": ["hive", "bigquery"],
-    "etl": ["etl", "elt", "pipeline", "airflow", "dbt"],
-    "ml": ["machine learning", "ml", "sklearn", "model"],
+    "distribution-architecture": ["kafka", "producer", "consumer", "cap"],
+    "orchestration": ["airflow", "cloud-run", "cloud-scheduler"],
+    "etl": ["etl", "elt", "pipeline", "medallion-architecture", "dbt"],
+    "ai": ["generative-ai", "gen-ai", "agent", "gemini", "claude", "openai", "dl", "deep-learning", "ai-evals"],
+    "rag": ["embedding", "ragas", "chunk", "langchain"],
+    "ml": ["machine-learning", "ml", "sklearn", "model"],
     "dockerize": ["docker", "container", "image", "dockerfile", "docker-compose"],
-    "github": ["git", "github", "github-actions"],
+    "github": ["git", "github", "github-actions", "ci", "cd", "cicd"],
     "linux": ["os", "linux", "linux-command"],
     "biotech": [
         "biotech",
@@ -29,6 +34,11 @@ TOPIC_KEYWORDS = {
         "perfusion",
         "cell-culture",
         "upstream",
+        "cell",
+        "cell bank",
+        "cell-culture",
+        "filtration",
+        "depth-filtration",
     ],
 }
 
