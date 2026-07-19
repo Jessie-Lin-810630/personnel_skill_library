@@ -8,7 +8,7 @@ task07 lazy_loading 三套服務（Bronze ETL、`task07_silver_service`、`task0
 
 - **欄位改名**（跨 Bronze/Silver/Gold 與 `task07_common`）：`html_hash`→`html_sha_hash`、`html_md5`→`html_md5_hash`、`md_md5`→`md_md5_hash`；silver md 欄位 `md_path`→`enriched_md_path`、`md_exported_at`→`enriched_md_exported_at`；gold 歸檔 md 欄位 `md_archive_path`→`archived_md_path`。C1（`onenote_graph_api_logs`）與 C2（`multimodal_llm_enrichment_logs`）的 `html_hash` 欄位同步改為 `html_sha_hash`，跨 collection 命名一致。（HTTP 端點回應 JSON 的 `md_path`／`md_archive_path` 鍵維持不變，僅 C3 document key 改名；審查頁 `dashboard_ui/pages/onenote_review.py` 讀 C3 的 `md_path` 同步改讀 `enriched_md_path`。）
 - **圖片血緣重構為 `attached_images` Object 陣列**：Bronze 寫入 `[{raw_image_path, raw_image_md5}, ...]`；Gold 歸檔時把每個 Object 補上 `archived_image_path`、`archived_image_md5`。移除 `img_md5`/`img_path`/`img_archive_path` 三個平行陣列。
-- **新增 `topic`（Must）**：借用 `task01_obsidian_etl_v2/t_clean_obsidian.py` 的 `TOPIC_KEYWORDS` 與 `_infer_topic()`（copy 而非 import，維持 task 間獨立演化）。Bronze 以 `page_title` 為初判來源寫入暫定 `topic`；Gold/reject 取得 `md_frontmatter.tags` 後以 tags＋title 重算並更新。
+- **新增 `topic`（Must）**：借用 `task01_obsidian_etl_v2/silver_transform_markdown/t_build_metadata_docs.py` 的 `TOPIC_KEYWORDS` 與 `_infer_topic()`（copy 而非 import，維持 task 間獨立演化）。Bronze 以 `page_title` 為初判來源寫入暫定 `topic`；Gold/reject 取得 `md_frontmatter.tags` 後以 tags＋title 重算並更新。
 - **新增 `md_body` Object**：`{valid_img_count, word_count, recomputed_at}`，於 archive/reject 解析 md 正文時一併算出。
 - **新增 `dismatched_img_count` / `md_has_dismatched_img`**：archive/reject 時預先算好 md 內失效（連結 basename 未命中歸檔／raw 圖片）的圖片數，避免日後跨欄位比對全表掃描。
 - **新增 `created_at` / `updated_at`**：於共用 `upsert_version_meta` 集中處理——每次 `$set` 蓋 `updated_at`，首次 insert 補 `created_at`。

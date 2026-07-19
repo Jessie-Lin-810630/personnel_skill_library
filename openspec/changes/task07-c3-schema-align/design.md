@@ -30,7 +30,7 @@
 - 取代 `img_md5`/`img_path`/`img_archive_path`。下游（task08 / valid_img 比對）改讀 `attached_images[].archived_image_path`。
 
 ### D3：`topic` 兩階段推導，借用 task01 分類器
-- copy `task01_obsidian_etl_v2/t_clean_obsidian.py` 的 `TOPIC_KEYWORDS` 常數與 `_infer_topic(tags, file_path)` 函式到 task07（Bronze 與 Gold 各自需要；置於能被兩處取用的位置，如 `task07_common` 或各自 copy，見 D6）。
+- copy `task01_obsidian_etl_v2/silver_transform_markdown/t_build_metadata_docs.py` 的 `TOPIC_KEYWORDS` 常數與 `_infer_topic(tags, file_path)` 函式到 task07（Bronze 與 Gold 各自需要；置於能被兩處取用的位置，如 `task07_common` 或各自 copy，見 D6）。
 - **Bronze**：此時尚無 LLM tags，以 `_infer_topic(tags=[], file_path=page_title)` 算暫定 topic 寫入（多半落 `other` 或由標題關鍵字命中）。
 - **Gold/reject**：`md_frontmatter.tags` 已由 LLM 產出，以 `_infer_topic(tags, page_title)` 重算 topic 並 upsert 覆蓋，取得最佳分類（對齊 task01 topic 由 tags＋檔名推導的語意）。
 

@@ -64,7 +64,7 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 - `l_*.py` — Load（把資料本體**寫入**目的地 folder／datalake／database；多數為 MongoDB，task07 寫 GCS 資料湖 `onenote-vaults` 的 `.md`／`.html`／`.png` 與 MongoDB）
 - `main.py` — 串接 E → T → L 的入口
 
-> **歸類準則**：判斷依據是「這支函式服務的是哪一段資料本體的流向」，而非「它讀寫哪個系統」。例：CDC 做增量 ingestion 時，需要先讀 MongoDB 撈既有 md5 來決定「哪些 GCS blob 要抓」——這個讀取雖然碰 MongoDB，但回傳值只服務 ingestion 判斷、**不寫入任何 collection**，故歸 `e_` 而非 `l_`。`l_` 只保留「把資料本體載入目的地」的寫入。（範例：`task01_obsidian_etl_v2/e_scan_obsidian.py` 的 `get_existing_md5_map()`。）
+> **歸類準則**：判斷依據是「這支函式服務的是哪一段資料本體的流向」，而非「它讀寫哪個系統」。例：CDC 做增量 ingestion 時，需要先讀 MongoDB 撈既有 md5 來決定「哪些 GCS blob 要抓」——這個讀取雖然碰 MongoDB，但回傳值只服務 ingestion 判斷、**不寫入任何 collection**，故歸 `e_` 而非 `l_`。`l_` 只保留「把資料本體載入目的地」的寫入。（範例：`task01_obsidian_etl_v2/silver_transform_markdown/e_get_changed_files.py` 的 `get_existing_md5_map()`。）
 
 ### Module Docstring 規範
 
@@ -111,7 +111,7 @@ Optional .env keys:
 
 所有 task 的 Load 步驟均以唯一欄位做 `upsert`，支援冪等重複執行。
 
-> **v1 已除役、v2/lazy_loading 扶正**：`task01_obsidian_etl`（v1，寫 `obsidian_notes`／`obsidian_summary`、單次全量）、`task06_obsidian_embed_etl`（v1）、`task07_onenote_to_markdown`（v1，本機磁碟、ETL 主動逐頁呼叫 LLM）均已淘汰；上表 task01／06／07 各列即為扶正後的版本。task01 過渡期仍並寫 v1 的 `obsidian_summary`，待 backfill 到 `notes_summary` 後擇期淘汰。
+> **v1 已除役、v2/lazy_loading 扶正**：`task01_obsidian_etl`（v1，寫 `obsidian_notes`／`obsidian_summary`、CDC 增量同步）、`task06_obsidian_embed_etl`（v1）、`task07_onenote_to_markdown`（v1，本機磁碟、ETL 主動逐頁呼叫 LLM）均已淘汰；上表 task01／06／07 各列即為扶正後的版本。task01 過渡期仍並寫 v1 的 `obsidian_summary`，待 backfill 到 `notes_summary` 後擇期淘汰。
 
 > **task06 與 task08 共寫 `note_vectors_multimodal`**：Obsidian（task01 歸檔）走 task06、OneNote（task07 歸檔）走 task08，兩者向量化後寫入**同一張** `note_vectors_multimodal`（同一 Atlas index `obsidian_vectors_index2`）。向量 doc 的血緣鍵統一為 `md_path`，值＝人工核可後的 archived md 路徑（已全面定調 `md_path`，無 `raw_md_path`／`md_path` 並存）。RAG 讀取端亦以 `md_path` 為血緣欄。
 

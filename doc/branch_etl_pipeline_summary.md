@@ -182,7 +182,7 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
 - **軟刪除**：`soft_delete_missing()` 對「DB 有、raw-notes live listing 已無」的筆記標 `status="deleted"`，保留 archived 副本供稽核與供 task06 v2 purge；`present_raw_paths` 為空時防呆跳過，避免上游掃空誤刪全表。
 - **(Gold)**：`build_summary` 與 `upsert_summary()` 對現況做每日快照 `notes_summary`，只計 `status="archived"` 者。
 > 由於 task07 oneone-to-markdown 採用 lazy loading 設計，onenote 筆記只會在人工審閱後觸發歸檔或退件的紀錄，這行為沒有保證週期性、沒有保證 `onenote_notes_metadata` 的快照也會像 task01 v2 的 `obsidian_notes_metadata` 快照日固定，因此目前借用定期執行的 task01 v2 的 gold 層任務，來同時快照 `obsidian_notes_metadata` 與 `onenote_notes_metadata` 兩張表，將快照結果彙整一起存入 `notes_summary`，以跟隨追蹤 task07 gold 層做歸檔、退件的進度，預計 task07 gold 層執行速度會比 task01 v2 慢上許多。
-> 待解決：目前，暫時維持同時寫入 `notes_summary` 與 task01 v1 的 `obsidian_summary` (follow 各自的 schema)，待 `obsidian_summary` 的舊資料 backfill 到 `notes_summary` 完全後，再視穩定性擇期淘汰 `obsidian_summary` (需修改 task01 v2 的 l_load_to_mongodb.py)。
+> 待解決：目前，暫時維持同時寫入 `notes_summary` 與 task01 v1 的 `obsidian_summary` (follow 各自的 schema)，待 `obsidian_summary` 的舊資料 backfill 到 `notes_summary` 完全後，再視穩定性擇期淘汰 `obsidian_summary` (需修改 task01 v2 的 gold_notes_metadata_snapshot/l_upsert_summary_to_mongodb.py)。
 
 ### MongoDB Collections
 
