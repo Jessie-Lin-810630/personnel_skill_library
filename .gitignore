@@ -224,4 +224,4 @@ doc/*.jsonl
 
 # some stuff should personal-use or learning local
 dashboard_ui/images/
-explain_by_skill
+doc_personal_use/
