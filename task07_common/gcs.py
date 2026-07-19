@@ -39,6 +39,20 @@ def _get_client() -> storage.Client:
     return _client
 
 
+def _get_client_on_premise() -> storage.Client:
+    """在地端，取得 (並快取) GCS storage client；首次呼叫才建立。"""
+    global _client
+    if _client is None:
+        # 地端執行才需要有 GCS_USER_CREDENTIALS
+        from google.oauth2.service_account import Credentials
+
+        json_path = os.getenv("GCS_USER_CREDENTIALS")
+        scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+        credentials = Credentials.from_service_account_file(json_path, scopes=scopes)
+        _client = storage.Client(credentials=credentials)
+    return _client
+
+
 def get_bucket_name() -> str:
     """回傳資料湖 bucket 名稱 (env ONENOTE_GCS_BUCKET，預設 onenote-vaults)。"""
     return os.getenv("ONENOTE_GCS_BUCKET", "onenote-vaults").strip()
