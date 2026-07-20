@@ -1901,3 +1901,22 @@ json.decoder.JSONDecodeError: Expecting value: line 2 column 1 (char 1)
 | Cloud Run Service Instance -<br>Silver of Task07 (Silver of DAG07)  | pull images from AF  | no interaction  | no interaction  | view, download (read), create and update the objects<br>and view objects' metadata in the same bucket  | call model (LLM) to<br>generate enriched context in neutral languages.  | - Agent Platform User<br>- Secret Manager Secret Accessor<br>- Storage Object User  | psd-enrich-task  |
 | Cloud Run Service Instance -<br>Gold of Task07 (Gold of DAG07)  | pull images from AF  | no interaction  | no interaction  | view, download (read) and copy (create) the objects<br>and view objects' metadata in the same bucket  | no interaction  | - Secret Manager Secret Accessor<br>- Storage Object Viewer<br>- Storage Object Creator  | psd-archive-task  |
 | Cloud Run Job Instance -<br>Task08 (DAG08)  | pull images from AF  | no interaction  | no interaction  | view and download (read) the objects<br>and view objects' metadata in the same bucket  | call model (embedding model) to<br>generate embeds.  | - Agent Platform User<br>- Secret Manager Secret Accessor<br>- Storage Object Viewer  | psd-embedding-task  |
+
+## 20260720 Work log
+
+1. 統一各 ETL task 的 try-except 設計，目標是部署到 Cloud Run 後的 log 品質，以確保
+    - 例外不被無聲吞掉
+    - 例外精細度不被 broad-except 包太粗
+    - 完整 traceback 只在最外層印一次。
+
+2. 涵蓋 task02、03、05、06、07（silver/gold/common）、08，大致上用三層例外模式（inner → middle → outer）來修正 try-except 設計:
+    - **inner／`.json()` 所在層**：就近捕捉網路（ConnectionError／Timeout）與解析（ValueError，含 JSONDecodeError）錯誤，只記業務短訊息、不帶 traceback、純 raise。
+    - **middle 業務層**：補「哪個 repo／branch／problem」context 後純 raise，保留原例外型別，不再包成 generic Exception，因為例外型別顆粒度反而變粗，很難辨識。
+    - **outer 入口（`run_taskNN`）**：try 包住 E+T+L，`logger.opt(exception=True).critical(...)` 印一次完整 traceback 後 raise。
+
+3. 其他刻意不 raise 而是選擇吞掉例外、不外拋的部分有:
+    - **task06 `t_chunk_and_embed_v2`／task08 `t_chunk_and_embed_onenote` 的 per-note except**：單筆筆記失敗不打算中斷整批向量化，故選擇吞掉例外，用 `continue` 進入迴圈下一輪的下一篇筆記做向量化；被跳過的那份筆記會因為在 metadata 裡面保持 `embedded_status=false`，因此下個 task06/task08 執行週期時，仍會被 CDC gate 納入重試向量化。除了 `continue`，這裡也用 `opt(exception=True)` 直接在內層函式的 log 印出 traceback 供診斷。
+    - **task07 `audit_log.py` 全部寫入／查詢函式**（`log_api_call`、`log_enrichment_call`、`count_regenerate`、`get_*_meta`、`find_cached_md_by_hash`、`get_sibling_pending_versions`、`upsert_version_meta` 等）：主流程才是 enrichment，所以這類 metadata 表的存取異常都記 warning，並回安全預設值（0／{}／[]）。
+    - **task07 `t_enrich_html_to_markdown` 的 _call_llm() 處的try-except**：LLM 失敗，是因達到 regenerte quota、rate-limit、API error 等，這屬業務執行結果而非服務崩潰，故不 raise。
+    - **task07 `l_archive_note` 的 frontmatter 重試 except**（`archive_note`／`reject_note` 內）：主流程才是歸檔是否成功，而不是 frontmatter 寫入 MongoDB 是否順利，故選擇吞掉例外，用 `continue` 進入迴圈下一輪的。
+    - **task07 兩個 `app.py` 的端點 handler（enrich／archive）**：Flask 邊界屬於 web service，所以不向外 raise，否則影響使用者體驗，而是要改捕捉例外後，使用 `logger.exception()` 在 stderr 印一次 traceback，然後return `結構化 JSON` 與 `500`。
