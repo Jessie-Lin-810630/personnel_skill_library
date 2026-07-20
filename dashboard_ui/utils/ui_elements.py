@@ -1,9 +1,15 @@
+"""Dashboard 的 UI 元件與繪圖樣式：集中 Plotly 配色、共用 layout 與可重用的版面元件。
+
+提供全站共用的 color_map 與 Plotly 基礎 layout，以及側邊欄、任務下拉選單、任務表格、
+雷達圖等可重用的 Streamlit 元件函式，供 app.py 與各頁組裝畫面。
+"""
+
 import textwrap
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from utils.precomputing import _normalize_radar_label
+from utils.precomputing import normalize_radar_label
 
 # ─────────────────────────────────────────
 # Plotly 色條
@@ -36,7 +42,7 @@ plotly_layout_base = dict(
 # ─────────────────────────────────────────
 
 
-def _render_side_bar():
+def render_side_bar():
     """Customize demonstrating style of the nevigation bar.
 
     Applies after switching off `showSidebarNavigation` in .streamlit/config.toml.
@@ -67,7 +73,7 @@ def _wrap_hover_text(text: str, width=27):
 
 
 def _radar_axis_options(labels):
-    return [_normalize_radar_label(label) for label in labels]
+    return [normalize_radar_label(label) for label in labels]
 
 
 def _task_dataframe(axis_key, tasks_dict):
@@ -93,10 +99,10 @@ def _selected_axis_from_event(event):
     point = points[0]
     customdata = point.get("customdata") if isinstance(point, dict) else getattr(point, "customdata", "")
     theta = point.get("theta") if isinstance(point, dict) else getattr(point, "theta", "")
-    return _normalize_radar_label(customdata or theta)
+    return normalize_radar_label(customdata or theta)
 
 
-def _render_task_selectbox(labels, tasks_dict, chart_event, key_prefix):
+def render_task_selectbox(labels, tasks_dict, chart_event, key_prefix):
     axis_options = _radar_axis_options(labels)
     selected_from_chart = _selected_axis_from_event(chart_event)
 
@@ -112,7 +118,7 @@ def _render_task_selectbox(labels, tasks_dict, chart_event, key_prefix):
     return selected_axis, tasks_dict
 
 
-def _render_task_table(selected_axis, tasks_dict):
+def render_task_table(selected_axis, tasks_dict):
     task_df = _task_dataframe(selected_axis, tasks_dict)
     with st.expander("收合/展開", expanded=True, type="compact"):
         if task_df.empty:
@@ -141,7 +147,7 @@ def make_radar(labels, values, color, title, tasks_dict):
     hover_texts = []
     customdata = []
     for lbl in labels:
-        axis_key = _normalize_radar_label(lbl)
+        axis_key = normalize_radar_label(lbl)
         customdata.append(axis_key)
         task_list = tasks_dict.get(axis_key, [])
         if task_list:

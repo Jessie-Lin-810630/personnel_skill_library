@@ -39,7 +39,7 @@ def _get_client() -> storage.Client:
     return _client
 
 
-def _get_client_on_premise() -> storage.Client:
+def get_client_on_premise() -> storage.Client:
     """在地端，取得 (並快取) GCS storage client；首次呼叫才建立。"""
     global _client
     if _client is None:

@@ -28,7 +28,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
 from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages
-from utils.ui_elements import _render_side_bar, color_map
+from utils.ui_elements import color_map, render_side_bar
 
 load_dotenv()
 
@@ -47,7 +47,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）

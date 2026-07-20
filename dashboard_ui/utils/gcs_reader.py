@@ -1,3 +1,12 @@
+"""GCS 讀取工具：從資料湖 bucket 讀出文字與圖片，供 Streamlit 頁面唯讀取用。
+
+1. 函式 read_text 從指定 bucket 讀取 HTML 或 md 文字內容，找不到時回傳空字串。
+2. 函式 read_bytes_as_base64 讀取圖片 blob 並轉成 base64 字串，供頁面內嵌顯示。
+
+Optional .env keys:
+    SOURCE_BUCKET   GCS data lake bucket (defaults to onenote-vaults).
+"""
+
 import base64
 import os
 from functools import lru_cache

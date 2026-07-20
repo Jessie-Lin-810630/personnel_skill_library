@@ -22,7 +22,7 @@ class GetGenaiClientTests(unittest.TestCase):
             patch.object(cc_mod, "genai") as mock_genai,
             patch.dict(cc_mod.os.environ, env, clear=True),
         ):
-            client = cc_mod._get_genai_client()
+            client = cc_mod.get_genai_client()
 
         mock_genai.Client.assert_called_once()
         kwargs = mock_genai.Client.call_args.kwargs
@@ -39,7 +39,7 @@ class GetGenaiClientTests(unittest.TestCase):
             patch.dict(cc_mod.os.environ, env, clear=True),
         ):
             with self.assertRaises(EnvironmentError):
-                cc_mod._get_genai_client()
+                cc_mod.get_genai_client()
 
 
 if __name__ == "__main__":

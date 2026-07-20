@@ -1,13 +1,10 @@
-"""Audit logging：維護 task07 三個 MongoDB collections（企劃書 C1 / C2 / C3）的寫入工具。
+"""Audit logging：維護 task07 三張 MongoDB collection 的寫入工具。
 
-三個 collections：
-  onenote_graph_api_logs          — 每次 OneNote Graph API 請求一筆 (C1)
-  multimodal_llm_enrichment_logs  — 每次 LLM enrichment 呼叫一筆（含 cache_hit） (C2)
-  onenote_note_metadata           — 每個 (page_id, dt) 版本一筆，全程 upsert (C3)
+1. onenote_graph_api_logs 為每次 OneNote Graph API 請求各記一筆。
+2. multimodal_llm_enrichment_logs 為每次 LLM enrichment 呼叫各記一筆，含 cache_hit 標記。
+3. onenote_note_metadata 為每個 (page_id, dt) 版本各記一筆、全程 upsert，主鍵改為 (page_id, dt) 以支援同頁多版本。
 
-與 v01 差異：C3 主鍵改為 (page_id, dt)，支援同頁多版本；新增 html_sha_hash、
-embedded_status、superseded 已移除（企劃書改版後不再使用）。三個 collection 寫入的
-html sha256 欄位一律命名 html_sha_hash，跨 collection join 命名一致。
+三張 collection 寫入的 html sha256 欄位一律命名 html_sha_hash，讓跨 collection join 時欄名一致。
 """
 
 import os
@@ -20,9 +17,9 @@ from pymongo import MongoClient
 
 _client = None
 
-C1 = "onenote_graph_api_logs"
-C2 = "multimodal_llm_enrichment_logs"
-C3 = "onenote_note_metadata"
+GRAPH_API_LOGS = "onenote_graph_api_logs"
+LLM_ENRICHMENT_LOGS = "multimodal_llm_enrichment_logs"
+NOTE_METADATA = "onenote_note_metadata"
 
 
 class Environment(StrEnum):
@@ -39,7 +36,7 @@ def _get_db():
     return _client[os.getenv("MONGO_DB_NAME")]
 
 
-def _now_utc() -> datetime:
+def now_utc() -> datetime:
     """回傳現在的 UTC timezone-aware datetime。"""
     return datetime.now(timezone.utc)
 
@@ -54,7 +51,7 @@ def _environment() -> Environment:
         raise RuntimeError
 
 
-# ── C1: onenote_graph_api_logs ────────────────────────────────────────────────
+# ── onenote_graph_api_logs ────────────────────────────────────────────────────
 
 
 def log_api_call(
@@ -71,7 +68,7 @@ def log_api_call(
     error_msg: str | None,
     html_path: str | None = None,
 ) -> None:
-    """寫一筆 OneNote Graph API 請求紀錄到 Collection C1（每次 attempt 一筆）。
+    """寫一筆 OneNote Graph API 請求紀錄到 onenote_graph_api_logs，每次 attempt 各一筆。
 
     Args:
         page_id (str | None): 該請求所屬 page id；listing 等無 page 情境為 None。
@@ -88,10 +85,10 @@ def log_api_call(
         html_path (str | None, optional): 成功寫入時的 GCS URI。Defaults to None.
     """
     try:
-        _get_db()[C1].insert_one(
+        _get_db()[GRAPH_API_LOGS].insert_one(
             {
                 "page_id": page_id,
-                "timestamp": _now_utc(),
+                "timestamp": now_utc(),
                 "event_type": "onenote_api_download",
                 "method": method,
                 "api_endpoint": api_endpoint,
@@ -108,10 +105,10 @@ def log_api_call(
             }
         )
     except Exception as e:
-        logger.warning(f"[audit] Failed to write {C1}: {e}")
+        logger.warning(f"[audit] Failed to write {GRAPH_API_LOGS}: {e}")
 
 
-# ── C2: multimodal_llm_enrichment_logs ────────────────────────────────────────
+# ── multimodal_llm_enrichment_logs ────────────────────────────────────────────
 
 
 def log_enrichment_call(
@@ -127,7 +124,7 @@ def log_enrichment_call(
     total_tokens: int | None,
     error_msg: str | None,
 ) -> None:
-    """寫一筆 LLM enrichment 呼叫紀錄到 Collection C2（含 cache_hit，命中時 tokens 皆 0）。
+    """寫一筆 LLM enrichment 呼叫紀錄到 multimodal_llm_enrichment_logs，含 cache_hit，命中時 tokens 皆 0。
 
     Args:
         page_id (str | None): 該次 enrichment 所屬 page id。
@@ -143,11 +140,11 @@ def log_enrichment_call(
         error_msg (str | None): 失敗原因；成功為 None。
     """
     try:
-        _get_db()[C2].insert_one(
+        _get_db()[LLM_ENRICHMENT_LOGS].insert_one(
             {
                 "page_id": page_id,
                 "html_sha_hash": html_hash,
-                "timestamp": _now_utc(),
+                "timestamp": now_utc(),
                 "event_type": "llm_enrichment_call",
                 "model": model,
                 "cache_hit": cache_hit,
@@ -162,16 +159,16 @@ def log_enrichment_call(
             }
         )
     except Exception as e:
-        logger.warning(f"[audit] Failed to write {C2}: {e}")
+        logger.warning(f"[audit] Failed to write {LLM_ENRICHMENT_LOGS}: {e}")
 
 
 def count_regenerate(html_hash: str) -> int:
     """查同一 html_hash 已成功 regenerate 的次數（作 per-note 成本上限依據）。
 
-    在 Collection C2（multimodal_llm_enrichment_logs）數 trigger=regenerate 且成功的列數。
+    在 multimodal_llm_enrichment_logs 數 trigger=regenerate 且成功的列數。
     """
     try:
-        return _get_db()[C2].count_documents(
+        return _get_db()[LLM_ENRICHMENT_LOGS].count_documents(
             {
                 "html_sha_hash": html_hash,
                 "trigger": "regenerate",
@@ -183,13 +180,13 @@ def count_regenerate(html_hash: str) -> int:
         return 0
 
 
-# ── C3: oneNote_note_metadata（主鍵 = page_id + dt）────────────────────────────
+# ── onenote_note_metadata（主鍵 = page_id + dt）───────────────────────────────
 
 
 def get_latest_version_meta(page_id: str) -> dict:
     """取某頁最新一筆版本（依 html_downloaded_at 排序），供 hash 變動判定。空則 {}。"""
     try:
-        cursor = _get_db()[C3].find({"page_id": page_id}).sort("html_downloaded_at", -1).limit(1)
+        cursor = _get_db()[NOTE_METADATA].find({"page_id": page_id}).sort("html_downloaded_at", -1).limit(1)
         docs = list(cursor)
         return docs[0] if docs else {}
     except Exception as e:
@@ -200,7 +197,7 @@ def get_latest_version_meta(page_id: str) -> dict:
 def get_version_meta(page_id: str, dt: str) -> dict:
     """取某頁某一 dt 版本的 metadata。"""
     try:
-        return _get_db()[C3].find_one({"page_id": page_id, "dt": dt}) or {}
+        return _get_db()[NOTE_METADATA].find_one({"page_id": page_id, "dt": dt}) or {}
     except Exception as e:
         logger.warning(f"[audit] Failed to query version ({page_id}, {dt}): {e}")
         return {}
@@ -213,7 +210,7 @@ def find_cached_md_by_hash(html_hash: str) -> dict:
     """
     try:
         return (
-            _get_db()[C3].find_one(
+            _get_db()[NOTE_METADATA].find_one(
                 {
                     "html_sha_hash": html_hash,
                     "enriched_md_path": {"$ne": None},
@@ -232,7 +229,9 @@ def get_latest_archived_version(page_id: str) -> dict:
     供 archive_note 把關「已有更新內容歸檔時不覆寫舊版」，與前端 dt≥最後歸檔日的篩選一致。
     """
     try:
-        cursor = _get_db()[C3].find({"page_id": page_id, "status": "archived"}).sort("archived_at", -1).limit(1)
+        cursor = (
+            _get_db()[NOTE_METADATA].find({"page_id": page_id, "status": "archived"}).sort("archived_at", -1).limit(1)
+        )
         docs = list(cursor)
         return docs[0] if docs else {}
     except Exception as e:
@@ -246,7 +245,9 @@ def get_sibling_pending_versions(page_id: str, exclude_dt: str) -> list[dict]:
     只鎖 pending_review，故從未進審閱的 bronze_stored 舊版不會被誤退役。
     """
     try:
-        cursor = _get_db()[C3].find({"page_id": page_id, "status": "pending_review", "dt": {"$ne": exclude_dt}})
+        cursor = _get_db()[NOTE_METADATA].find(
+            {"page_id": page_id, "status": "pending_review", "dt": {"$ne": exclude_dt}}
+        )
         return list(cursor)
     except Exception as e:
         logger.warning(f"[audit] Failed to query sibling pending versions ({page_id}): {e}")
@@ -264,16 +265,16 @@ def upsert_version_meta(
     每次寫入一律在 $set 蓋 updated_at、在 $setOnInsert 補 created_at（當下 UTC），
     呼叫端不需逐處手動帶這兩個稽核時間戳。
     """
-    now = _now_utc()
+    now = now_utc()
     update: dict = {
         "$set": {**set_fields, "updated_at": now},
         "$setOnInsert": {**(set_on_insert_fields or {}), "created_at": now},
     }
     try:
-        _get_db()[C3].update_one(
+        _get_db()[NOTE_METADATA].update_one(
             {"page_id": page_id, "dt": dt},
             update,
             upsert=True,
         )
     except Exception as e:
-        logger.warning(f"[audit] Failed to upsert {C3} (page_id={page_id}, dt={dt}): {e}")
+        logger.warning(f"[audit] Failed to upsert {NOTE_METADATA} (page_id={page_id}, dt={dt}): {e}")

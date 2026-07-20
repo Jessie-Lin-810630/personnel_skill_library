@@ -19,7 +19,7 @@ NOTE_METADATA = "obsidian_note_metadata"
 VECTORS_V2 = "note_vectors_multimodal"
 
 
-def get_db(mongo_uri: str, db_name: str):
+def get_db(mongo_uri: str, db_name: str) -> Database:
     """以連線字串建立 MongoClient，回傳指定名稱的 database。
 
     Args:

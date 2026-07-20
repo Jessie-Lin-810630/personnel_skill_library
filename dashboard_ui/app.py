@@ -1,3 +1,13 @@
+"""個人技能看板首頁（HOME），讀取所有 MongoDB collection 並繪製總覽圖表。
+
+以 module-level 單例連上 MongoDB Atlas 後由上而下組裝四段：生技與資料工程兩張雷達圖、
+KPI 卡片、GitHub 最近專案卡片，以及刷題三相 donut chart。資料查詢封裝於
+utils.interact_with_mongodb，繪圖與版面元件取自 utils.precomputing 與 utils.ui_elements。
+
+Usage:
+    poetry run streamlit run dashboard_ui/app.py
+"""
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -12,7 +22,7 @@ from utils.precomputing import (
     _radar_tasks_from_df,
     _show_updated_at,
 )
-from utils.ui_elements import _render_side_bar, _render_task_selectbox, _render_task_table, color_map, make_radar
+from utils.ui_elements import color_map, make_radar, render_side_bar, render_task_selectbox, render_task_table
 
 # get_db_atlas() 內部已是 module-level 單例（client 只建立一次、跨頁共用連線池）
 db = mongo_utils.get_db_atlas()
@@ -81,7 +91,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # 最小化 CSS（只做 streamlit 預設元件微調）
@@ -218,20 +228,20 @@ with detail_biotech_col:
     with col1:
         st.markdown("##### 💊 生技製藥任務明細")
     with col2:
-        selected_axis_biotech, tasks_dict_biotech = _render_task_selectbox(
+        selected_axis_biotech, tasks_dict_biotech = render_task_selectbox(
             biotech_labels, biotech_tasks, biotech_radar_event, "biotech"
         )
 
-    _render_task_table(selected_axis_biotech, tasks_dict_biotech)
+    render_task_table(selected_axis_biotech, tasks_dict_biotech)
 
 with detail_de_col:
     col1, col2 = st.columns([1.5, 2], gap=None)
     with col1:
         st.markdown("##### 💻 資料工程任務明細")
     with col2:
-        selected_axis_de, tasks_dict_de = _render_task_selectbox(de_labels, de_tasks, de_radar_event, "de")
+        selected_axis_de, tasks_dict_de = render_task_selectbox(de_labels, de_tasks, de_radar_event, "de")
 
-    _render_task_table(selected_axis_de, tasks_dict_de)
+    render_task_table(selected_axis_de, tasks_dict_de)
 
 st.divider()
 # ─────────────────────────────────────────

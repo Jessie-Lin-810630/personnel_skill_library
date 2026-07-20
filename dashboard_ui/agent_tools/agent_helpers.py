@@ -1,15 +1,8 @@
-"""agents 共用的格式化輔助函式（context 組裝、來源清單、歷史脈絡），供 rag_agent / planning_agent 使用。
+"""agents 共用的格式化輔助函式，負責 context 組裝、來源清單與歷史脈絡，供 rag_agent 與 planning_agent 使用。
 
-職責：
-    1. build_context():
-        把 vector_search 的 chunks 組成純文字 context block
-    2. build_source_list():
-        把 chunks 去重成回傳給 UI 的來源清單
-    3. build_history_context_message():
-        把某 agent 的歷史對話包成獨立 user/model 對組
-
-依賴:
- 1. agent_tools/chat_history.py
+1. 函式 build_context 把 vector_search 回傳的 chunks 組成一段純文字 context block。
+2. 函式 build_source_list 把 chunks 去重成回傳給 UI 的來源清單。
+3. 函式 build_history_context_message 把某個 agent 的歷史對話包成獨立的 user 與 model 對組。
 """
 
 from agent_tools.chat_history import load_chat_history

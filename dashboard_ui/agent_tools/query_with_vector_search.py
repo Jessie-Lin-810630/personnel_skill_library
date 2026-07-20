@@ -45,7 +45,7 @@ VECTOR_COLLECTION = NoteCollections.VECTOR
 def _get_embed_client() -> genai.Client:
     """初始化指向 Vertex AI 的 google-genai client (限定給 location=us 供 embedding 模型用)。
 
-    與 connect_to_google_genai._get_genai_client 分開，因為該函式只調用在 us-central1 的模型。
+    與 connect_to_google_genai.get_genai_client 分開，因為該函式只調用在 us-central1 的模型。
 
     Returns:
         指向 Vertex AI (location=us) 的 google-genai Client 物件。

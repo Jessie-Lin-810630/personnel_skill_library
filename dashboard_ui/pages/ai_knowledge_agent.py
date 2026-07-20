@@ -16,7 +16,7 @@ from agents.intent_router_agent import route
 from dotenv import load_dotenv
 from loguru import logger
 from utils.interact_with_mongodb import get_db_atlas
-from utils.ui_elements import _render_side_bar, color_map
+from utils.ui_elements import color_map, render_side_bar
 
 # TODO: st.login() Google OAuth
 # 當 GCP Console 上建立好 OAuth 2.0 Client ID 與 Client Secret 後：
@@ -41,7 +41,7 @@ st.set_page_config(
     page_icon="🤖",
     layout="wide",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）

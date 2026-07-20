@@ -1,21 +1,14 @@
 """Planning Agent：個人化學習路徑生成與多輪追問調整。
 
-職責:
-  generate_learning_map(): 學習地圖初版生成
-  refine_learning_map():   多輪追問調整（沿用同一 session 的脈絡）
+1. 函式 generate_learning_map 生成學習地圖初版。
+2. 函式 refine_learning_map 沿用同一 session 的脈絡，依多輪追問調整學習地圖。
 
-  兩支函式共用同一套 system prompt 與模型設定，
-  差異只在於是否帶入 history、以及 vector_search 的 query 來源。
-
-依賴:
-  - google-genai SDK (Vertex AI)
-  - agent_tools/query_with_vector_search.py
-  - agent_tools/chat_history.py
+兩支函式共用同一套 system prompt 與模型設定，差異只在於是否帶入 history，以及 vector_search 的 query 來源。
 """
 
 from agent_tools.agent_helpers import build_context, build_history_context_message, build_source_list
 from agent_tools.chat_history import save_chat_history
-from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.connect_to_google_genai import get_genai_client
 from agent_tools.query_with_vector_search import vector_search
 from agent_tools.types_and_constants import PlanningAgent
 from google.genai import types
@@ -54,7 +47,7 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = Pla
             "sources": [{"file_name": ..., "section": ..., "score": ...}, ...]
         }
     """
-    client = _get_genai_client()
+    client = get_genai_client()
 
     # ── Step 1: 儲存使用者訊息 ─────────────────────────────────
     save_chat_history(
@@ -148,7 +141,7 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
             "sources": [{"file_name": ..., "section": ..., "score": ...}, ...]
         }
     """
-    client = _get_genai_client()
+    client = get_genai_client()
 
     # ── Step 1: 儲存使用者追問 ─────────────────────────────────
     save_chat_history(

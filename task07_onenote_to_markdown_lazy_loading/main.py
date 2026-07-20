@@ -15,7 +15,7 @@ Required .env keys:
 from dotenv import load_dotenv
 from loguru import logger
 
-from task07_common.gcs import _get_client_on_premise
+from task07_common.gcs import get_client_on_premise
 
 from .e_onenote_download import e_onenote_download
 
@@ -25,7 +25,7 @@ load_dotenv()
 def run_task07_bronze_etl() -> None:
     """Bronze 層 ETL 入口：呼叫 e_onenote_download() 下載並記錄新版本數。Silver 由 UI on-demand 觸發。"""
     logger.info("=== Task07 v02 Bronze layer: ETL ===")
-    _get_client_on_premise()
+    get_client_on_premise()
     new_versions = e_onenote_download()
     logger.success(f"Bronze layer ETL 完成：{new_versions} 個新版本。Silver 由 UI on-demand 觸發。")
 

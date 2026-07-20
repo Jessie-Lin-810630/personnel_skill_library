@@ -1,22 +1,42 @@
+"""task03 入口：依序執行 LeetCode 與 ccClub 兩條刷題 ETL。
+
+1. 函式 run_task03_leetcode 執行 LeetCode GraphQL ETL，抓取已解題清單與統計，寫入 MongoDB。
+2. 函式 run_task03_ccclub 執行 ccClub REST API ETL，登入後抓取已解題資料，寫入 MongoDB。
+3. 兩條 pipeline 各自把 summary 以 partial update 寫進共用的 ccClub&leetcode_summary，互不覆蓋。
+
+Usage:
+    poetry run python -m task03_leetcode_ccClub_etl.main
+
+Required .env keys:
+    LEETCODE_USERNAME   LeetCode account name.
+    LEETCODE_SESSION    LeetCode session cookie.
+    CSRF_TOKEN          LeetCode CSRF token cookie.
+    CCCLUB_USERNAME     ccClub Judge account name.
+    CCCLUB_PASSWORD     ccClub Judge password.
+    MONGO_ALTAS_URI     MongoDB Atlas connection string.
+    MONGO_DB_NAME       Target database name.
+"""
+
 import os
+
 from loguru import logger
-from pymongo import MongoClient
 
-from .e_query_leetcode_graphql import _get_headers, fetch_solved_problems_features, fetch_solved_problem_stats
-from .t_transform_leetcode import build_problem_feat_documents, build_leetcode_summary_partial
-from .l_load_leetcode_doc_to_mongodb import get_db, upsert_leetcode_problems, upsert_leetcode_summary_partial
-
-from .e_crawler_ccClub import _get_session_and_headers, fetch_all_solved_problems
-from .t_transform_ccClub import build_ccclub_problem_documents, build_ccclub_summary_partial
+from .e_crawler_ccClub import fetch_all_solved_problems, get_session_and_headers
+from .e_query_leetcode_graphql import fetch_solved_problem_stats, fetch_solved_problems_features, get_headers
 from .l_load_ccClub_doc_to_mongodb import upsert_ccclub_problems, upsert_ccclub_summary_partial
-
-
-"""
-一次執行 Task 3-A：LeetCode GraphQL ETL。
-"""
+from .l_load_leetcode_doc_to_mongodb import get_db, upsert_leetcode_problems, upsert_leetcode_summary_partial
+from .t_transform_ccClub import build_ccclub_problem_documents, build_ccclub_summary_partial
+from .t_transform_leetcode import build_leetcode_summary_partial, build_problem_feat_documents
 
 
 def run_task03_leetcode() -> None:
+    """執行 LeetCode GraphQL ETL，抓取已解題清單與統計後寫入 MongoDB。
+
+    1. 檢查 LeetCode 與 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
+    2. Extract 以 GraphQL 抓取已解題題型特徵與解題統計。
+    3. Transform 把兩者組成題目文檔與 LeetCode 側摘要。
+    4. Load 以 upsert 寫入 solved_problems_on_leetcode 與 ccClub&leetcode_summary。
+    """
     username = os.getenv("LEETCODE_USERNAME")
     session = os.getenv("LEETCODE_SESSION")
     csrf_token = os.getenv("CSRF_TOKEN")
@@ -24,15 +44,18 @@ def run_task03_leetcode() -> None:
     db_name = os.getenv("MONGO_DB_NAME")
 
     if not all([username, session, csrf_token, mongo_uri, db_name]):
-        logger.error("請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-                     "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-                               "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
-                               )
+        logger.error(
+            "請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
+            "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
+        )
+        raise EnvironmentError(
+            "請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
+            "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
+        )
 
     logger.info("=== Task 3-A: LeetCode GraphQL ETL 開始 ===")
 
-    headers = _get_headers(csrf_token, session, username)
+    headers = get_headers(csrf_token, session, username)
 
     # ======== Extract ========
     # 抓已解題清單 + beats stats
@@ -55,6 +78,13 @@ def run_task03_leetcode() -> None:
 
 
 def run_task03_ccclub() -> None:
+    """執行 ccClub REST API ETL，登入後抓取已解題資料並寫入 MongoDB。
+
+    1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
+    2. Extract 登入 ccClub 後抓取已解題清單並逐題補齊 topic 與 difficulty。
+    3. Transform 把資料組成題目文檔與 ccClub 側摘要。
+    4. Load 以 upsert 寫入 solved_problems_on_ccClub 與 ccClub&leetcode_summary。
+    """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
@@ -66,7 +96,7 @@ def run_task03_ccclub() -> None:
 
     # ======== Extract ========
     # 登入並抓取所有已解題資料
-    session, headers = _get_session_and_headers()
+    session, headers = get_session_and_headers()
     raw_solved_problems = fetch_all_solved_problems(session, headers)
 
     # ======== Transform ========

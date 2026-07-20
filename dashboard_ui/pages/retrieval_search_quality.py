@@ -21,7 +21,7 @@ from utils.interact_with_mongodb import (
     get_rag_satisfaction_proxy,
     get_rag_session_rounds,
 )
-from utils.ui_elements import _render_side_bar, color_map
+from utils.ui_elements import color_map, render_side_bar
 
 # ─────────────────────────────────────────
 # 頁面設定
@@ -32,7 +32,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # 常數

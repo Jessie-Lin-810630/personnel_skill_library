@@ -1,4 +1,4 @@
-"""Gold 層 Load：approve 歸檔 / reject 退件，兩者都把 md frontmatter 寫回 C3 供好壞 md 分析。
+"""Gold 層 Load：approve 歸檔 / reject 退件，兩者都把 md frontmatter 寫回 onenote_note_metadata 供好壞 md 分析。
 
 本層不做向量化 (解耦至另一條 pipeline Task06)。
 
@@ -35,10 +35,10 @@ from loguru import logger
 
 from task07_common import gcs
 from task07_common.audit_log import (
-    _now_utc,
     get_latest_archived_version,
     get_sibling_pending_versions,
     get_version_meta,
+    now_utc,
     upsert_version_meta,
 )
 from task07_common.topic import infer_topic
@@ -255,7 +255,7 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
     # 故這版 dt 的筆記能重回 Silver&Gold 層
     archived_prefix = gcs.archived_note_prefix(meta["onenote_user_id"], meta["notebook"], meta["section"], dt)
 
-    now = _now_utc()
+    now = now_utc()
     try:
         # 2. 執行歸檔：從 processed-notes 複製 md 到 archived-notes
         md_name = PurePosixPath(enriched_md_path).name
@@ -333,7 +333,7 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             logger.warning(f"[gold] frontmatter fail (已歸檔，但無法寫入 frontmatter 到 metadata): {e}")
             continue
 
-    # 重試皆失敗：歸檔本體已完成（md/png 已複製、C3 已翻 archived），僅 frontmatter 從缺
+    # 重試皆失敗：歸檔本體已完成（md/png 已複製、onenote_note_metadata 已翻 archived），僅 frontmatter 從缺
     return {"status": "archived", "md_archive_path": md_archive_uri, "img_archive_path": img_archive_paths}
 
 
@@ -368,7 +368,7 @@ def reject_note(page_id: str, dt: str, role: str) -> dict:
             "status": "review_closed",
             "review_result": "rejected",
             "reviewed_by_role": role,
-            "reviewed_at": _now_utc(),
+            "reviewed_at": now_utc(),
         },
     )
 

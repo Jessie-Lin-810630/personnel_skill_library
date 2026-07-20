@@ -1,21 +1,15 @@
-"""作為 RAG agent 執行向量檢索的前置工作: Query Transformation。
+"""RAG agent 執行向量檢索前的 Query Transformation 前置工作。
 
-職責：
-    1. _load_known_tags():
-        讀取 MongoDB 向量資料庫取出真實存在的資料 tags
-    2. _load_alias_to_tags_map():
-        讀取 MongoDB 筆記元數據資料庫取出筆記名稱 (alias) 與對應的 tags
-    3. _format_history_for_prompt():
-        將 agent_tools.chat_history() 回傳的歷史問答脈絡，拼成 model 看得懂的 user prompt 字串
-    4. rewrite_query():
-        - 接收歷史對話紀錄資料到 user prompt，接收 alias-tag 對照表中，傳入 system prompt
-        - 將使用者最新的追問改寫成一個「不依賴歷史就能獨立理解」的完整問句
-        - 並推薦 3-5 個 tags，串接到 rewritten query 做 query expansion
-        - 回傳 rewritten_query (給 reranker 用) 與 expanded_query (給 vector_search 用)
+1. 函式 _load_known_tags 從 MongoDB 向量資料庫取出真實存在的資料 tags。
+2. 函式 _load_alias_to_tags_map 從 MongoDB 筆記元數據資料庫取出筆記名稱與其對應的 tags。
+3. 函式 _format_history_for_prompt 把歷史問答脈絡拼成 model 看得懂的 user prompt 字串。
+4. 函式 rewrite_query 把使用者最新的追問改寫成不依賴歷史也能獨立理解的完整問句，
+   同時推薦 3 到 5 個 tags 做 query expansion，
+   回傳給 reranker 用的 rewritten_query 與給 vector_search 用的 expanded_query。
 
 設計決策：
-  - expanded_query 用於 vector_search 粗篩，需摻入 tag 關鍵字增強語意信號，提高 recall
-  - rewritten_query 用於 reranker 根據語意關聯度做排序，但不摻 tag 雜訊避免關鍵字干擾 cross-encoder 判斷
+  - expanded_query 用於 vector_search 粗篩，摻入 tag 關鍵字增強語意信號以提高 recall。
+  - rewritten_query 用於 reranker 依語意關聯度排序，不摻 tag 雜訊，避免關鍵字干擾 cross-encoder 判斷。
 """
 
 from agent_tools.types_and_constants import NoteCollectionBeforeEmbedding, NoteCollections, RewriterAgent

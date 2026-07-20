@@ -1,25 +1,15 @@
-"""意圖分類 router：判斷使用者輸入該交給 rag_agent 還是 planning_agent（v2 簡化版）。
+"""意圖分類 router，判斷使用者輸入該交給 rag_agent 還是 planning_agent。
 
-改版重點：
-  舊版: route() 負責 intent 分類 + tag 抽取 + alias 比對 + file_path 繼承 + HyDE rewrite
-  新版: route() 只負責 intent 分類（rag_agent vs planning_agent），
-        query rewrite / tag expansion / rerank 全部移到 rag_agent 內部處理
+1. 函式 route 只做 intent 分類，帶入歷史脈絡判定該把這輪輸入交給 rag_agent 還是 planning_agent。
 
 設計決策：
-  - Router 職責單一化：只做 intent classification
-  - 所有 retrieval 優化邏輯（rewrite、expansion、rerank）封裝在 rag_agent 內
-  - 移除 _extract_filter_tags()、_extract_tags_via_alias()、
-    _r_hyde_rewrite()、_looks_like_followup()、_get_last_filter_tags()
-  - 呼叫端（Streamlit）只需判斷 agent_target 即可
-
-依賴:
-  - google-genai SDK (R2 用)
-  - agent_tools/chat_history.py (R2 帶入 history)
-  - 不需要 vector_search
+  - Router 職責單一化，只做 intent classification；
+    query rewrite、tag expansion、rerank 等檢索優化邏輯全部封裝在 rag_agent 內部。
+  - 呼叫端只需依 route 回傳的 agent_target 分派，不需處理任何 retrieval 細節。
 """
 
 from agent_tools.chat_history import load_chat_history, save_chat_history
-from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.connect_to_google_genai import get_genai_client
 from agent_tools.types_and_constants import RouterAgent
 from google import genai
 from google.genai import types
@@ -172,7 +162,7 @@ def route(query: str, session_id: str) -> dict:
         return {"agent_target": r1_result}
 
     # R2 LLM 補判
-    client = _get_genai_client()
+    client = get_genai_client()
     r2_result, intent_score = _r2_llm_classify(query, session_id, client)
 
     save_chat_history(

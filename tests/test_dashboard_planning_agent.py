@@ -1,6 +1,6 @@
 """Planning agent 測試：學習地圖初版生成與多輪追問調整。
 
-vector_search / save_chat_history / _get_genai_client 皆 mock；
+vector_search / save_chat_history / get_genai_client 皆 mock；
 build_context / build_source_list / build_history_context_message 為純函式，讓其真實執行
 （build_history_context_message 內的 load_chat_history 於 agent_helpers 層 mock）。
 """
@@ -47,7 +47,7 @@ class PlanningAgentTests(unittest.TestCase):
         self.mock_client = MagicMock()
         self.mock_client.models.generate_content.return_value = self.mock_response
 
-        pl_mod._get_genai_client = MagicMock(return_value=self.mock_client)
+        pl_mod.get_genai_client = MagicMock(return_value=self.mock_client)
         pl_mod.save_chat_history = MagicMock()
         pl_mod.vector_search = MagicMock(return_value=list(self.CHUNKS))
         # build_history_context_message 真跑，但其內部 load_chat_history 於 agent_helpers 層 mock

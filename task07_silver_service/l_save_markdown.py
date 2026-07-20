@@ -8,7 +8,7 @@ upsert onenote_note_metadata（enriched_md_path、md_md5_hash、enriched_md_expo
 from loguru import logger
 
 from task07_common import gcs
-from task07_common.audit_log import _now_utc, upsert_version_meta
+from task07_common.audit_log import now_utc, upsert_version_meta
 
 
 def save_enriched_md(
@@ -29,7 +29,7 @@ def save_enriched_md(
         set_fields={
             "enriched_md_path": md_uri,
             "md_md5_hash": md_md5_hash,
-            "enriched_md_exported_at": _now_utc(),
+            "enriched_md_exported_at": now_utc(),
             "status": "pending_review",
             "error_msg": None,
         },

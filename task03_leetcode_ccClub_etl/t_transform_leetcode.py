@@ -1,24 +1,28 @@
+"""task03 Transform（LeetCode）：把 Extract 抓來的已解題清單與統計結果清洗成 MongoDB document。
+
+輸入的已解題清單與統計結果都已由 Extract 端 decode 成 Python dict。
+
+1. 函式 build_problem_feat_documents 從已解題清單擷取題號與題型特徵，
+   組成符合 solved_problems_on_leetcode schema 的 document。
+2. 函式 build_leetcode_summary_partial 接收上一步的題型特徵文檔與 Extract 抓到的統計結果，
+   產出 LeetCode 刷題進度的彙整文檔。
+"""
+
 from collections import defaultdict
 from datetime import datetime, timezone
 
 from loguru import logger
 
-"""
-程式架構：
-Transform：接收 e_query_leetcode_graphql 所抓取的 用戶已解題清單 與 統計結果，
-兩個來自e_query_leetcode_graphql.py的最終變數都是已經 decode 成 python dict 形式。
-接下來清洗成符合 MongoDB document 的格式。
-
-函式設計：
-(1) build_problem_feat_documents(): 從用戶已解題清單擷取需要的題型特徵與題號，
-以其符合自定義的 MongoDB schema(document)。
-(2) build_leetcode_summary_partial(): 接收上一支函式清洗出來的題型特徵文檔、
-以及 e_query_leetcode_graphql 任務爬取到的統計結果，產出leetcode刷題進度彙整文檔。
-"""
-
 
 def build_problem_feat_documents(raw_solved: list[dict]) -> list[dict]:
-    """將每題 AC 的 raw question 組裝成 文檔集'solved_problems_on_leetcode' 的 document。"""
+    """把每題 AC 的 raw question 組裝成 solved_problems_on_leetcode 的 document。
+
+    Args:
+        raw_solved: 已 AC 題目的 raw question 清單。
+
+    Returns:
+        符合 solved_problems_on_leetcode schema 的 document 清單。
+    """
     logger.info("Building documents listing the features of problems on leetcode...")
     feature_docs = []
     for q in raw_solved:
@@ -38,18 +42,18 @@ def build_leetcode_summary_partial(
     feature_docs: list[dict],
     solved_problem_stats: list[dict],
 ) -> dict:
-    """產出 文檔集 'ccClub&leetcode_summary' 中關於 LeetCode 相關的欄位。
+    """統計 LeetCode 題目文檔與解題統計，產出 ccClub&leetcode_summary 中 LeetCode 側的欄位。
 
-    另一個刷題系統 ccClub 的部分由 task03 的另一支腳本補入，這裡只產 leetcode 側。
-    用 $set partial update 寫入，不覆蓋 ccClub 側的欄位。
+    ccClub 側的欄位由 task03 另一支腳本補入，這裡只產 LeetCode 側，以 $set partial update
+    寫入不覆蓋 ccClub 欄位；feature_docs 為空但統計顯示有解題時視為上游不一致並回傳空 dict。
 
-    回傳：
-    {
-        "snapshot_date": "...",
-        "totalProblemsOnLeetcode": 15,
-        "problemsSolvedOnLeetcode": [...],
-        "problemTopicsOnLeetcode": {"array": 13.4, ...}
-    }
+    Args:
+        feature_docs: build_problem_feat_documents 產出的題型特徵文檔清單。
+        solved_problem_stats: Extract 抓到的各難度 AC submission 統計。
+
+    Returns:
+        含 snapshot_date、totalSolvedProblemsOnLeetcode、problemDifficultyOnLeetcode 與
+        topicsPercentOnLeetcode 的 LeetCode 側摘要 dict；上游不一致時為空 dict。
     """
     logger.info("Building partial summary documents for leetcode...")
 

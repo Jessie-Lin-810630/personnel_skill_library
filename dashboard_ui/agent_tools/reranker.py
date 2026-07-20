@@ -1,22 +1,21 @@
-"""作為 RAG agent 執行向量檢索後的重排序工作: Rerank。
+"""RAG agent 執行向量檢索後的 Rerank 重排序工作。
 
-職責：
-  對 vector_search 回傳的 candidate chunks 做 cross-encoder 精排，
-  用 Cohere Rerank API 重新計算 query-document 的相關性分數，
-  只保留 top_n 最相關的 chunks 給 RAG Agent LLM 使用。
+1. 對 vector_search 回傳的 candidate chunks 用 Cohere Rerank API 做 cross-encoder 精排，
+   重新計算 query 與 document 的相關性分數。
+2. 只保留 top_n 最相關的 chunks 給 RAG agent 的 LLM 使用。
+3. 若 Cohere API 呼叫失敗，fallback 直接回傳原始的 vector search 結果，不做 rerank。
 
 設計決策：
-  - rerank 時用 rewritten_query (不是 expanded_query)，
-    因為 expanded_query 裡串接的 tag 關鍵字會干擾 cross-encoder 的語意判斷。
+  - rerank 時用 rewritten_query 而非 expanded_query，
+    因為 expanded_query 串接的 tag 關鍵字會干擾 cross-encoder 的語意判斷。
   - rerank score 取代原本的 vectorSearchScore，成為最終排序依據。
-  - 如果 Cohere API 呼叫失敗，fallback 回傳原始的 vector search 結果 (不做 rerank)。
 
 Required .env keys:
-    COHERE_API_KEY                    COHERE reranker mode API key
+    COHERE_API_KEY   Cohere reranker API key.
 
 參考：
-  - Cohere Rerank docs: https://docs.cohere.com/reference/rerank
-  - Rerank model: rerank-v3.5 (多語言、支援中英日文混合)
+  - Cohere Rerank 文件：https://docs.cohere.com/reference/rerank
+  - Rerank 模型：rerank-v3.5，多語言、支援中英日文混合。
 """
 
 import os

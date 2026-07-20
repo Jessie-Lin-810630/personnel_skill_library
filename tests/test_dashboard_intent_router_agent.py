@@ -153,7 +153,7 @@ class TestRoute(unittest.TestCase):
 
     @patch(f"{_MODULE}.save_chat_history")
     @patch(f"{_MODULE}._r2_llm_classify", return_value=("rag_agent", 0.82))
-    @patch(f"{_MODULE}._get_genai_client")
+    @patch(f"{_MODULE}.get_genai_client")
     def test_R1_未命中_呼叫_R2(self, mock_client, mock_r2, mock_save):
         result = route("好餓", "test_session")
         self.assertEqual(result, {"agent_target": "rag_agent"})

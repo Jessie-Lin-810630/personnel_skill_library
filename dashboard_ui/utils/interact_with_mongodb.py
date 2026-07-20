@@ -1,3 +1,14 @@
+"""Dashboard 的 MongoDB 查詢封裝：集中連線建立與各頁所需的 collection 讀取。
+
+1. 函式 get_db 與 get_db_atlas 分別以 MONGO_URI 與 MONGO_ALTAS_URI 建立連線，後者為跨頁共用的 module-level 單例。
+2. 其餘查詢函式把各 collection 讀成 Streamlit 頁面直接可用的 DataFrame 或 dict。
+
+Required .env keys:
+    MONGO_ALTAS_URI   MongoDB Atlas connection string (used by get_db_atlas singleton).
+    MONGO_URI         MongoDB connection string used by get_db.
+    MONGO_DB_NAME     Target database name.
+"""
+
 import os
 
 import pandas as pd
@@ -9,7 +20,7 @@ from pymongo.database import Database
 load_dotenv()
 
 
-def get_db():
+def get_db() -> Database:
     mongo_uri = os.getenv("MONGO_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
@@ -53,7 +64,7 @@ def get_db_atlas() -> Database:
     return _atlas_db
 
 
-def get_radar_summary_df(db, collection: str) -> pd.DataFrame:
+def get_radar_summary_df(db: Database, collection: str) -> pd.DataFrame:
     """取得每張雷達圖最新的軸向標籤、軸向刻度的資料，並轉成 pandas dataframe。"""
     coll = db[collection]
     curr_summary = list(
@@ -73,7 +84,7 @@ def get_radar_summary_df(db, collection: str) -> pd.DataFrame:
     return curr_summary_df
 
 
-def get_a_radar_detail(db, collection: str) -> pd.DataFrame:
+def get_a_radar_detail(db: Database, collection: str) -> pd.DataFrame:
     coll = db[collection]
     data = coll.find({}, {"_id": 0, "雷達軸": 1, "經手任務": 1})
 
@@ -81,7 +92,7 @@ def get_a_radar_detail(db, collection: str) -> pd.DataFrame:
     return radar_detail_df
 
 
-def get_obsidian_kpi(db, collection: str = "obsidian_summary") -> tuple:
+def get_obsidian_kpi(db: Database, collection: str = "obsidian_summary") -> tuple:
     #     # —— KPI ——
     # obsidian_total = 36
     # obsidian_delta = "+6"
@@ -102,7 +113,7 @@ def get_obsidian_kpi(db, collection: str = "obsidian_summary") -> tuple:
     return curr_total, note_delta, topic_counts, snapshot_date
 
 
-def get_github_kpi(db, collection: str = "github_summary") -> tuple:
+def get_github_kpi(db: Database, collection: str = "github_summary") -> tuple:
     # github_total = 15
     # github_delta = "+3 repos"
     coll = db[collection]
@@ -119,7 +130,7 @@ def get_github_kpi(db, collection: str = "github_summary") -> tuple:
     return curr_total, repo_delta, snapshot_date
 
 
-def get_github_detail(db, collection: str = "github_repos") -> list[dict]:
+def get_github_detail(db: Database, collection: str = "github_repos") -> list[dict]:
     coll = db[collection]
     data = coll.find(
         {},
@@ -137,7 +148,7 @@ def get_github_detail(db, collection: str = "github_repos") -> list[dict]:
     return list(data)
 
 
-def get_problem_kpi_donut(db, collection: str = "ccClub&leetcode_summary") -> dict:
+def get_problem_kpi_donut(db: Database, collection: str = "ccClub&leetcode_summary") -> dict:
     """取得刷題三相 donut 所需的 KPI 與環比變化量。
 
     範例回傳值：
@@ -194,7 +205,7 @@ def get_problem_kpi_donut(db, collection: str = "ccClub&leetcode_summary") -> di
         }
 
 
-def get_onenote_versioned_pages(db) -> list[dict]:
+def get_onenote_versioned_pages(db: Database) -> list[dict]:
     """查詢 Collection onenote_note_metadata，回傳一篇筆記「目前哪些版本可審閱」。
 
     同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為主鍵鎖定筆記版本。
@@ -241,7 +252,7 @@ def get_onenote_versioned_pages(db) -> list[dict]:
     return list(coll.aggregate(pipeline))
 
 
-def get_notes_summary_snapshots(db, collection: str = "notes_summary", limit: int = 2) -> list[dict]:
+def get_notes_summary_snapshots(db: Database, collection: str = "notes_summary", limit: int = 2) -> list[dict]:
     """取得 notes_summary 最新的幾筆快照，供攝取品質頁的 KPI 卡與生命週期漏斗使用。
 
     依 snapshot_date 由新到舊取前 limit 筆（預設 2 筆）：第 0 筆為最新快照、
@@ -261,7 +272,7 @@ def get_notes_summary_snapshots(db, collection: str = "notes_summary", limit: in
     return list(data)
 
 
-def get_onenote_attachment_dismatch(db, collection: str = "onenote_note_metadata") -> list[dict]:
+def get_onenote_attachment_dismatch(db: Database, collection: str = "onenote_note_metadata") -> list[dict]:
     """彙總 OneNote 各狀態筆記的附件遺失情形，供攝取品質頁的附件遺失量長條圖。
 
     只取 status 為 archived / rejected 的筆記，依 (status, embedded_status) 分組，
@@ -299,7 +310,7 @@ def get_onenote_attachment_dismatch(db, collection: str = "onenote_note_metadata
     return list(coll.aggregate(pipeline))
 
 
-def get_enrichment_logs(db, collection: str = "multimodal_llm_enrichment_logs") -> pd.DataFrame:
+def get_enrichment_logs(db: Database, collection: str = "multimodal_llm_enrichment_logs") -> pd.DataFrame:
     """取得 LLM enrichment 的成功與 cache hit 紀錄，供 token 累計與 cache hit rate 圖表。
 
     只取 status 為 success 的紀錄（濾掉失敗筆避免 token 為 null），
@@ -329,7 +340,7 @@ def get_enrichment_logs(db, collection: str = "multimodal_llm_enrichment_logs") 
     return pd.DataFrame(list(cursor))
 
 
-def get_rag_retrieved_chunks(db, collection: str = "chat_history") -> pd.DataFrame:
+def get_rag_retrieved_chunks(db: Database, collection: str = "chat_history") -> pd.DataFrame:
     """展開 RAG 回應的 retrieved_chunks，每個 chunk 一列，供 similarity vs rerank 散佈圖。
 
     只取 agent_type=rag 且 role=model 的紀錄，$unwind metadata.retrieved_chunks
@@ -363,7 +374,7 @@ def get_rag_retrieved_chunks(db, collection: str = "chat_history") -> pd.DataFra
     return pd.DataFrame(list(coll.aggregate(pipeline)))
 
 
-def get_rag_session_rounds(db, collection: str = "chat_history") -> pd.DataFrame:
+def get_rag_session_rounds(db: Database, collection: str = "chat_history") -> pd.DataFrame:
     """統計每個 session 的檢索輪數（同 session 中 role=user 的訊息數），供輪數分佈圖。
 
     Args:
@@ -382,7 +393,7 @@ def get_rag_session_rounds(db, collection: str = "chat_history") -> pd.DataFrame
     return pd.DataFrame(list(coll.aggregate(pipeline)))
 
 
-def get_rag_file_retrieval_counts(db, collection: str = "chat_history") -> pd.DataFrame:
+def get_rag_file_retrieval_counts(db: Database, collection: str = "chat_history") -> pd.DataFrame:
     """統計各文件被 RAG 檢索到的次數與最後檢索時間，供冷熱資料 treemap。
 
     以 note_files（去重後的參考檔案）$unwind 後 group by 檔名計數。days_since
@@ -420,7 +431,7 @@ def get_rag_file_retrieval_counts(db, collection: str = "chat_history") -> pd.Da
     return df
 
 
-def get_rag_satisfaction_proxy(db, collection: str = "chat_history", truncate_limit: int = 2000) -> dict:
+def get_rag_satisfaction_proxy(db: Database, collection: str = "chat_history", truncate_limit: int = 2000) -> dict:
     """彙總 RAG 檢索品質的滿意度代理指標（rerank top-1 中位數、多文件發散度、回應截斷率）。
 
     以一次 aggregation 掃過 agent_type=rag 且 role=model 的紀錄，計算：
@@ -482,7 +493,7 @@ def get_rag_satisfaction_proxy(db, collection: str = "chat_history", truncate_li
     }
 
 
-def get_problem_features(db, collection: str = "ccClub&leetcode_summary") -> dict:
+def get_problem_features(db: Database, collection: str = "ccClub&leetcode_summary") -> dict:
     coll = db[collection]
     data = list(coll.find({}, {"_id": 0}).sort({"snapshot_date": -1}).limit(1))
     if not data:

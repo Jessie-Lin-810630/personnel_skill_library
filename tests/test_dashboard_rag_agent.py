@@ -1,7 +1,7 @@
 """RAG agent (v2) 測試：rewrite → vector_search → rerank → generate。
 
 外部相依（rewrite_query / vector_search / rerank_chunks / load/save_chat_history /
-_get_genai_client）皆以 MagicMock 覆蓋，不打真實 API；
+get_genai_client）皆以 MagicMock 覆蓋，不打真實 API；
 build_context / build_source_list 為純函式，讓其真實執行做整合驗證。
 """
 
@@ -58,7 +58,7 @@ class RagQueryNoChunksTests(unittest.TestCase):
 
     def setUp(self):
         self.mock_client = MagicMock()
-        rag_mod._get_genai_client = MagicMock(return_value=self.mock_client)
+        rag_mod.get_genai_client = MagicMock(return_value=self.mock_client)
         rag_mod.save_chat_history = MagicMock()
         rag_mod.load_chat_history = MagicMock(return_value=[])
         rag_mod.rewrite_query = MagicMock(return_value=REWRITE_RESULT)
@@ -142,7 +142,7 @@ class RagQueryWithChunksTests(unittest.TestCase):
         self.mock_client = MagicMock()
         self.mock_client.models.generate_content.return_value = self.mock_response
 
-        rag_mod._get_genai_client = MagicMock(return_value=self.mock_client)
+        rag_mod.get_genai_client = MagicMock(return_value=self.mock_client)
         rag_mod.save_chat_history = MagicMock()
         rag_mod.load_chat_history = MagicMock(return_value=list(self.HISTORY))
         rag_mod.rewrite_query = MagicMock(return_value=REWRITE_RESULT)

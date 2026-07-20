@@ -13,7 +13,7 @@ import os
 from google import genai
 
 
-def _get_genai_client() -> genai.Client:
+def get_genai_client() -> genai.Client:
     """初始化指向 Vertex AI 的 google-genai client (限定給 location=us-central1，供 chat 模型用)。
 
     與 query_with_vector_search._get_embed_client 分開，因為該函式只調用在 us 的模型。

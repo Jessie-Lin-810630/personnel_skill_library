@@ -35,9 +35,9 @@ from loguru import logger
 
 from task07_common import gcs  # GCS 相關互動模組
 from task07_common.audit_log import (  # 回傳現在 UTC 時間
-    _now_utc,
     get_latest_version_meta,  # 取出每份筆記頁 (page) 的最新一筆 html_hash 值
     log_api_call,  # Insert request log to OneNote Graph API
+    now_utc,
     upsert_version_meta,  # Upsert data lineage between html to md
 )
 from task07_common.hashing import html_source_hash  # 計算 html_sha_hash 用
@@ -684,7 +684,7 @@ def download_notebooks(
                         "html_sha_hash": html_hash,
                         "html_md5_hash": html_md5,
                         "html_path": html_uri,
-                        "html_downloaded_at": _now_utc(),
+                        "html_downloaded_at": now_utc(),
                         "attached_images": attached_images,
                         "status": "bronze_stored",
                         "embedded_status": False,

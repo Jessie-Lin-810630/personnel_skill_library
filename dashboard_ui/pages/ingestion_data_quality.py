@@ -21,7 +21,7 @@ from utils.interact_with_mongodb import (
     get_notes_summary_snapshots,
     get_onenote_attachment_dismatch,
 )
-from utils.ui_elements import _render_side_bar, color_map
+from utils.ui_elements import color_map, render_side_bar
 
 # ─────────────────────────────────────────
 # 頁面設定
@@ -32,7 +32,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # 色票 — 沿用全站 color_map，另補語意用的綠(好)/紅(壞)

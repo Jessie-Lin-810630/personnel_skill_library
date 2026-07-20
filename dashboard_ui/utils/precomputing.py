@@ -1,3 +1,9 @@
+"""Dashboard 的資料預處理工具：把 MongoDB 查詢結果整理成繪圖前所需的格式。
+
+集中日期格式化、雷達軸標籤正規化、百分比換算題數、GitHub 專案卡片整理等純函式，
+供 app.py 與各頁在繪圖前呼叫，本身不涉及任何 I/O 或環境變數。
+"""
+
 import pandas as pd
 import streamlit as st
 
@@ -26,7 +32,7 @@ def _show_updated_at(value):
         st.caption(f"最近更新日期：{value}")
 
 
-def _normalize_radar_label(label):
+def normalize_radar_label(label):
     return " ".join(str(label).replace("<br>", " ").split())
 
 
@@ -52,7 +58,7 @@ def _radar_tasks_from_df(df: pd.DataFrame):
             task_items = task
         else:
             task_items = [task]
-        tasks.setdefault(_normalize_radar_label(axis), []).extend(str(item) for item in task_items if item)
+        tasks.setdefault(normalize_radar_label(axis), []).extend(str(item) for item in task_items if item)
     return tasks
 
 

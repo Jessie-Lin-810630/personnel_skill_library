@@ -1,24 +1,20 @@
-"""筆記語意查詢 RAG agent：rewrite → vector_search → rerank → LLM 生成（v2）。
+"""筆記語意查詢 RAG agent，流程為 rewrite → vector_search → rerank → LLM 生成。
 
-改版重點：
-  舊版: prefilter (tags/file_paths) → vector_search(top_k=5) → LLM 生成
-  新版: query_rewrite → vector_search(expanded_query, 無 prefilter, top_k=5)
-        → Cohere rerank(rewritten_query, top_n=5) → LLM 生成
+1. 以 query_rewriter 把使用者問句改寫成 rewritten_query 與含 tag 的 expanded_query。
+2. 以 expanded_query 對向量庫做 vector_search 粗篩，取 top_k 個 chunk。
+3. 以 rewritten_query 對粗篩結果做 Cohere rerank，取 top_n 個 chunk。
+4. 把精排後的 chunks 組成 context 交給 LLM 生成回答。
 
 設計決策：
-  - vector_search 不加 prefilter，用 expanded_query（含 tag 關鍵字）做軟性語意增強
-  - rerank 用 rewritten_query（不含 tag 關鍵字），避免 tag 干擾 cross-encoder 判斷
-  - chat_history 存原始 query（使用者真正講的話），不存 rewritten/expanded
-  - metadata 記錄 search_optimize_method、rewritten_query、recommended_tags，方便 debug
-
-依賴:
-  - google-genai SDK (Vertex AI)
-  - agent_tools/query_rewriter.py、agent_tools/reranker.py
+  - vector_search 不加 prefilter，改用含 tag 關鍵字的 expanded_query 做軟性語意增強。
+  - rerank 用不含 tag 關鍵字的 rewritten_query，避免 tag 干擾 cross-encoder 判斷。
+  - chat_history 只存使用者原始 query，不存 rewritten 或 expanded 版本。
+  - metadata 記錄 search_optimize_method、rewritten_query、recommended_tags，方便 debug。
 """
 
 from agent_tools.agent_helpers import build_context, build_source_list
 from agent_tools.chat_history import load_chat_history, save_chat_history
-from agent_tools.connect_to_google_genai import _get_genai_client
+from agent_tools.connect_to_google_genai import get_genai_client
 from agent_tools.query_rewriter import rewrite_query
 from agent_tools.query_with_vector_search import vector_search
 from agent_tools.reranker import rerank_chunks
@@ -60,7 +56,7 @@ def rag_query(
             "debug": dict,   # 方便觀察 pipeline 每一步的結果
         }
     """
-    client = _get_genai_client()
+    client = get_genai_client()
 
     # ── Step 1: 儲存使用者訊息 ─────────────────────────────────
     save_chat_history(

@@ -10,7 +10,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from utils.gcs_reader import read_text
 from utils.tech_stack_diagram import render_tech_stack_diagram
-from utils.ui_elements import _render_side_bar, color_map
+from utils.ui_elements import color_map, render_side_bar
 
 load_dotenv()
 ERD_LINK = os.getenv("ERD_LINK")
@@ -24,7 +24,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-_render_side_bar()
+render_side_bar()
 
 # ─────────────────────────────────────────
 # 標題
