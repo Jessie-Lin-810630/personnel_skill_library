@@ -57,21 +57,27 @@ def run_task03_leetcode() -> None:
 
     headers = get_headers(csrf_token, session, username)
 
-    # ======== Extract ========
-    # 抓已解題清單 + beats stats
-    raw_solved_problem_feat = fetch_solved_problems_features(headers)
-    raw_solved_problem_stats = fetch_solved_problem_stats(headers, username)
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （loguru 不吃 exc_info=True，需用 logger.opt(exception=True) 才會帶出 traceback）
+    try:
+        # ======== Extract ========
+        # 抓已解題清單 + beats stats
+        raw_solved_problem_feat = fetch_solved_problems_features(headers)
+        raw_solved_problem_stats = fetch_solved_problem_stats(headers, username)
 
-    # ======== Transform ========
-    # 組裝 documents
-    feature_docs = build_problem_feat_documents(raw_solved_problem_feat)
-    summary_docs_leetcode = build_leetcode_summary_partial(feature_docs, raw_solved_problem_stats)
+        # ======== Transform ========
+        # 組裝 documents
+        feature_docs = build_problem_feat_documents(raw_solved_problem_feat)
+        summary_docs_leetcode = build_leetcode_summary_partial(feature_docs, raw_solved_problem_stats)
 
-    # ======== Load ========
-    # 寫入 MongoDB
-    db = get_db(mongo_uri, db_name)
-    upsert_leetcode_problems(db, feature_docs)
-    upsert_leetcode_summary_partial(db, summary_docs_leetcode)
+        # ======== Load ========
+        # 寫入 MongoDB
+        db = get_db(mongo_uri, db_name)
+        upsert_leetcode_problems(db, feature_docs)
+        upsert_leetcode_summary_partial(db, summary_docs_leetcode)
+    except Exception:
+        logger.opt(exception=True).critical("Task 3-A (LeetCode) job failed")
+        raise
 
     logger.success("=== Task 3-A: LeetCode GraphQL ETL 完成 ===")
     return None
@@ -94,21 +100,27 @@ def run_task03_ccclub() -> None:
 
     logger.info("=== Task 3-B: ccClub ETL 開始 ===")
 
-    # ======== Extract ========
-    # 登入並抓取所有已解題資料
-    session, headers = get_session_and_headers()
-    raw_solved_problems = fetch_all_solved_problems(session, headers)
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （loguru 不吃 exc_info=True，需用 logger.opt(exception=True) 才會帶出 traceback）
+    try:
+        # ======== Extract ========
+        # 登入並抓取所有已解題資料
+        session, headers = get_session_and_headers()
+        raw_solved_problems = fetch_all_solved_problems(session, headers)
 
-    # ======== Transform ========
-    # 組裝 documents
-    problem_docs = build_ccclub_problem_documents(raw_solved_problems)
-    summary_docs_ccClub = build_ccclub_summary_partial(problem_docs)
+        # ======== Transform ========
+        # 組裝 documents
+        problem_docs = build_ccclub_problem_documents(raw_solved_problems)
+        summary_docs_ccClub = build_ccclub_summary_partial(problem_docs)
 
-    # ======== Load ========
-    # 寫入 MongoDB
-    db = get_db(mongo_uri, db_name)
-    upsert_ccclub_problems(db, problem_docs)
-    upsert_ccclub_summary_partial(db, summary_docs_ccClub)
+        # ======== Load ========
+        # 寫入 MongoDB
+        db = get_db(mongo_uri, db_name)
+        upsert_ccclub_problems(db, problem_docs)
+        upsert_ccclub_summary_partial(db, summary_docs_ccClub)
+    except Exception:
+        logger.opt(exception=True).critical("Task 3-B (ccClub) job failed")
+        raise
 
     logger.success("=== Task 3-B: ccClub ETL 完成 ===")
     return None

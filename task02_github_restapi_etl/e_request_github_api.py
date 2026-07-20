@@ -10,6 +10,7 @@
 """
 
 import base64
+import binascii
 import time
 from datetime import datetime, timezone
 
@@ -129,18 +130,28 @@ def _paginate(url: str, headers: dict, params: dict = None, *, timeout: int = 10
                     break
 
             # for 迴圈結束後，補上這個保險，以避免"在連續三次403/429跳出迴圈後，仍然執行了else後面的程序"。
-            if resp.status_code != 200 or resp is None:
-                raise Exception(f"All {attempts} attempts failed for {url}, last status: {resp.status_code}")
+            if resp is None or resp.status_code != 200:
+                last_status = resp.status_code if resp is not None else "N/A"
+                logger.error(f"All {attempts} attempts failed for {url}, last status: {last_status}")
+                raise Exception(f"All {attempts} attempts failed for {url}")
 
             # HTTP 4xx/5xx（例如：409，排除403&429這種rate limit），讓呼叫_paginate()的外層函式決定怎麼處理
             # 因為每個409的情況隨使用的endpoint不同而可能有不同處理方式
             resp.raise_for_status()
 
-        except requests.ConnectionError as e:  # 網路層錯誤（DNS 失敗、連線中斷等）直接往外拋，不需要重試
+            batch = resp.json()
+
+        # 網路層錯誤（DNS 失敗、連線中斷、逾時等）直接往外拋，不需要重試；HTTPError 故意不接，留給中間層補 repo context
+        except requests.ConnectionError as e:
             logger.error(f"Network error when requesting {url}, msg error: {e}")
             raise
+        except requests.Timeout as e:
+            logger.error(f"Network error when requesting {url}, msg error: {e}")
+            raise
+        except ValueError:  # ValueError 已涵蓋 json.JSONDecodeError
+            logger.error(f"Malformed JSON from {url}, page {params['page']}")
+            raise
         else:
-            batch = resp.json()
             if not batch:
                 break
             results.extend(batch)
@@ -187,8 +198,9 @@ def fetch_all_branches(owner: str, repo_name: str, headers: dict) -> list:
             required_branches.append(b.get("name"))
         return required_branches
     except requests.HTTPError as e:
-        logger.error(f"Error when requesting the repo {repo_name}. Status code: {branches.status_code}, Error msg: {e}")
-        raise Exception(f"Error when requesting {url}.")
+        # 只記業務簡短訊息、不放 exc_info；純 raise 保留 HTTPError 型別交給最外層印 traceback
+        logger.error(f"Failed to fetch branches for {owner}/{repo_name}, status {e.response.status_code}")
+        raise
 
 
 def fetch_a_repo_commits(owner: str, repo_name: str, headers: dict, branches: list[str]) -> list[dict]:
@@ -219,8 +231,9 @@ def fetch_a_repo_commits(owner: str, repo_name: str, headers: dict, branches: li
                 logger.warning(f"{repo_name}：空 repo、空 branch，跳過 commits 抓取")
                 return []
 
-            logger.error(f"Error when requesting the branch {b}. Status code: {commits.status_code}, Error msg: {e}")
-            raise Exception(f"Error when requesting {url}.")
+            # 只記業務簡短訊息、不放 exc_info；純 raise 保留 HTTPError 型別交給最外層印 traceback
+            logger.error(f"Failed to fetch commits for {owner}/{repo_name} branch {b}, status {e.response.status_code}")
+            raise
 
     logger.info(f"Successfully requesting. Total commits fetched in the repo: {len(all_commits)}")
     return all_commits
@@ -243,18 +256,33 @@ def fetch_a_repo_readme(owner: str, repo_name: str, headers: dict, returned_max_
     url = f"{BASE_URL}/repos/{owner}/{repo_name}/readme"
     try:
         resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 404:
+        if resp.status_code == 404:  # 找不到 README 是正常情形，回空字串
             return {"readme_html_url": "", "readme_summary": ""}
-    except requests.RequestException as e:
-        logger.error(f"Error when requesting README. Status code: {resp.status_code}, Error msg: {e}")
-        raise Exception(f"Error when requesting README for {repo_name}.")
-
-    html_url = resp.json().get("html_url", "")
-    content_b64 = resp.json().get("content", "")
-    decoded_content = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
+        resp.raise_for_status()  # 其餘非 2xx（500/403…）不再靜默吞掉，明確拋出
+        payload = resp.json()
+        content_b64 = payload.get("content", "")
+        decoded_content = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
+    # 以下三桶各記不同業務訊息、皆不放 exc_info，純 raise 保留原型別交給最外層印 traceback
+    # 網路層錯誤，resp 可能未綁定，故不引用 resp
+    except requests.ConnectionError:
+        logger.error(f"Network error when fetching README for {owner}/{repo_name}")
+        raise
+    except requests.Timeout:
+        logger.error(f"Network error when fetching README for {owner}/{repo_name}")
+        raise
+    except requests.HTTPError as e:
+        logger.error(f"HTTP {e.response.status_code} when fetching README for {owner}/{repo_name}")
+        raise
+    # ValueError 已涵蓋 json.JSONDecodeError；base64 解碼失敗為 binascii.Error（非 ValueError 子類）
+    except ValueError:
+        logger.error(f"Malformed README payload for {owner}/{repo_name}")
+        raise
+    except binascii.Error:
+        logger.error(f"Malformed README payload for {owner}/{repo_name}")
+        raise
 
     readme = {
-        "readme_html_url": html_url,
+        "readme_html_url": payload.get("html_url", ""),
         "readme_summary": decoded_content[:returned_max_chars],
     }
     logger.success(f"Completed requesting the README.md of {repo_name}.")

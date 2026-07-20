@@ -8,7 +8,8 @@ Usage:
     poetry run python -m task05_googlesheet_skill_etl.main
 
 Required .env keys:
-    GOOGLE_SHEET_KEY   Decoded service account JSON string for Google Sheets access.
+    GOOGLE_SHEET_KEY   Service account credential for Google Sheets access; a path to the
+                       JSON key file when running locally, or the decoded JSON string on GCP.
     MONGO_ALTAS_URI    MongoDB Atlas connection string.
     MONGO_DB_NAME      Target database name.
 """
@@ -47,26 +48,35 @@ def run_task05():
 
     logger.info("=== Task 05: Google Sheet skills records ETL 開始 ===")
 
-    # Extract
-    client = get_google_sheet_client(CREDENTAIL_JSONS_FROM_ENVAR="GOOGLE_SHEET_KEY")
-    df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "生技")
-    df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "資料工程")
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （loguru 不吃 exc_info=True，需用 logger.opt(exception=True) 才會帶出 traceback）
+    try:
+        # Extract
+        if os.path.isfile(google_sheet_key):  # 地端可改用 path to service account JSON key file
+            client = get_google_sheet_client(CREDENTIAL_FILE_PATH=google_sheet_key)
+        else:
+            client = get_google_sheet_client(CREDENTAIL_JSONS_FROM_ENVAR="GOOGLE_SHEET_KEY")
+        df_biotech = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "生技")
+        df_de = open_spreadsheet_get_worksheet(client, "Personal Skill Radar Calculation", "資料工程")
 
-    # Transform
-    df_biotech_stats = build_biotech_task_docs(df_biotech, BIOTECH_RADAR_LABELS)
-    df_de_stats = build_de_task_docs(df_de, DE_RADER_LABELS)
-    df_both_summary = build_combined_summaries(
-        [
-            build_summary_for_radar(df_biotech_stats, "雷達圖1生技"),
-            build_summary_for_radar(df_de_stats, "雷達圖2資料工程"),
-        ]
-    )
+        # Transform
+        df_biotech_stats = build_biotech_task_docs(df_biotech, BIOTECH_RADAR_LABELS)
+        df_de_stats = build_de_task_docs(df_de, DE_RADER_LABELS)
+        df_both_summary = build_combined_summaries(
+            [
+                build_summary_for_radar(df_biotech_stats, "雷達圖1生技"),
+                build_summary_for_radar(df_de_stats, "雷達圖2資料工程"),
+            ]
+        )
 
-    # Load
-    db = get_db(mongo_uri, db_name)
-    upsert_skill_scores(db, "skill_scores_biotech", df_biotech_stats)
-    upsert_skill_scores(db, "skill_scores_data_eng", df_de_stats)
-    upsert_skill_radar_summary(db, df_both_summary)
+        # Load
+        db = get_db(mongo_uri, db_name)
+        upsert_skill_scores(db, "skill_scores_biotech", df_biotech_stats)
+        upsert_skill_scores(db, "skill_scores_data_eng", df_de_stats)
+        upsert_skill_radar_summary(db, df_both_summary)
+    except Exception:
+        logger.opt(exception=True).critical("Task 05 job failed")
+        raise
 
     logger.success("=== Task 05: Google Sheet skills records ETL 完成 ===")
 

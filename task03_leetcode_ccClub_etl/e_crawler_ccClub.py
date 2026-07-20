@@ -68,7 +68,10 @@ def get_session_and_headers() -> tuple[Session, dict]:
         login_resp.raise_for_status()
         logger.info(f"Status of logging: {login_resp.status_code}")
     except requests.ConnectionError as e:
-        logger.error(f"Some errors happended during logging. Error msg: {e}")
+        logger.error(f"Network error during ccClub login. Error msg: {e}")
+        raise
+    except requests.Timeout as e:
+        logger.error(f"Network error during ccClub login. Error msg: {e}")
         raise
     else:
         # Step 3：登入後，有些網頁可能 rotate csrftoken，因此可以勤勞更新 headers
@@ -98,17 +101,20 @@ def _fetch_solved_problem_ids(
         logger.info("Start to fetch problem list....")
         profile_resp = session.get(f"{CCCLUB_BASE_URL}/profile", headers=headers, timeout=30)
         profile_resp.raise_for_status()
+        # .json() 移進 try，parse 錯誤才接得到
+        profile_data = profile_resp.json().get("data", {})
     except requests.ConnectionError as e:
-        logger.error(f"Some errors happended during logging. Error msg: {e}")
+        logger.error(f"Network error when fetching ccClub profile. Error msg: {e}")
+        raise
+    except requests.Timeout as e:
+        logger.error(f"Network error when fetching ccClub profile. Error msg: {e}")
+        raise
+    except ValueError:  # ValueError 已涵蓋 json.JSONDecodeError
+        logger.error("Malformed JSON from ccClub profile")
         raise
     else:
-        if profile_resp is None:
-            logger.error("No response after logging in.")
-            return []
-
-        profile_data = profile_resp.json().get("data", {})
-        if profile_data == {}:
-            logger.error("No data found.")
+        if not profile_data:
+            logger.error("No data found in ccClub profile.")
             return []
 
     # ==================================================================
@@ -178,15 +184,17 @@ def _fetch_problem_detail(
             return {}
 
         resp.raise_for_status()
+        # .json() 移進 try，parse 錯誤才接得到
+        data = resp.json().get("data", {})
     except requests.ConnectionError as e:
-        logger.error(f"Some errors happended when getting {problem_id}. Error msg: {e}")
+        logger.error(f"Network error when fetching problem_id {problem_id}. Error msg: {e}")
         raise
-    else:
-        if resp is None:
-            logger.warning(f"No responses from problem_id {problem_id}, skip this.")
-            return {}
-
-    data = resp.json().get("data", {})
+    except requests.Timeout as e:
+        logger.error(f"Network error when fetching problem_id {problem_id}. Error msg: {e}")
+        raise
+    except ValueError:  # ValueError 已涵蓋 json.JSONDecodeError
+        logger.error(f"Malformed JSON for problem_id {problem_id}")
+        raise
 
     # difficulty 標準化，與 leetcode 標示一致
     raw_difficulty = data.get("difficulty", "Unknown")

@@ -57,36 +57,42 @@ def run_task02() -> None:
 
     logger.info("=== Task 02: GitHub REST API ETL 開始 ===")
 
-    # ======== Extract ========
-    # 以 headers 抓取所有 repos，回傳 list of dicts
-    all_repos = fetch_repos(headers)
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （loguru 不吃 exc_info=True，需用 logger.opt(exception=True) 才會帶出 traceback）
+    try:
+        # ======== Extract ========
+        # 以 headers 抓取所有 repos，回傳 list of dicts
+        all_repos = fetch_repos(headers)
 
-    # 先擷取repo_name 與 owner 供下面兩支函式使用
-    all_repo_docs = []
-    for raw_repo in all_repos:
-        repo_name = raw_repo.get("name")
-        owner = raw_repo.get("owner", {}).get("login")
+        # 先擷取repo_name 與 owner 供下面兩支函式使用
+        all_repo_docs = []
+        for raw_repo in all_repos:
+            repo_name = raw_repo.get("name")
+            owner = raw_repo.get("owner", {}).get("login")
 
-        # 找尋該 repo 下的 branches
-        branch_list = fetch_all_branches(owner, repo_name, headers)
+            # 找尋該 repo 下的 branches
+            branch_list = fetch_all_branches(owner, repo_name, headers)
 
-        # 從 /commits 與 /readme endpoint 獲取資料
-        repo_commits = fetch_a_repo_commits(owner, repo_name, headers, branch_list)
-        repo_readme = fetch_a_repo_readme(owner, repo_name, headers)
+            # 從 /commits 與 /readme endpoint 獲取資料
+            repo_commits = fetch_a_repo_commits(owner, repo_name, headers, branch_list)
+            repo_readme = fetch_a_repo_readme(owner, repo_name, headers)
 
-        # ======== Transform ========
-        # 建立單一repo文檔，並 append 到統一 list
-        a_repo_doc = build_repo_document(raw_repo, git_username, git_mail, repo_commits, repo_readme)
-        all_repo_docs.append(a_repo_doc)
+            # ======== Transform ========
+            # 建立單一repo文檔，並 append 到統一 list
+            a_repo_doc = build_repo_document(raw_repo, git_username, git_mail, repo_commits, repo_readme)
+            all_repo_docs.append(a_repo_doc)
 
-    # 建立摘要文檔
-    summary_docs = build_summary_document(all_repo_docs)
+        # 建立摘要文檔
+        summary_docs = build_summary_document(all_repo_docs)
 
-    # ======== Load ========
-    db = get_db(mongo_uri, db_name)
-    # 存入文檔集 github_repos 與 github_summary。
-    upsert_repos(db, all_repo_docs)
-    upsert_repo_summary(db, summary_docs)
+        # ======== Load ========
+        db = get_db(mongo_uri, db_name)
+        # 存入文檔集 github_repos 與 github_summary。
+        upsert_repos(db, all_repo_docs)
+        upsert_repo_summary(db, summary_docs)
+    except Exception:
+        logger.opt(exception=True).critical("Task 02 job failed")
+        raise
 
     logger.success("=== Task 02: GitHub REST API ETL 完成 ===")
     return None

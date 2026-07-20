@@ -4,7 +4,8 @@
 2. 函式 open_spreadsheet_get_worksheet 開啟指定試算表的某張工作表，回傳其內容為 pandas DataFrame。
 
 Required .env keys:
-    GOOGLE_SHEET_KEY   Decoded service account JSON string for Google Sheets access.
+    GOOGLE_SHEET_KEY   Service account credential for Google Sheets access; a path to the
+                       JSON key file when running locally, or the decoded JSON string on GCP.
 """
 
 import pandas as pd
@@ -37,11 +38,14 @@ def get_google_sheet_client(
     elif CREDENTIAL_FILE_PATH is None and CREDENTAIL_JSONS_FROM_ENVAR:
         return pygsheets.authorize(service_account_env_var=CREDENTAIL_JSONS_FROM_ENVAR)
     else:
-        logger.error("Your must pass either CREDENTAIL_JSONS_FROM_ENVAR or CREDENTAIL_KEY_FILE_PATH.")
-        raise
+        # 兩參數皆缺或皆給時的參數驗證錯誤，拋明確的 ValueError
+        # （此處 bare raise 無 active exception，會變成看不懂的 RuntimeError）
+        msg = "You must pass exactly one of CREDENTIAL_FILE_PATH or CREDENTAIL_JSONS_FROM_ENVAR."
+        logger.error(msg)
+        raise ValueError(msg)
 
 
-def open_spreadsheet_get_worksheet(client: Client, spreadsheet_title: str, worksheet_title: str) -> pd.dataframe:
+def open_spreadsheet_get_worksheet(client: Client, spreadsheet_title: str, worksheet_title: str) -> pd.DataFrame:
     """開啟指定 Google 試算表的某張工作表，回傳其內容為 pandas DataFrame。
 
     Args:
@@ -58,7 +62,7 @@ def open_spreadsheet_get_worksheet(client: Client, spreadsheet_title: str, works
         spdsheets = client.open(spreadsheet_title)
         worksheet = spdsheets.worksheet("title", worksheet_title)
     except pygsheets.SpreadsheetNotFound as e:
-        logger.error(f"Failed to fetch the spreadsheet. Error msg: {e}")
+        logger.error(f"Failed to fetch the spreadsheet '{spreadsheet_title}'. Error msg: {e}")
         raise
     except pygsheets.WorksheetNotFound as e:
         logger.error(f"Failed to fetch the worksheet '{worksheet_title}'. Error msg: {e}")

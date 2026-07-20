@@ -46,9 +46,9 @@ def _environment() -> Environment:
     env_name = os.getenv("ENVIRONMENT", "local")
     try:
         return Environment(env_name)
-    except ValueError:
+    except ValueError as e:
         logger.error(f"Unknown environment: {env_name}")
-        raise RuntimeError
+        raise RuntimeError(f"Unknown environment: {env_name}") from e
 
 
 # ── onenote_graph_api_logs ────────────────────────────────────────────────────

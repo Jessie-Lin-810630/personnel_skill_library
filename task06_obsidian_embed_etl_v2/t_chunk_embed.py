@@ -442,9 +442,10 @@ def t_chunk_and_embed_v2(
                 "md_path": archived_md_path,
                 "archived_md5": note["archived_md_md5_hash"],
             }
-        except Exception as e:
-            # 失敗的檔之 embedded_status 維持 False，待下次執行本函式時重試
-            logger.warning(f"處理失敗，略過：{raw_md_path} | 原因：{e}")
+        except Exception:
+            # 失敗的檔之 embedded_status 維持 False，待下次執行本函式時重試（刻意吞掉、不中斷整批）
+            # 此處是該例外的終點（不再往外拋），故用 opt(exception=True) 保留 traceback 供診斷，否則會徹底遺失
+            logger.opt(exception=True).warning(f"處理失敗，略過：{raw_md_path}")
             continue
 
     logger.info(f"向量化完成：{len(all_vector_docs)} 個 vector docs，成功處理 {len(embedded_by_raw_md_path)} 份筆記")

@@ -70,12 +70,23 @@ def _post_graphql(headers: dict, json_payload: dict, attempts: int = 3) -> dict:
             #  HTTP 4xx/5xx（例如：409，排除403&429這種rate limit）
             resp.raise_for_status()
 
-        except requests.ConnectionError as e:
-            logger.error(f"Network error at attempt No. {i}/{attempts}: {e}")
-            raise
-        else:
+            # .json() 移進 try，parse 錯誤才接得到（在 else 區塊會漏接）
             data = resp.json()
 
+        # 以下各桶各記不同業務短訊息、皆不放 exc_info、純 raise，交給最外層印一次 traceback
+        except requests.ConnectionError as e:
+            logger.error(f"Network error at attempt No. {i + 1}/{attempts}: {e}")
+            raise
+        except requests.Timeout as e:
+            logger.error(f"Network error at attempt No. {i + 1}/{attempts}: {e}")
+            raise
+        except requests.HTTPError as e:
+            logger.error(f"GraphQL HTTP error at attempt No. {i + 1}/{attempts}, status {e.response.status_code}")
+            raise
+        except ValueError:  # ValueError 已涵蓋 json.JSONDecodeError
+            logger.error(f"Malformed JSON from GraphQL at attempt No. {i + 1}/{attempts}")
+            raise
+        else:
             # 處理非網路層的錯誤：可能是 Query 敘述不當導致 status code 是200但 reponse body 出現 errors key
             if "errors" in data:
                 logger.error(f"GraphQL responsed error messages: {data['errors'][0]['message']}")
@@ -84,7 +95,8 @@ def _post_graphql(headers: dict, json_payload: dict, attempts: int = 3) -> dict:
             logger.info("Completed decoding the response from GraphQL.")
             return data
 
-    logger.critical(f"All {i + 1} attempts failed for GraphQL request. Stop the tasks.")
+    # critical + exc_info 留給最外層 run_task03_leetcode，這裡只記短訊息後拋
+    logger.error(f"All {i + 1} attempts failed for GraphQL request. Stop the tasks.")
     raise Exception(f"All {i + 1} attempts failed for GraphQL request.")
 
 

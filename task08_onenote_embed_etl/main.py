@@ -39,24 +39,30 @@ def run_task08():
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
     if not all([mongo_uri, db_name]):
-        logger.error("請確認已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        logger.error("請確認 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 08: OneNote 向量化開始 ===")
     db = get_db(mongo_uri, db_name)
 
-    # Extract: 讀取這次要 embedding 的 archived 版本
-    gate_list = get_embedding_gate_list(db)
-    if not gate_list:
-        logger.warning("=== 本次無任何需做向量化的 onenote 版本 ===")
-        logger.success("=== Task 08 完成 | 向量化: 0 ===")
-        return
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （per-note 失敗已在 t_chunk_and_embed_onenote 內就地略過，這裡接的是 client 初始化／DB 讀寫等全域錯誤）
+    try:
+        # Extract: 讀取這次要 embedding 的 archived 版本
+        gate_list = get_embedding_gate_list(db)
+        if not gate_list:
+            logger.warning("=== 本次無任何需做向量化的 onenote 版本 ===")
+            logger.success("=== Task 08 完成 | 向量化: 0 ===")
+            return
 
-    # Transform: 打開歸檔 md，做切塊與向量化
-    vector_docs, embedded_md5_by_md_path = t_chunk_and_embed_onenote(gate_list, BUCKET_NAME)
+        # Transform: 打開歸檔 md，做切塊與向量化
+        vector_docs, embedded_md5_by_md_path = t_chunk_and_embed_onenote(gate_list, BUCKET_NAME)
 
-    # Load: 更新到向量資料庫 (先刪前次向量化結果後插入) + CAS
-    load_vectors_incremental_onenote(db, vector_docs, embedded_md5_by_md_path)
+        # Load: 更新到向量資料庫 (先刪前次向量化結果後插入) + CAS
+        load_vectors_incremental_onenote(db, vector_docs, embedded_md5_by_md_path)
+    except Exception:
+        logger.opt(exception=True).critical("Task 08 job failed")
+        raise
 
     logger.success(f"=== Task 08 完成 | 向量化: {len(embedded_md5_by_md_path)} ===")
 

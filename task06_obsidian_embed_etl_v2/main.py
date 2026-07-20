@@ -36,31 +36,37 @@ def run_task06_v2():
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
     if not all([mongo_uri, db_name]):
-        logger.error("請確認已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        logger.error("請確認 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
+        raise EnvironmentError("請確認 secret manager 已設定 MONGO_ALTAS_URI / MONGO_DB_NAME")
 
     logger.info("=== Task 06 v2: 向量化 + purge 開始 ===")
     db = get_db(mongo_uri, db_name)
 
-    # Embedding：gate → chunk+embed → 先刪後插 + CAS
-    # Gold - Extract: 讀取這次要 embedding 的文件之路徑
-    gate_list = get_embedding_gate_list(db)
+    # 最外層統一接住內層拋出的例外，只在此處印一次完整 traceback 後再往上拋
+    # （per-note 失敗已在 t_chunk_and_embed_v2 內就地略過，這裡接的是 client 初始化／DB 讀寫等全域錯誤）
+    try:
+        # Embedding：gate → chunk+embed → 先刪後插 + CAS
+        # Gold - Extract: 讀取這次要 embedding 的文件之路徑
+        gate_list = get_embedding_gate_list(db)
 
-    # Gold - Transform: 打開文件，做切塊與向量化
-    if not gate_list:
-        logger.warning(f"=== 本次無任何需做向量化的文件，gate_list 列表長度 {len(gate_list)} ===")
+        # Gold - Transform: 打開文件，做切塊與向量化
+        if not gate_list:
+            logger.warning(f"=== 本次無任何需做向量化的文件，gate_list 列表長度 {len(gate_list)} ===")
 
-        # 只做 Purge：將已被軟刪除的事實來源之 embed，從向量資料庫中移除。
+            # 只做 Purge：將已被軟刪除的事實來源之 embed，從向量資料庫中移除。
+            n_purged = purge_deleted_vectors(db)
+            logger.success(f"=== Task 06 v2 完成 | 向量化: 0 | purge: {n_purged} ===")
+            return
+        vector_docs, embedded_by_raw_md_path = t_chunk_and_embed_v2(gate_list, BUCKET_NAME)
+
+        # Gold - Load: 更新到向量資料庫 (先刪前次向量化結果後插入) CAS
+        load_vectors_incremental_v2(db, vector_docs, embedded_by_raw_md_path)
+
+        # Purge：將已被軟刪除的事實來源之 embed，從向量資料庫中移除。
         n_purged = purge_deleted_vectors(db)
-        logger.success(f"=== Task 06 v2 完成 | 向量化: 0 | purge: {n_purged} ===")
-        return
-    vector_docs, embedded_by_raw_md_path = t_chunk_and_embed_v2(gate_list, BUCKET_NAME)
-
-    # Gold - Load: 更新到向量資料庫 (先刪前次向量化結果後插入) CAS
-    load_vectors_incremental_v2(db, vector_docs, embedded_by_raw_md_path)
-
-    # Purge：將已被軟刪除的事實來源之 embed，從向量資料庫中移除。
-    n_purged = purge_deleted_vectors(db)
+    except Exception:
+        logger.opt(exception=True).critical("Task 06 v2 job failed")
+        raise
 
     logger.success(f"=== Task 06 v2 完成 | 向量化: {len(embedded_by_raw_md_path)} | purge: {n_purged} ===")
 

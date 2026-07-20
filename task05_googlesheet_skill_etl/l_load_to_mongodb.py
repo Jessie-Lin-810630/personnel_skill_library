@@ -25,7 +25,7 @@ def get_db(mongo_uri: str, db_name: str) -> Database:
     return client[db_name]
 
 
-def upsert_skill_scores(db: Database, collection_name: str, df: pd.dataFrame) -> None:
+def upsert_skill_scores(db: Database, collection_name: str, df: pd.DataFrame) -> None:
     """以「雷達軸」與「經手任務」為唯一鍵，把任務分數批次 upsert 到指定 collection。
 
     Args:
