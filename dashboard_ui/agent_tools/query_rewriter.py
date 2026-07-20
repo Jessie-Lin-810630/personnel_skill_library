@@ -1,7 +1,7 @@
 """RAG agent 執行向量檢索前的 Query Transformation 前置工作。
 
-1. 函式 _load_known_tags 從 MongoDB 向量資料庫取出真實存在的資料 tags。
-2. 函式 _load_alias_to_tags_map 從 MongoDB 筆記元數據資料庫取出筆記名稱與其對應的 tags。
+1. 函式 load_known_tags 從 MongoDB 向量資料庫取出真實存在的資料 tags。
+2. 函式 load_alias_to_tags_map 從 MongoDB 筆記元數據資料庫取出筆記名稱與其對應的 tags。
 3. 函式 _format_history_for_prompt 把歷史問答脈絡拼成 model 看得懂的 user prompt 字串。
 4. 函式 rewrite_query 把使用者最新的追問改寫成不依賴歷史也能獨立理解的完整問句，
    同時推薦 3 到 5 個 tags 做 query expansion，
@@ -20,7 +20,7 @@ from pymongo.database import Database
 
 
 # ── 參考資料載入（rewriter 的 tag 字典來源）──────────────────────
-def _load_known_tags(db: Database, collection: NoteCollections = NoteCollections.VECTOR) -> set[str]:
+def load_known_tags(db: Database, collection: NoteCollections = NoteCollections.VECTOR) -> set[str]:
     """從向量庫撈出所有出現過的 tag，做為合法 tag 字典。
 
     用於校驗 LLM 推薦的 tags，避免 LLM 自發創意產出不存在的 tags。
@@ -36,7 +36,7 @@ def _load_known_tags(db: Database, collection: NoteCollections = NoteCollections
     return set(coll.distinct("tags"))
 
 
-def _load_alias_to_tags_map(
+def load_alias_to_tags_map(
     db: Database, collection: NoteCollectionBeforeEmbedding = NoteCollections.OBSIDIAN
 ) -> list[dict]:
     """從 obsidian_note_metadata 或 onenote_note_metadata 撈出 {alias: [tags]} 的對照表。

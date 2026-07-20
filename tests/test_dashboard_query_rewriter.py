@@ -32,17 +32,17 @@ class _FakeColl:
         return iter(self._docs)
 
 
-# ── _load_known_tags ──────────────────────────────────────────────────────────
+# ── load_known_tags ──────────────────────────────────────────────────────────
 
 
 class LoadKnownTagsTests(unittest.TestCase):
     def test_returns_distinct_tags_as_set(self):
         coll = _FakeColl(distinct_vals=["MySQL", "SQL", "MySQL"])
-        result = qr_mod._load_known_tags({NoteCollections.VECTOR: coll})
+        result = qr_mod.load_known_tags({NoteCollections.VECTOR: coll})
         self.assertEqual(result, {"MySQL", "SQL"})
 
 
-# ── _load_alias_to_tags_map ───────────────────────────────────────────────────
+# ── load_alias_to_tags_map ───────────────────────────────────────────────────
 
 
 class LoadAliasMapTests(unittest.TestCase):
@@ -51,7 +51,7 @@ class LoadAliasMapTests(unittest.TestCase):
             {"file_name": "note.md", "tags": ["t1"], "alias": ["A1", "A2"], "file_path": "gs://v/note.md"},
         ]
         coll = _FakeColl(docs=docs)
-        result = qr_mod._load_alias_to_tags_map({NoteCollections.OBSIDIAN: coll})
+        result = qr_mod.load_alias_to_tags_map({NoteCollections.OBSIDIAN: coll})
 
         # 只撈 archived + embedded
         self.assertEqual(coll.find_filter, {"status": "archived", "embedded_status": True})
@@ -65,13 +65,13 @@ class LoadAliasMapTests(unittest.TestCase):
 
     def test_onenote_projection_uses_page_title_and_md_frontmatter(self):
         coll = _FakeColl(docs=[])
-        qr_mod._load_alias_to_tags_map({NoteCollections.ONENOTE: coll}, collection=NoteCollections.ONENOTE)
+        qr_mod.load_alias_to_tags_map({NoteCollections.ONENOTE: coll}, collection=NoteCollections.ONENOTE)
         self.assertEqual(coll.find_projection["file_name"], "$page_title")
         self.assertEqual(coll.find_projection["alias"], "$md_frontmatter.alias")
 
     def test_empty_docs_returns_empty_list(self):
         coll = _FakeColl(docs=[])
-        self.assertEqual(qr_mod._load_alias_to_tags_map({NoteCollections.OBSIDIAN: coll}), [])
+        self.assertEqual(qr_mod.load_alias_to_tags_map({NoteCollections.OBSIDIAN: coll}), [])
 
 
 # ── _format_history_for_prompt ────────────────────────────────────────────────

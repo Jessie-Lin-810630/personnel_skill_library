@@ -9,7 +9,7 @@ import os
 import uuid
 
 import streamlit as st
-from agent_tools.query_rewriter import _load_alias_to_tags_map, _load_known_tags
+from agent_tools.query_rewriter import load_alias_to_tags_map, load_known_tags
 from agent_tools.types_and_constants import NoteCollections
 from agents import planning_agent, rag_agent
 from agents.intent_router_agent import route
@@ -140,12 +140,23 @@ if "api_call_count" not in st.session_state:
 if "planning_map_generated" not in st.session_state:
     st.session_state["planning_map_generated"] = False
 
-# rag_agent 的 rewriter 需要 alias-tag 對照表與合法 tag 字典，
-# 每個 session 只查一次 MongoDB，快取進 session_state 避免每輪重查。
-if "alias_tag_pairs" not in st.session_state:
-    _db = get_db_atlas()
-    st.session_state["alias_tag_pairs"] = _load_alias_to_tags_map(_db, NoteCollections.OBSIDIAN)
-    st.session_state["known_tags"] = _load_known_tags(_db, NoteCollections.VECTOR)
+
+# rag_agent 的 rewriter 需要 alias-tag 對照表與合法 tag 字典。這兩份資料不隨使用者互動改變，
+# 故以 st.cache_data 跨 session 共用快取（TTL 12 小時），而非 session_state；後者會讓多人同時使用時
+# 每個 session 各存一份完全相同的資料、徒增記憶體。_db 前綴底線讓 cache_data 略過雜湊該連線物件。
+@st.cache_data(ttl="12h")
+def _load_alias_to_tags_map(_db, collection):
+    return load_alias_to_tags_map(_db, collection)
+
+
+@st.cache_data(ttl="12h")
+def _load_known_tags(_db, collection):
+    return load_known_tags(_db, collection)
+
+
+_db = get_db_atlas()
+alias_tag_pairs = _load_alias_to_tags_map(_db, NoteCollections.OBSIDIAN)
+known_tags = _load_known_tags(_db, NoteCollections.VECTOR)
 
 # ── Sidebar 控制區 ───────────────────────────────────────────────────────────
 with st.sidebar:
@@ -251,8 +262,8 @@ if query:
             result = rag_agent.rag_query(
                 query=query,
                 session_id=session_id,
-                alias_tag_pairs=st.session_state["alias_tag_pairs"],
-                known_tags=st.session_state["known_tags"],
+                alias_tag_pairs=alias_tag_pairs,
+                known_tags=known_tags,
             )
 
         elif agent_target == "planning_agent":
@@ -267,8 +278,8 @@ if query:
             result = rag_agent.rag_query(
                 query=query,
                 session_id=session_id,
-                alias_tag_pairs=st.session_state["alias_tag_pairs"],
-                known_tags=st.session_state["known_tags"],
+                alias_tag_pairs=alias_tag_pairs,
+                known_tags=known_tags,
             )
             agent_target = "rag_agent"
 
