@@ -73,12 +73,10 @@ poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 ```python
 """<一句中文摘要，緊貼三引號、同一行、以「。」結尾>。
 
-<中文執行流程，可多行；用箭頭串主要步驟>：
-取得 token → 遞迴列出 page → 下載 html → 比對 html_hash →
-有變動才以 dt= 分區寫入 GCS 並 upsert metadata。
-
-Usage:
-    poetry run python -m <package>.<module>
+<中文執行流程，可多行；用編號1.、2.、3...串主要步驟>：
+1. 函式 upsert_note 以 raw_md_path 為唯一鍵 (Upsert key) 寫入並設 status=archived。
+2. 函式 mark_note_error 對失敗者記 status=error。
+3. 函式 soft_delete_missing 對已從 GCS 上消失的檔案，標上 status=deleted。
 
 Required .env keys:
     ONENOTE_CLIENT_ID      Azure App Registration Client ID (Notes.Read scope).
