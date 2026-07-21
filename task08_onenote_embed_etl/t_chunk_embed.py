@@ -1,7 +1,8 @@
 """對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為血緣鍵的 vector docs。
 
 兩段式 chunking → 每 chunk 解析 markdown ![](_images/x.png) 圖片、以 basename 對上 attached_images
-的 archived_image_path → 送 text 與圖片 uri 給多模態模型 gemini-embedding-2 → L2 normalize → 組 vector doc。
+的 archived_image_path、打 GCS 確認圖片仍存在 → 送 text 與圖片 uri 給多模態模型 gemini-embedding-2
+→ L2 normalize → 組 vector doc。
 chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy 而非 import，兩來源各自演化）；
 與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、血緣欄命名 md_path（存 archived md 路徑）。
 
@@ -20,11 +21,13 @@ import re
 from pathlib import Path, PurePosixPath
 
 from google import genai
+from google.cloud import storage
+from google.cloud.storage import Bucket
 from google.genai import types
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from loguru import logger
 
-from .e_scan_metadata import fetch_archived_content
+from .e_scan_metadata import blob_name_from_uri, fetch_archived_content
 
 # 多模態 embedding 模型與輸出維度設定
 EMBED_MODEL = "gemini-embedding-2"
@@ -134,29 +137,38 @@ def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 10
     return chunks_a_md
 
 
-def _resolve_chunk_images(text_in_chunk: str, archived_by_basename: dict[str, str]) -> tuple[str, list[str]]:
+def _resolve_chunk_images(
+    text_in_chunk: str, archived_by_basename: dict[str, str], bucket: Bucket, bucket_name: str = "onenote-vaults"
+) -> tuple[str, list[str]]:
     """從一個 chunk 的文字抽出所有 markdown 圖片 ![](_images/xxx.png)，對上 archived 圖片 gs:// URI。
 
     OneNote 歸檔 md 的圖片為標準 markdown 語法、連結多為相對的 `_images/<檔名>`；
-    以連結 basename 對上該筆記 attached_images 的 archived_image_path（gate 已帶精確路徑，
-    不需重推 GCS 路徑）。對不上 basename 者記 warning 後略過。
+    以連結 basename 對上該筆記 attached_images 的 archived_image_path 拿到精確路徑，
+    再打一次 GCS 確認該圖片仍存在（防範 metadata 有記、但 archived 圖片事後被移動或刪除），
+    存在才收進 image_uris。對不上 basename、或圖片已不在 GCS 者記 warning 後略過。
 
     Args:
         text_in_chunk: 單一 chunk 的原始文字 (可能含 ![]() 圖片)。
         archived_by_basename: 該筆記 {圖片 basename: archived_image_path(gs:// URI)} 對照表。
+        bucket: 已建立的 GCS Bucket 物件，用來檢查圖片是否存在。
+        bucket_name: GCS bucket 名稱，用來從 archived_image_path 剝除 gs:// 前綴。
 
     Returns:
         tuple (text_for_model, image_uris)：去除 ![]() 後的純文字，
-        與該 chunk 命中的 archived gs:// URI 清單 (無圖為 [])。
+        與該 chunk 命中且確認存在的 archived gs:// URI 清單 (無圖為 [])。
     """
     image_uris = []
     for m in _IMAGE_LINK_PATTERN.finditer(text_in_chunk):
         base = PurePosixPath(m.group(1).strip()).name  # 取連結 basename，例如 _images/x.png → x.png
         archived_uri = archived_by_basename.get(base)
-        if archived_uri:
+        if not archived_uri:
+            logger.warning(f"找不到對應 archived 圖片，略過：{base}")
+            continue
+        # metadata 有記路徑，仍打一次 GCS 確認圖片沒被移走/刪除，存在才准送模型
+        if bucket.blob(blob_name_from_uri(archived_uri, bucket_name)).exists():
             image_uris.append(archived_uri)
         else:
-            logger.warning(f"找不到對應 archived 圖片，略過：{base}")
+            logger.warning(f"archived 圖片已不存在於 GCS，略過：{archived_uri}")
 
     # 圖片改以 Part 形式傳入模型，故其他傳給模型的文字形式，可把 ![]() 標記拿掉並整理空行；
     text_for_model = _IMAGE_LINK_PATTERN.sub("", text_in_chunk)
@@ -185,6 +197,8 @@ def _embed_chunks_a_markdown(
     genai_client: genai.Client,
     archived_by_basename: dict[str, str],
     note_title: str,
+    bucket: Bucket,
+    bucket_name: str = "onenote-vaults",
 ) -> list[dict]:
     """對一份 markdown 筆記的每個 chunk 做多模態向量化 (gemini-embedding-2)。
 
@@ -199,6 +213,8 @@ def _embed_chunks_a_markdown(
         genai_client: 已初始化的 google-genai client。
         archived_by_basename: 該筆記 {圖片 basename: archived_image_path} 對照表。
         note_title: 筆記標題 (alias 或 page_title)，組進 prompt 的 title。
+        bucket: GCS Bucket 物件，檢查圖片是否存在。
+        bucket_name: GCS bucket 名稱，預設 "onenote-vaults"。
 
     Returns:
         在每筆 chunk dict 上新增欄位後的 list[dict]，每筆含：
@@ -207,7 +223,7 @@ def _embed_chunks_a_markdown(
     """
     embedded = []
     for chunk in chunks:
-        text_for_model, image_uris = _resolve_chunk_images(chunk["content"], archived_by_basename)
+        text_for_model, image_uris = _resolve_chunk_images(chunk["content"], archived_by_basename, bucket, bucket_name)
 
         # 組 multimodal parts：
         section = chunk.get("section") or ""
@@ -308,6 +324,7 @@ def t_chunk_and_embed_onenote(
         return [], {}  # 無待做版本：不需初始化 genai client，直接回空
     if not genai_client:
         genai_client = _get_genai_client()
+    bucket = storage.Client().bucket(bucket_name)  # 供 embed 階段檢查圖片是否存在
     all_vector_docs = []
     embedded_md5_by_md_path: dict[str, str] = {}
 
@@ -331,7 +348,9 @@ def t_chunk_and_embed_onenote(
 
             # 3. Embedding
             logger.info(f"讀取、切塊完成，開始向量化: {md_archive_path}")
-            embedded = _embed_chunks_a_markdown(chunks, genai_client, archived_by_basename, _note_title(note))
+            embedded = _embed_chunks_a_markdown(
+                chunks, genai_client, archived_by_basename, _note_title(note), bucket, bucket_name
+            )
 
             # 4. 組合最終 vector doc
             chunk_total = len(embedded)

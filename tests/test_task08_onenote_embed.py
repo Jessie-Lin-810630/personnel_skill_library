@@ -12,6 +12,13 @@ from task08_onenote_embed_etl import l_load_to_mongodb as l
 from task08_onenote_embed_etl import t_chunk_embed as t
 
 
+def _fake_bucket(exists: bool = True) -> MagicMock:
+    """回傳假的 GCS Bucket，其 blob(...).exists() 一律回傳 exists。"""
+    bucket = MagicMock()
+    bucket.blob.return_value.exists.return_value = exists
+    return bucket
+
+
 class GateListTests(unittest.TestCase):
     def test_filter_and_projection(self):
         mock_col = MagicMock()
@@ -43,15 +50,22 @@ class ResolveChunkImagesTests(unittest.TestCase):
             "r1.png": "gs://onenote-vaults/archived-notes/u/nb/sec/dt=2026-07-01/_images/r1.png",
         }
         text = "先講原理\n\n![示意圖](_images/r1.png)\n\n後續說明"
-        text_for_model, uris = t._resolve_chunk_images(text, archived_by_basename)
+        text_for_model, uris = t._resolve_chunk_images(text, archived_by_basename, _fake_bucket(exists=True))
         self.assertEqual(uris, [archived_by_basename["r1.png"]])
         self.assertNotIn("![", text_for_model)  # 圖片語法已從文字移除
 
     def test_unmatched_link_skipped(self):
         text = "![壞連結](_images/typo.png)"
-        text_for_model, uris = t._resolve_chunk_images(text, {})
+        text_for_model, uris = t._resolve_chunk_images(text, {}, _fake_bucket())
         self.assertEqual(uris, [])
         self.assertEqual(text_for_model, "")
+
+    def test_archived_missing_in_gcs_skipped(self):
+        # basename 對得上 metadata，但 archived 圖片事後被移走/刪除 → 打 GCS 驗證未過，不送模型
+        archived_by_basename = {"r1.png": "gs://onenote-vaults/archived-notes/u/_images/r1.png"}
+        text = "![示意圖](_images/r1.png)"
+        _, uris = t._resolve_chunk_images(text, archived_by_basename, _fake_bucket(exists=False))
+        self.assertEqual(uris, [])
 
 
 class NoteHelperTests(unittest.TestCase):
@@ -82,8 +96,11 @@ class ChunkAndEmbedTests(unittest.TestCase):
         docs, md5map = t.t_chunk_and_embed_onenote([])
         self.assertEqual((docs, md5map), ([], {}))
 
+    @patch("task08_onenote_embed_etl.t_chunk_embed.storage")
     @patch("task08_onenote_embed_etl.t_chunk_embed.fetch_archived_content")
-    def test_vector_doc_shape_and_md5_map(self, mock_fetch):
+    def test_vector_doc_shape_and_md5_map(self, mock_fetch, mock_storage):
+        # GCS 存在性驗證回 True，讓命中的 archived 圖片得以送模型
+        mock_storage.Client.return_value.bucket.return_value.blob.return_value.exists.return_value = True
         mock_fetch.return_value = "# 標題\n\n內文段落。\n\n![圖](_images/r1.png)\n"
         note = {
             "archived_md_path": "gs://onenote-vaults/archived-notes/u/nb/sec/dt=2026-07-01/n.md",
@@ -117,16 +134,18 @@ class ChunkAndEmbedTests(unittest.TestCase):
         self.assertTrue(img_chunks)
         self.assertEqual(img_chunks[0]["image_paths"], [note["attached_images"][0]["archived_image_path"]])
 
+    @patch("task08_onenote_embed_etl.t_chunk_embed.storage")
     @patch("task08_onenote_embed_etl.t_chunk_embed.fetch_archived_content")
-    def test_empty_body_still_counts_as_processed(self, mock_fetch):
+    def test_empty_body_still_counts_as_processed(self, mock_fetch, mock_storage):
         mock_fetch.return_value = "   "  # 切塊為空
         note = {"archived_md_path": "gs://b/arch/n.md", "md_md5_hash": "M", "page_title": "n", "md_frontmatter": {}}
         docs, md5map = t.t_chunk_and_embed_onenote([note], genai_client=self._fake_client())
         self.assertEqual(docs, [])
         self.assertEqual(md5map, {"gs://b/arch/n.md": "M"})
 
+    @patch("task08_onenote_embed_etl.t_chunk_embed.storage")
     @patch("task08_onenote_embed_etl.t_chunk_embed.fetch_archived_content")
-    def test_failed_note_excluded_from_md5_map(self, mock_fetch):
+    def test_failed_note_excluded_from_md5_map(self, mock_fetch, mock_storage):
         mock_fetch.side_effect = RuntimeError("download boom")
         note = {"archived_md_path": "gs://b/arch/n.md", "md_md5_hash": "M", "page_title": "n", "md_frontmatter": {}}
         docs, md5map = t.t_chunk_and_embed_onenote([note], genai_client=self._fake_client())
