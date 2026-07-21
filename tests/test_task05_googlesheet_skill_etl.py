@@ -17,7 +17,7 @@ class GoogleSheetExtractTests(unittest.TestCase):
             patch("builtins.open", mock_open(read_data='{"type":"service_account"}')) as mocked_open,
             patch.object(e_fetch_google_sheet.pygsheets, "authorize", return_value=fake_client) as authorize,
         ):
-            client = e_fetch_google_sheet.get_google_sheet_client("/tmp/creds.json")
+            client = e_fetch_google_sheet.get_google_sheet_client(CREDENTIAL_FILE_PATH="/tmp/creds.json")
 
         mocked_open.assert_called_once_with("/tmp/creds.json", "r")
         authorize.assert_called_once_with(service_account_json='{"type":"service_account"}')
@@ -272,12 +272,13 @@ class Task05MainTests(unittest.TestCase):
             patch.dict(
                 os.environ,
                 {
-                    "GS_CREDENTIAL_FILE_PATH": "/tmp/creds.json",
+                    "GOOGLE_SHEET_KEY": "/tmp/creds.json",
                     "MONGO_ALTAS_URI": "mongodb://localhost:27017",
                     "MONGO_DB_NAME": "skill_library",
                 },
                 clear=False,
             ),
+            patch.object(main.os.path, "isfile", return_value=True),
             patch.object(main, "get_google_sheet_client", return_value=fake_client) as get_client,
             patch.object(
                 main,
@@ -294,7 +295,7 @@ class Task05MainTests(unittest.TestCase):
         ):
             main.run_task05()
 
-        get_client.assert_called_once_with("/tmp/creds.json")
+        get_client.assert_called_once_with(CREDENTIAL_FILE_PATH="/tmp/creds.json")
         self.assertEqual(open_worksheet.call_count, 2)
         build_biotech.assert_called_once_with(df_biotech, main.BIOTECH_RADAR_LABELS)
         build_de.assert_called_once_with(df_de, main.DE_RADER_LABELS)

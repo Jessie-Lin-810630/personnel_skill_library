@@ -33,7 +33,7 @@ class FakeResponse:
 
 class GithubExtractTests(unittest.TestCase):
     def test_get_headers_builds_github_headers(self):
-        headers = e_request_github_api._get_headers("token-123", "jessie")
+        headers = e_request_github_api.get_headers("token-123", "jessie")
 
         self.assertEqual(headers["Authorization"], "Bearer token-123")
         self.assertEqual(headers["Accept"], "application/vnd.github+json")
@@ -392,7 +392,7 @@ class GithubMainTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch.object(main, "_get_headers", return_value={"Authorization": "Bearer token-123"}) as get_headers,
+            patch.object(main, "get_headers", return_value={"Authorization": "Bearer token-123"}) as get_headers,
             patch.object(main, "fetch_repos", return_value=raw_repos) as fetch_repos,
             patch.object(main, "fetch_all_branches", side_effect=[["main"], ["main"]]) as fetch_branches,
             patch.object(main, "fetch_a_repo_commits", side_effect=[["c1"], ["c2"]]) as fetch_commits,

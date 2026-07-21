@@ -23,9 +23,9 @@ import requests  # noqa: E402
 from task07_common import gcs  # noqa: E402
 from task07_common.audit_log import (  # noqa: E402
     Environment,
-    _now_utc,
     log_api_call,
     log_enrichment_call,
+    now_utc,
     upsert_version_meta,
 )
 from task07_common.hashing import html_source_hash  # noqa: E402
@@ -45,8 +45,8 @@ from task07_silver_service import t_enrich_html_to_markdown as t  # noqa: E402
 
 class NowUtcTests(unittest.TestCase):
     def test_returns_utc_datetime(self):
-        self.assertIsInstance(_now_utc(), datetime)
-        self.assertEqual(_now_utc().tzinfo, timezone.utc)
+        self.assertIsInstance(now_utc(), datetime)
+        self.assertEqual(now_utc().tzinfo, timezone.utc)
 
 
 class EnvironmentEnumTests(unittest.TestCase):

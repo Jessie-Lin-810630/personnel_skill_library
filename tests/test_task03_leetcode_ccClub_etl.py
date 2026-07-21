@@ -29,8 +29,8 @@ class FakeResponse:
 
 
 class LeetCodeExtractTests(unittest.TestCase):
-    def test_get_headers_builds_expected_cookie_and_csrf_headers(self):
-        headers = e_query_leetcode_graphql._get_headers("csrf-token", "session-token", "jessie")
+    def testget_headers_builds_expected_cookie_and_csrf_headers(self):
+        headers = e_query_leetcode_graphql.get_headers("csrf-token", "session-token", "jessie")
 
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(headers["Cookie"], "LEETCODE_SESSION=session-token; csrftoken=csrf-token")
@@ -160,12 +160,12 @@ class LeetCodeExtractTests(unittest.TestCase):
 
 
 class CcClubExtractTests(unittest.TestCase):
-    def test_get_session_and_headers_raises_when_env_missing(self):
+    def testget_session_and_headers_raises_when_env_missing(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(EnvironmentError):
-                e_crawler_ccClub._get_session_and_headers()
+                e_crawler_ccClub.get_session_and_headers()
 
-    def test_get_session_and_headers_logs_in_and_refreshes_csrf(self):
+    def testget_session_and_headers_logs_in_and_refreshes_csrf(self):
         class FakeCookies:
             def __init__(self):
                 self.values = {"csrftoken": "initial-token"}
@@ -192,7 +192,7 @@ class CcClubExtractTests(unittest.TestCase):
             ),
             patch.object(e_crawler_ccClub.requests, "Session", return_value=FakeSession()),
         ):
-            session, headers = e_crawler_ccClub._get_session_and_headers()
+            session, headers = e_crawler_ccClub.get_session_and_headers()
 
         self.assertIsNotNone(session)
         self.assertEqual(headers["X-CSRFToken"], "rotated-token")
@@ -540,7 +540,7 @@ class Task03MainTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch.object(main, "_get_headers", return_value={"h": "1"}) as get_headers,
+            patch.object(main, "get_headers", return_value={"h": "1"}) as get_headers,
             patch.object(main, "fetch_solved_problems_features", return_value=raw_features) as fetch_features,
             patch.object(main, "fetch_solved_problem_stats", return_value=raw_stats) as fetch_stats,
             patch.object(main, "build_problem_feat_documents", return_value=feature_docs) as build_docs,
@@ -580,7 +580,7 @@ class Task03MainTests(unittest.TestCase):
                 },
                 clear=False,
             ),
-            patch.object(main, "_get_session_and_headers", return_value=(object(), {"h": "1"})) as get_session,
+            patch.object(main, "get_session_and_headers", return_value=(object(), {"h": "1"})) as get_session,
             patch.object(main, "fetch_all_solved_problems", return_value=raw_problems) as fetch_all,
             patch.object(main, "build_ccclub_problem_documents", return_value=problem_docs) as build_docs,
             patch.object(main, "build_ccclub_summary_partial", return_value=summary) as build_summary,

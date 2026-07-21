@@ -9,7 +9,13 @@ import frontmatter
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from task01_obsidian_etl_v2 import e_scan_obsidian, l_load_to_mongodb, t_clean_obsidian
+from task01_obsidian_etl_v2.gold_notes_metadata_snapshot import l_upsert_summary_to_mongodb, t_build_summary
+from task01_obsidian_etl_v2.silver_transform_markdown import (
+    e_get_changed_files,
+    l_archive_markdown,
+    l_upsert_metadata_to_mongodb,
+    t_build_metadata_docs,
+)
 
 
 # --------------------------- Fakes ---------------------------
@@ -96,12 +102,12 @@ class PathHelperTests(unittest.TestCase):
     def test_blob_name_from_uri_strips_bucket_prefix(self):
         uri = "gs://personal-vaults/raw-notes/u/nb/01-d/x.md"
         self.assertEqual(
-            l_load_to_mongodb.blob_name_from_uri(uri, "personal-vaults"),
+            l_archive_markdown.blob_name_from_uri(uri, "personal-vaults"),
             "raw-notes/u/nb/01-d/x.md",
         )
 
     def test_parse_note_path_splits_user_notebook_section_file(self):
-        parsed = e_scan_obsidian.parse_note_path("raw-notes/lucky460721/data-engineering/01-daily-logs/x.md")
+        parsed = t_build_metadata_docs._parse_note_path("raw-notes/lucky460721/data-engineering/01-daily-logs/x.md")
         self.assertEqual(parsed["note_user_id"], "lucky460721")
         self.assertEqual(parsed["notebook"], "data-engineering")
         self.assertEqual(parsed["section"], "01-daily-logs")
@@ -120,7 +126,7 @@ class SelectChangedBlobsTests(unittest.TestCase):
             f"gs://{bucket}/{changed.name}": {"md_md5": "OLD", "images": {}},  # md5 異 → 納入
         }
 
-        result = e_scan_obsidian.select_changed_blobs([same, changed, new], existing, {}, bucket)
+        result = e_get_changed_files.select_changed_blobs([same, changed, new], existing, {}, bucket)
 
         self.assertEqual({b.name for b in result}, {changed.name, new.name})
 
@@ -134,7 +140,7 @@ class SelectChangedBlobsTests(unittest.TestCase):
         }
         image_index = {img_path: "IMG_NEW"}  # GCS 現況圖片 md5 已變
 
-        result = e_scan_obsidian.select_changed_blobs([note], existing, image_index, bucket)
+        result = e_get_changed_files.select_changed_blobs([note], existing, image_index, bucket)
 
         self.assertEqual({b.name for b in result}, {note.name})
 
@@ -147,7 +153,7 @@ class SelectChangedBlobsTests(unittest.TestCase):
             f"gs://{bucket}/{note.name}": {"md_md5": "SAME", "images": {img_path: "IMG_OLD"}},
         }
 
-        result = e_scan_obsidian.select_changed_blobs([note], existing, {}, bucket)
+        result = e_get_changed_files.select_changed_blobs([note], existing, {}, bucket)
 
         self.assertEqual({b.name for b in result}, {note.name})
 
@@ -160,7 +166,7 @@ class SelectChangedBlobsTests(unittest.TestCase):
         }
         image_index = {img_path: "IMG"}  # 圖片 md5 也相同
 
-        result = e_scan_obsidian.select_changed_blobs([note], existing, image_index, bucket)
+        result = e_get_changed_files.select_changed_blobs([note], existing, image_index, bucket)
 
         self.assertEqual(result, [])
 
@@ -172,7 +178,7 @@ class BuildNoteDocumentTests(unittest.TestCase):
         text = "---\ntype: daily\ntags: python, sql\ndate: 2026-07-06\n---\n本文 ![[a.png]] 內容\n"
         image_index = {"raw-notes/u/nb/01-daily/_attachment/a.png": "IMG_A"}
 
-        doc = t_clean_obsidian.build_note_document(blob, text, "personal-vaults", image_index)
+        doc = t_build_metadata_docs.build_note_document(blob, text, "personal-vaults", image_index)
 
         self.assertEqual(doc["raw_md_path"], "gs://personal-vaults/raw-notes/u/nb/01-daily/note.md")
         self.assertEqual(doc["raw_md_md5_hash"], "RAWMD5")
@@ -189,7 +195,7 @@ class BuildNoteDocumentTests(unittest.TestCase):
     def test_missing_image_in_index_is_skipped(self):
         blob = FakeBlob("raw-notes/u/nb/01-daily/note.md")
         text = "---\ntype: daily\n---\n![[gone.png]]\n"
-        doc = t_clean_obsidian.build_note_document(blob, text, "personal-vaults", {})
+        doc = t_build_metadata_docs.build_note_document(blob, text, "personal-vaults", {})
         self.assertEqual(doc["attached_images"], [])
 
 
@@ -204,7 +210,7 @@ class ArchiveNoteTests(unittest.TestCase):
             "attached_images": [{"raw_image_path": "raw-notes/u/nb/01-d/_attachment/a.png", "raw_image_md5": "A"}],
         }
 
-        out = l_load_to_mongodb.archive_note(note_doc, bucket, "personal-vaults")
+        out = l_archive_markdown.archive_note(note_doc, bucket, "personal-vaults")
 
         self.assertEqual(out["archived_md_path"], "gs://personal-vaults/archived-notes/u/nb/01-d/x.md")
         self.assertEqual(out["archived_md_md5_hash"], "ARCH_x.md")
@@ -236,7 +242,7 @@ class ArchiveNoteTests(unittest.TestCase):
         }
 
         with self.assertRaises(RuntimeError):
-            l_load_to_mongodb.archive_note(note_doc, BoomBucket(), "personal-vaults")
+            l_archive_markdown.archive_note(note_doc, BoomBucket(), "personal-vaults")
 
         self.assertIn("boom", note_doc["error_msg"])
 
@@ -246,7 +252,7 @@ class DeleteMispositionMetadataTests(unittest.TestCase):
         # 正文頂端誤植的 frontmatter 區塊在第一個真標題前，應被清掉
         post = frontmatter.Post(content="tags: python, sql\ndate: 2026-07-06\n# 真標題\n本文內容\n")
 
-        l_load_to_mongodb._delete_misposition_metadata(post)
+        l_archive_markdown._delete_misposition_metadata(post)
 
         self.assertNotIn("tags: python, sql", post.content)
         self.assertNotIn("date: 2026-07-06", post.content)
@@ -258,7 +264,7 @@ class DeleteMispositionMetadataTests(unittest.TestCase):
         original = "# 標題\n內文有 tags: 這個字\n"
         post = frontmatter.Post(content=original)
 
-        l_load_to_mongodb._delete_misposition_metadata(post)
+        l_archive_markdown._delete_misposition_metadata(post)
 
         self.assertEqual(post.content, original)
 
@@ -270,7 +276,7 @@ class UploadCleanMdTests(unittest.TestCase):
         bucket = FakeBucket(texts={"raw-notes/u/x.md": raw})
         clean_fm = {"tags": ["python"], "type": "daily-log", "date": None, "alias": []}
 
-        md5 = l_load_to_mongodb._upload_clean_md(bucket, "raw-notes/u/x.md", "archived-notes/u/x.md", clean_fm)
+        md5 = l_archive_markdown._upload_clean_md(bucket, "raw-notes/u/x.md", "archived-notes/u/x.md", clean_fm)
 
         uploaded = frontmatter.loads(bucket.uploads["archived-notes/u/x.md"])
         # 乾淨 frontmatter 已覆寫進 metadata
@@ -290,9 +296,9 @@ class UpsertNoteTests(unittest.TestCase):
         db = FakeDb()
         note_doc = {"raw_md_path": "gs://b/raw-notes/u/x.md", "topic": "python"}
 
-        l_load_to_mongodb.upsert_note(db, note_doc)
+        l_upsert_metadata_to_mongodb.upsert_note(db, note_doc)
 
-        col = db.collections[l_load_to_mongodb.NOTE_METADATA]
+        col = db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA]
         filter_doc, update, upsert = col.last_update_one
         self.assertEqual(filter_doc, {"raw_md_path": "gs://b/raw-notes/u/x.md"})
         self.assertEqual(update["$set"]["status"], "archived")
@@ -302,9 +308,9 @@ class UpsertNoteTests(unittest.TestCase):
     def test_upsert_is_idempotent_on_same_raw_md_path(self):
         db = FakeDb()
         note_doc = {"raw_md_path": "gs://b/raw-notes/u/x.md", "topic": "python"}
-        l_load_to_mongodb.upsert_note(db, note_doc)
-        l_load_to_mongodb.upsert_note(db, {**note_doc, "topic": "database"})
-        col = db.collections[l_load_to_mongodb.NOTE_METADATA]
+        l_upsert_metadata_to_mongodb.upsert_note(db, note_doc)
+        l_upsert_metadata_to_mongodb.upsert_note(db, {**note_doc, "topic": "database"})
+        col = db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA]
         self.assertEqual(len(col.docs), 1)
         self.assertEqual(col.docs[0]["topic"], "database")
 
@@ -313,9 +319,9 @@ class MarkNoteErrorTests(unittest.TestCase):
     def test_upserts_status_error_with_message(self):
         db = FakeDb()
 
-        l_load_to_mongodb.mark_note_error(db, "gs://b/raw-notes/u/x.md", "boom")
+        l_upsert_metadata_to_mongodb.mark_note_error(db, "gs://b/raw-notes/u/x.md", "boom")
 
-        col = db.collections[l_load_to_mongodb.NOTE_METADATA]
+        col = db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA]
         filter_doc, update, upsert = col.last_update_one
         self.assertEqual(filter_doc, {"raw_md_path": "gs://b/raw-notes/u/x.md"})
         self.assertEqual(update["$set"]["status"], "error")
@@ -329,7 +335,7 @@ class SoftDeleteTests(unittest.TestCase):
     def _db_with_notes(self):
         db = FakeDb()
         db.preset(
-            l_load_to_mongodb.NOTE_METADATA,
+            l_upsert_metadata_to_mongodb.NOTE_METADATA,
             [
                 {"raw_md_path": "gs://b/raw-notes/u/keep.md", "status": "archived"},
                 {"raw_md_path": "gs://b/raw-notes/u/gone.md", "status": "archived"},
@@ -341,9 +347,9 @@ class SoftDeleteTests(unittest.TestCase):
         db = self._db_with_notes()
         present = {"gs://b/raw-notes/u/keep.md"}
 
-        n = l_load_to_mongodb.soft_delete_missing(db, present)
+        n = l_upsert_metadata_to_mongodb.soft_delete_missing(db, present)
 
-        docs = {d["raw_md_path"]: d for d in db.collections[l_load_to_mongodb.NOTE_METADATA].docs}
+        docs = {d["raw_md_path"]: d for d in db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA].docs}
         self.assertEqual(n, 1)
         self.assertEqual(docs["gs://b/raw-notes/u/gone.md"]["status"], "deleted")
         self.assertEqual(docs["gs://b/raw-notes/u/keep.md"]["status"], "archived")
@@ -351,39 +357,47 @@ class SoftDeleteTests(unittest.TestCase):
     def test_rerun_is_idempotent(self):
         db = self._db_with_notes()
         present = {"gs://b/raw-notes/u/keep.md"}
-        l_load_to_mongodb.soft_delete_missing(db, present)
-        n_again = l_load_to_mongodb.soft_delete_missing(db, present)
+        l_upsert_metadata_to_mongodb.soft_delete_missing(db, present)
+        n_again = l_upsert_metadata_to_mongodb.soft_delete_missing(db, present)
         self.assertEqual(n_again, 0)
 
     def test_empty_present_set_skips_and_does_not_mass_delete(self):
         # 防呆：present 為空（上游掃描異常）時不得把全表標 deleted
         db = self._db_with_notes()
-        n = l_load_to_mongodb.soft_delete_missing(db, set())
+        n = l_upsert_metadata_to_mongodb.soft_delete_missing(db, set())
         self.assertEqual(n, 0)
-        for d in db.collections[l_load_to_mongodb.NOTE_METADATA].docs:
+        for d in db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA].docs:
             self.assertEqual(d["status"], "archived")
 
 
 # --------------------------- 空值 / None 邊界 ---------------------------
 class EmptyInputTests(unittest.TestCase):
     def test_select_changed_blobs_all_empty(self):
-        self.assertEqual(e_scan_obsidian.select_changed_blobs([], {}, {}, "personal-vaults"), [])
+        self.assertEqual(e_get_changed_files.select_changed_blobs([], {}, {}, "personal-vaults"), [])
 
     def test_build_note_document_empty_text(self):
         blob = FakeBlob("raw-notes/u/nb/01-d/x.md", md5_hash="M")
-        doc = t_clean_obsidian.build_note_document(blob, "", "personal-vaults", {})
+        doc = t_build_metadata_docs.build_note_document(blob, "", "personal-vaults", {})
         self.assertEqual(doc["word_count"], 0)
         self.assertEqual(doc["attached_images"], [])
 
-    def test_build_and_upsert_summary_empty_collection(self):
+    def test_build_summary_empty_collection(self):
         db = FakeDb()
-        summary = l_load_to_mongodb.build_and_upsert_summary(db)
-        self.assertEqual(summary["total_notes"], 0)
-        self.assertEqual(summary["by_type"], {})
-        self.assertEqual(summary["by_topic"], {})
-        self.assertEqual(summary["archived_notes"], 0)
-        self.assertEqual(summary["rejected_notes"], 0)
-        self.assertEqual(summary["by_tag_in_rejected_notes"], {})
+        summary = t_build_summary.build_summary(db, "obsidian_note_metadata")
+        self.assertEqual(summary["snapshot_source"], "obsidian_note_metadata")
+        s = summary["summary"]
+        self.assertEqual(s["archived_notes"], 0)
+        self.assertEqual(s["rejected_notes"], 0)
+        self.assertEqual(s["embedded_notes"], 0)
+        self.assertEqual(dict(s["by_type_in_archived_notes"]), {})
+        self.assertEqual(dict(s["by_topic_in_archived_notes"]), {})
+        self.assertEqual(dict(s["by_tag_in_rejected_notes"]), {})
+
+        # upsert 空快照仍應寫入一筆全零的 notes_summary
+        l_upsert_summary_to_mongodb.upsert_summary(db, [summary])
+        docs = db.collections[l_upsert_summary_to_mongodb.NOTES_SUMMARY].docs
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0]["total_notes"], 0)
 
 
 # --------------------------- Task 7.2: gold snapshot ---------------------------
@@ -391,7 +405,7 @@ class SummaryTests(unittest.TestCase):
     def test_snapshot_counts_exclude_deleted_and_overwrite_same_day(self):
         db = FakeDb()
         db.preset(
-            l_load_to_mongodb.NOTE_METADATA,
+            l_upsert_metadata_to_mongodb.NOTE_METADATA,
             [
                 {
                     "status": "archived",
@@ -427,27 +441,33 @@ class SummaryTests(unittest.TestCase):
             ],
         )
 
-        summary = l_load_to_mongodb.build_and_upsert_summary(db)
-        # 全域統計涵蓋 archived + rejected，排除 deleted / error
-        self.assertEqual(summary["total_notes"], 3)
-        self.assertEqual(summary["embedded_notes"], 1)
-        self.assertEqual(summary["by_type"], {"daily-log": 1, "project": 1, "draft": 1})
-        self.assertEqual(summary["by_topic"], {"python": 1, "database": 1, "ml": 1})
+        summary = t_build_summary.build_summary(db, "obsidian_note_metadata")
+        s = summary["summary"]
+        # archived + rejected 兩桶，排除 deleted / error
+        self.assertEqual(s["embedded_notes"], 1)
 
         # archived 桶
-        self.assertEqual(summary["archived_notes"], 2)
-        self.assertEqual(summary["by_tag_in_archived_notes"], {"etl": 2, "gcs": 1})
-        self.assertEqual(summary["by_topic_in_archived_notes"], {"python": 1, "database": 1})
-        self.assertEqual(summary["by_type_in_archived_notes"], {"daily-log": 1, "project": 1})
+        self.assertEqual(s["archived_notes"], 2)
+        self.assertEqual(dict(s["by_tag_in_archived_notes"]), {"etl": 2, "gcs": 1})
+        self.assertEqual(dict(s["by_topic_in_archived_notes"]), {"python": 1, "database": 1})
+        self.assertEqual(dict(s["by_type_in_archived_notes"]), {"daily-log": 1, "project": 1})
 
         # rejected 桶
-        self.assertEqual(summary["rejected_notes"], 1)
-        self.assertEqual(summary["by_tag_in_rejected_notes"], {"wip": 1})
-        self.assertEqual(summary["by_topic_in_rejected_notes"], {"ml": 1})
-        self.assertEqual(summary["by_type_in_rejected_notes"], {"draft": 1})
+        self.assertEqual(s["rejected_notes"], 1)
+        self.assertEqual(dict(s["by_tag_in_rejected_notes"]), {"wip": 1})
+        self.assertEqual(dict(s["by_topic_in_rejected_notes"]), {"ml": 1})
+        self.assertEqual(dict(s["by_type_in_rejected_notes"]), {"draft": 1})
 
-        l_load_to_mongodb.build_and_upsert_summary(db)  # 同日重跑
-        self.assertEqual(len(db.collections[l_load_to_mongodb.NOTES_SUMMARY].docs), 1)
+        # upsert 後的全域統計涵蓋 archived + rejected
+        l_upsert_summary_to_mongodb.upsert_summary(db, [summary])
+        snap = db.collections[l_upsert_summary_to_mongodb.NOTES_SUMMARY].docs[0]
+        self.assertEqual(snap["total_notes"], 3)
+        self.assertEqual(snap["embedded_notes"], 1)
+        self.assertEqual(snap["archived_notes"], 2)
+        self.assertEqual(snap["rejected_notes"], 1)
+
+        l_upsert_summary_to_mongodb.upsert_summary(db, [summary])  # 同日重跑
+        self.assertEqual(len(db.collections[l_upsert_summary_to_mongodb.NOTES_SUMMARY].docs), 1)
 
 
 if __name__ == "__main__":
