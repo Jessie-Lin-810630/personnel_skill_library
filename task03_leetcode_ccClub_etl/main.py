@@ -46,11 +46,11 @@ def run_task03_leetcode() -> None:
     if not all([username, session, csrf_token, mongo_uri, db_name]):
         logger.error(
             "請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-            "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
+            "CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
         )
         raise EnvironmentError(
             "請確認 secret manager 已設定 LEETCODE_USERNAME / LEETCODE_SESSION / "
-            "LEETCODE_CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
+            "CSRF_TOKEN / MONGO_ALTAS_URI / MONGO_DB_NAME"
         )
 
     logger.info("=== Task 3-A: LeetCode GraphQL ETL 開始 ===")
