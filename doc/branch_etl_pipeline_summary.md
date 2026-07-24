@@ -65,6 +65,8 @@ feature/etl-pipeline/
 
 ## Task 01 — Obsidian Vault ETL
 
+> **已除役**：本節（v1，寫 `obsidian_notes`／`obsidian_summary`、每跑全量下載同步）已淘汰，正宗版本為下方〈Task 01 v2〉。本節保留供設計對照與歷史查閱。
+
 ### 資料來源
 GCS bucket `personal-vaults`（本地 Obsidian vault 已同步上雲），以 `scan_vault_gs()` 掃描三類資料夾下的 `.md` 檔案；另保留 `scan_vault()` 供本地路徑掃描（legacy）：
 
@@ -161,26 +163,26 @@ OBSIDIAN_VAULT_PATH=              # 僅 legacy 本地 scan_vault() 使用
 
 ---
 
-## Task 01 v2 — Obsidian Vault Medallion ETL（變體，與 Task 01 並存）
+## Task 01 v2 — Obsidian Vault Medallion ETL（正宗版本）
 
-> 為對照兩種設計而建的 medallion 分層變體，程式在 `task01_obsidian_etl_v2/`，與現行 `task01_obsidian_etl` 檔案並存，但對於整個專案來說先以 task01 v2 優先往後串接其他任務。刻意不做 `dt=` 分區，改用 GCS Object Versioning 保留歷史版本，藉此與 task07 的 `dt=` 分區做設計對照。
+> medallion 分層版本，程式在 `task01_obsidian_etl_v2/`，已扶正為 Task 01 的正宗版本，v1（上一節）已除役；整個專案往後串接其他任務皆以 v2 為準。刻意不做 `dt=` 分區，改用 GCS Object Versioning 保留歷史版本，藉此與 task07 的 `dt=` 分區做設計對照。
 
 ### 資料來源
-GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcloud storage rsync` 覆蓋同步上雲。以 section 資料夾前綴過濾三類 `.md`：
+GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcloud storage rsync` 覆蓋同步上雲。以 section 資料夾名的**前兩碼**（`FOLDER_TYPE_MAP`）過濾三類 `.md`（例：`01-daily-logs` 取前兩碼 `01`）：
 
-| section 前綴 | note_type |
+| 資料夾前兩碼 | note_type |
 |-----------|-----------|
-| `01_` | daily-log |
-| `02_` | knowledge-summary |
-| `04_` | project |
+| `01` | daily-log |
+| `02` | knowledge-summary |
+| `04` | project |
 
 ### ETL 設計重點（medallion 分層）
 - **Bronze**：rsync 覆蓋 `raw-notes/`，bucket 開 Object Versioning 保留舊版；此層不清洗、不呼叫 LLM。
 - **(Silver) Extract**：`list_raw_blobs()` 掃 `raw-notes/` 取每份 `.md` 與圖片的 `md5_hash`，不下載內容；`get_existing_md5_map()` 從 DB 撈既有狀態，含每筆的圖片 md5；`select_changed_blobs()` 做 CDC gate，只對新增、內文變更、或引用圖片變更的 `.md` 才 `download_as_text()`，取代 v1 的每跑全量下載。
 - **(Silver) Transform**：`build_note_document()` 沿用 v1 清洗邏輯推導 note_type／topic／date／word_count，並解析 `![[ ]]` 組出單表內嵌的 `attached_images` 血緣；已於函式內預留 LLM enrichment 掛載點，本次不實作。
 - **(Silver) Load**：`archive_note()` 把清洗後 `.md` 與其圖片 `copy_blob` 到 **`archived-notes/`** 乾淨隔離層並回填 archived 端 path／md5；`upsert_note()` 以 `raw_md_path` 為唯一鍵冪等 upsert `obsidian_note_metadata`；任一步失敗以 `mark_note_error()` 記 `status="error"` 與 `error_msg` 落地稽核。
-- **軟刪除**：`soft_delete_missing()` 對「DB 有、raw-notes live listing 已無」的筆記標 `status="deleted"`，保留 archived 副本供稽核與供 task06 v2 purge；`present_raw_paths` 為空時防呆跳過，避免上游掃空誤刪全表。
-- **(Gold)**：`build_summary` 與 `upsert_summary()` 對現況做每日快照 `notes_summary`，只計 `status="archived"` 者。
+- **軟刪除**：`soft_delete_missing()` 對「DB 有、raw-notes live listing 已無」的筆記標 `status="deleted"`，保留 archived 副本供稽核，也讓 task06 v2 之後據此清掉對應向量；`present_raw_paths` 為空時防呆跳過，避免上游掃空誤刪全表。
+- **(Gold)**：`build_summary` 與 `upsert_summary()` 對現況做每週一次快照 `notes_summary`，同時盤 **archived 與 rejected 兩桶**——`status="archived"` 者計入 `archived_notes` 與 `by_*_in_archived_notes`，被退件者（`status="review_closed"` 且 `review_result="rejected"`）計入 `rejected_notes` 與 `by_*_in_rejected_notes`；`deleted`／`error` 不計入進度。
 > 由於 task07 oneone-to-markdown 採用 lazy loading 設計，onenote 筆記只會在人工審閱後觸發歸檔或退件的紀錄，這行為沒有保證週期性、沒有保證 `onenote_notes_metadata` 的快照也會像 task01 v2 的 `obsidian_notes_metadata` 快照日固定，因此目前借用定期執行的 task01 v2 的 gold 層任務，來同時快照 `obsidian_notes_metadata` 與 `onenote_notes_metadata` 兩張表，將快照結果彙整一起存入 `notes_summary`，以跟隨追蹤 task07 gold 層做歸檔、退件的進度，預計 task07 gold 層執行速度會比 task01 v2 慢上許多。
 > 待解決：目前，暫時維持同時寫入 `notes_summary` 與 task01 v1 的 `obsidian_summary` (follow 各自的 schema)，待 `obsidian_summary` 的舊資料 backfill 到 `notes_summary` 完全後，再視穩定性擇期淘汰 `obsidian_summary` (需修改 task01 v2 的 gold_notes_metadata_snapshot/l_upsert_summary_to_mongodb.py)。
 
@@ -206,7 +208,7 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
       "archived_image_path": "gs://.../archived-notes/.../_attachment/x.png", "archived_image_md5": "..." }
   ],
   "archived_md_frontmatter": { "tags": ["python"], "date": ISODate("..."), "type": "daily-log", "alias": [] },
-  "topic": "python",
+  "topic": "python",              // 由 tags＋檔名比對 TOPIC_KEYWORDS 推導；全不中時預設 "other-in-de"
   "word_count": 1250,
   "status": "archived",           // archived / deleted / error
   "embedded_status": false,       // task06 v2 完成向量化時翻 true
@@ -252,7 +254,8 @@ pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage
 
 ### .env 金鑰
 ```
-GOOGLE_APPLICATION_CREDENTIALS=   # GCS list / download / copy_blob
+GCS_USER_CREDENTIALS=             # (On-premise only) GCS service account JSON 路徑，供 list / download / copy_blob；
+                                  # 執行期解析成絕對路徑後塞給 GOOGLE_APPLICATION_CREDENTIALS。Cloud Run 上改走 ADC、免此金鑰檔。
 MONGO_ALTAS_URI=
 MONGO_DB_NAME=                    # 應為 skill_dashboard
 ```
@@ -628,6 +631,8 @@ MONGO_DB_NAME=
 
 ## Task 06 — Obsidian Vector DB ETL
 
+> **已除役**：本節（v1，讀 v1 的 `obsidian_notes`＋raw `.md`、寫 `obsidian_vectors_multimodal`）已淘汰，正宗版本為下方〈Task 06 v2〉。本節保留供設計對照與歷史查閱。
+
 ### 資料來源
 Google Cloud Storage bucket：`personal-vaults`，沿用 Task 01 的 `scan_vault_gs()` 掃描 bucket 內三類 Obsidian `.md` 檔案 metadata，再依 `file_path` 重新下載 Markdown 內文做 chunking 與 embedding。
 
@@ -733,25 +738,25 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 
 ---
 
-## Task 06 v2 — Obsidian Vector DB ETL（變體，對接 Task 01 v2 medallion）
+## Task 06 v2 — Obsidian Vector DB ETL（正宗版本，對接 Task 01 v2 medallion）
 
-> 程式在 `task06_obsidian_embed_etl_v2/`，與現行 `task06_obsidian_embed_etl` 並存。改吃 Task 01 v2 的 `obsidian_note_metadata` 與 `archived-notes/` 乾淨層，向量寫入 **v2 專用 `note_vectors_multimodal`**，與 v1 的 `obsidian_vectors_multimodal` 完全隔離，並新增 purge 消費端消費 Task 01 v2 的軟刪除訊號。
+> 程式在 `task06_obsidian_embed_etl_v2/`，已扶正為 Task 06 的正宗版本，v1（上一節）已除役。改吃 Task 01 v2 的 `obsidian_note_metadata` 與 `archived-notes/` 乾淨層，向量寫入 `note_vectors_multimodal`（與 task08 共寫**同一張**表、共用 Atlas index `obsidian_vectors_index2`；Obsidian 走 task06、OneNote 走 task08），並會依 Task 01 v2 標記的軟刪除，一併清掉對應的向量。
 
 ### 資料來源
 MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內文與圖片來源。
 
 ### ETL 設計重點
-- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
-- **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 帶 `raw_md_path` 血緣鍵。
-- **Load**：`load_vectors_incremental_v2()` 對每份筆記先 `delete_many({raw_md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`，並以 **`archived_md_md5_hash` 守衛的 CAS** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。
-- **Purge（消費軟刪除）**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，`delete_many({raw_md_path})` 清 `note_vectors_multimodal` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
+- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；投影出 `raw_md_path`（metadata 主鍵、供 CAS 定位）、`archived_md_path`（內文來源、也是向量表血緣欄 `md_path` 的值）、`archived_md_md5_hash`（CAS 守衛）；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
+- **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 的血緣欄為 **`md_path`（值＝人工核可後的 `archived_md_path`）**。
+- **Load**：`load_vectors_incremental_v2()` 依血緣欄 `md_path` 分組，對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`；再以 **`archived_md_md5_hash` 守衛的 CAS（以 metadata 主鍵 `raw_md_path` 定位筆記）** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。embedding 期間若 task01_v2 又重歸檔改了 md5，CAS 不命中、留待下輪重做。
+- **清除軟刪除的向量**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，以 `delete_many({md_path})`（`md_path`＝該筆的 `archived_md_path`）清 `note_vectors_multimodal` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
 
 ### MongoDB Collections
 
-**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
 ```json
 {
-  "md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
+  "md_path": "gs://personal-vaults/archived-notes/.../xxx.md",
   "file_name": "xxx.md",
   "chunk_index": 0,
   "chunk_total": 6,
@@ -764,7 +769,7 @@ MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內�
   "embedding": [0.01, -0.02, "..."]
 }
 ```
-> `embedding` 長度 1536、已 L2 normalize。需在 Atlas Console 手動建 `note_vectors_multimodal` 的 Vector Search index，維度 1536、similarity cosine。
+> `embedding` 長度 1536、已 L2 normalize。需在 Atlas Console 手動建 `note_vectors_multimodal` 的 Vector Search index `obsidian_vectors_index2`，維度 1536、similarity cosine（與 task08 共用同一 index）。
 
 ### 套件依賴
 ```
@@ -773,8 +778,9 @@ pymongo, python-frontmatter, python-dotenv, loguru, google-cloud-storage, google
 
 ### .env 金鑰
 ```
-GOOGLE_APPLICATION_CREDENTIALS=    # GCS 下載 archived md、檢查圖片是否存在
-AGENT_PLATFORM_USER_CREDENTIALS=   # Vertex AI gemini-embedding-2 服務帳號金鑰
+GCS_USER_CREDENTIALS=              # (On-premise only) GCS service account JSON 路徑，供下載 archived md、檢查圖片；
+                                   # 執行期解析成絕對路徑後塞給 GOOGLE_APPLICATION_CREDENTIALS。Cloud Run 上改走 ADC、免此金鑰檔。
+AGENT_PLATFORM_USER_CREDENTIALS=   # (On-premise only) Vertex AI gemini-embedding-2 服務帳號金鑰；Cloud Run 上走 ADC。
 GCP_PROJECT_ID=                    # Vertex AI 專案
 MONGO_ALTAS_URI=
 MONGO_DB_NAME=                     # 應為 skill_dashboard
@@ -790,7 +796,7 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 
 ## 增量 Embedding（CDC）機制：v1 vs v2 對照
 
-> task01／task06 有兩套並存的 CDC 設計：v1（`task01_obsidian_etl` + `task06_obsidian_embed_etl`）與 v2（medallion 變體，`*_v2`）。兩者核心訊號都是 GCS object 的 `md5_hash`，差異在分層、下載時機、schema 與刪除處理。
+> task01／task06 先後有兩套 CDC 設計：v1（`task01_obsidian_etl` + `task06_obsidian_embed_etl`，**已除役**）與 v2（medallion，`*_v2`，**已扶正為正宗**）。以下對照保留供設計說明。兩者核心訊號都是 GCS object 的 `md5_hash`，差異在分層、下載時機、schema 與刪除處理。
 
 ### 共通核心訊號
 - CDC 依據都是 GCS blob 的 `md5_hash`：它是 GCS object 層級屬性，`list_blobs()` 回傳即帶、不需下載內容，由伺服器端依實際 bytes 計算、與上傳 client 無關；本專案 `.md`／`.png` 都是小檔，保證存在。
@@ -811,7 +817,7 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 | 向量化旗標 | `embedding_done` | `embedded_status` |
 | CAS 守衛欄位 | `file_md5_hash` | `archived_md_md5_hash` |
 | 向量 collection | `obsidian_vectors_multimodal` | `note_vectors_multimodal`，與 v1 完全隔離 |
-| 刪除→向量清理 | 靠獨立孤兒 chunk 清理 job | **purge 消費端**：軟刪除訊號驅動 `delete_many` 即時清 |
+| 刪除→向量清理 | 靠獨立孤兒 chunk 清理 job | **依軟刪除標記即時清**：查到 `status="deleted"` 就 `delete_many` 清掉對應向量 |
 | 失敗處理 | 檔略過、下輪重試 | 檔略過並 `mark_note_error(status=error)` 落地稽核 |
 
 ### 共通的 gate ＋ 先刪後插 ＋ CAS
