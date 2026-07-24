@@ -70,7 +70,7 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 
 ## Architecture
 
-![image](./doc/Architecture.png)
+![image](./doc/architecture.png)
 
 ## Project Structure
 
