@@ -80,8 +80,10 @@ def build_ccclub_summary_partial(problem_docs: list[dict]) -> dict:
     for topic, cnt in sorted_topic_count:
         topic_percentage[topic] = round(cnt / total_topic_cnts * 100, 2) if total_topic_cnts > 0 else 0.0
 
+    # snapshot_date 存 datetime 物件、但只表示到日（時分秒毫秒歸零），供以日為粒度的 upsert 與排序。
+    snapshot_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     partial_summary_docs_ccClub = {
-        "snapshot_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "snapshot_date": snapshot_date,
         "totalSolvedProblemsOnCCclub": total_problems,
         "problemDifficultyOnCCclub": problem_difficulty,
         "topicsPercentOnCCclub": topic_percentage,
