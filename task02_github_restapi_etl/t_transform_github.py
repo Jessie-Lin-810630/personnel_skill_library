@@ -11,6 +11,22 @@ from datetime import datetime, timezone
 from loguru import logger
 
 
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """把 GitHub API 回傳的 ISO 8601 字串（如 2026-04-23T02:13:17Z）轉成 datetime 物件。
+
+    值為 None 或空字串時回傳 None（例如 pushed_at 可能為 None）。
+
+    Args:
+        value: GitHub API 回傳的 ISO 8601 時間字串，或 None。
+
+    Returns:
+        對應的 datetime 物件；輸入為空時回傳 None。
+    """
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
+
+
 def build_repo_document(
     raw_repo: dict,
     github_username: str,
@@ -44,7 +60,7 @@ def build_repo_document(
             commit_info = {
                 "sha": c["sha"][:7],  # 只存短 sha 省空間
                 "message": c["commit"]["message"],
-                "committed_at": c["commit"]["author"]["date"],
+                "committed_at": _parse_iso_datetime(c["commit"]["author"]["date"]),
             }
             if commit_info not in commits:  # 分支出去或merge過來的同個 commit 事件之sha 會一樣，故不需要重複計算 commit
                 commits.append(commit_info)
@@ -59,8 +75,8 @@ def build_repo_document(
         "language": raw_repo.get("language") or "others",
         "is_private": raw_repo["private"],
         "role": role,
-        "created_at": raw_repo["created_at"],
-        "pushed_at": raw_repo.get("pushed_at", None),
+        "created_at": _parse_iso_datetime(raw_repo["created_at"]),
+        "pushed_at": _parse_iso_datetime(raw_repo.get("pushed_at")),
         "stars": raw_repo.get("stargazers_count", 0),
         "topics": raw_repo.get("topics", []),
         "commit_counts": len(commits),
@@ -95,7 +111,10 @@ def build_summary_document(all_repo_docs: list[dict]) -> dict:
         total_commits += repo["commit_counts"]
 
     # 最近有 push 的 repo（按 pushed_at 降序），沒有 push 的會排在最後。
-    sorted_repos = sorted(all_repo_docs, key=lambda r: r["pushed_at"] or "", reverse=True)
+    # pushed_at 型別會是 datetime 或 None，None 在排序時替換成 datetime.min 最小可取得時間，
+    # 否則 None 與 datetime 在 sorted() 排序時會出現 TypeError。
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    sorted_repos = sorted(all_repo_docs, key=lambda r: r["pushed_at"] or oldest, reverse=True)
     recent_repos = []
     for r in sorted_repos:
         if r["pushed_at"] is not None:
@@ -108,8 +127,10 @@ def build_summary_document(all_repo_docs: list[dict]) -> dict:
                 }
             )
 
+    # snapshot_date 存 datetime 物件、但只表示到日（時分秒毫秒歸零），供以日為粒度的 upsert 與排序。
+    snapshot_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     summary_docs = {
-        "snapshot_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "snapshot_date": snapshot_date,
         "total_repos": len(all_repo_docs),
         "by_role": dict(by_role),
         "by_language": dict(by_language),
