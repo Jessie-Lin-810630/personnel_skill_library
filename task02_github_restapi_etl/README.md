@@ -110,6 +110,7 @@ task02_github_restapi_etl/
 
 ```json
 {
+  "_id" : ObjectId("6a5ddeb7..."),
   "repo_id": 123456789,
   "repo_name": "etl-pipeline",
   "repo_full_name": "yourname/etl-pipeline",
@@ -117,17 +118,17 @@ task02_github_restapi_etl/
   "language": "Python",
   "is_private": false,
   "role": "owner",
-  "created_at": "2024-01-01T00:00:00Z",
-  "pushed_at": "2025-04-23T10:00:00Z",
+  "created_at": ISODate("2026-02-04T06:06:12.000+0000"),
+  "pushed_at": ISODate("2026-06-07T07:15:17.000+0000"),
   "commit_counts": 42,
   "commits": [
-    { "sha": "abc123", "message": "init: scaffold ETL structure", "committed_at": "2025-04-20T09:00:00Z" }
+    { "sha": "abc123", "message": "init: scaffold ETL structure", "committed_at": ISODate("2026-03-15T03:06:59.000+0000") }
   ],
   "readme_summary": "This project is an ETL pipeline...",
   "readme_url": "https://github.com/yourname/etl-pipeline/blob/main/README.md",
   "topics": ["etl", "python", "mongodb"],
   "stars": 0,
-  "fetched_at": "2026-04-28T10:00:00Z"
+  "fetched_at": ISODate("2026-07-25T01:29:57.204+0000")
 }
 ```
 
@@ -139,7 +140,7 @@ task02_github_restapi_etl/
 | **欄位名稱**          | **欄位語意**             | **資料型別**                  | **值來源**                             |
 | :-------------------- | :----------------------- | :---------------------------- | :------------------------------------- |
 | `_id`                 | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId                      | MongoDB 自動產生                       |
-| `snapshot_date`       | 快照日（Upsert key）      | Date (`YYYY-MM-DD`)           | task02 Load 階段自訂函式               |
+| `snapshot_date`       | 快照日（Upsert key）      | Date (ISO 8601) (時間部分均歸零)  | task02 Load 階段自訂函式               |
 | `total_repos`         | 總 repo 數量             | Integer                       | collection `github_repos`              |
 | `by_role`             | 各角色 repo 數量         | Object (Embedded Integer)     | collection `github_repos`              |
 | `by_language`         | 各程式語言 repo 數量     | Object (Embedded Integer)     | collection `github_repos`              |
@@ -150,14 +151,15 @@ task02_github_restapi_etl/
 
 ```json
 {
-  "snapshot_date": "2026-04-28",
+  "_id" : ObjectId("6a5ddeb7..."),
+  "snapshot_date": ISODate("2026-07-25T00:00:00.000+0000"),
   "total_repos": 15,
   "by_role": { "owner": 12, "collaborator": 3 },
   "by_language": { "Python": 8, "SQL": 2, "Shell": 1, "others": 4 },
   "total_commits": 287,
   "recent_three_repos": [
-    { "repo_name": "etl-pipeline", "pushed_at": "2025-04-23T10:00:00Z", "language": "Python", "description": "This project is an ETL pipeline..." },
-    { "repo_name": "quick-notes", "pushed_at": "2025-04-20T08:00:00Z", "language": "Shell", "description": null }
+    { "repo_name": "etl-pipeline", "pushed_at": ISODate("2025-04-23T10:00:00.000+0000"), "language": "Python", "description": "This project is an ETL pipeline..." },
+    { "repo_name": "quick-notes", "pushed_at": ISODate("2025-04-20T08:00:00.000+0000"), "language": "Shell", "description": null }
   ]
 }
 ```
