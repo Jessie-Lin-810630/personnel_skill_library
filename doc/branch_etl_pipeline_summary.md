@@ -273,7 +273,7 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
 | Collaborator repos | 身為協作者的 public repos |
 
 ### ETL 設計重點
-- **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 獲取 brach names；逐 repo與branch 呼叫 `/commits` 與 `/readme`；分頁器 `_paginate()` 每頁 100 筆
+- **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 獲取 branch names；逐 branch 呼叫 `/commits`、逐 repo 呼叫 `/readme`；分頁器 `_paginate()` 每頁 100 筆
 - **Rate Limit 控制**：每次 response 後讀取 `x-ratelimit-remaining` 與 `x-ratelimit-reset`；剩餘配額低於緩衝值（100）時，精準 sleep 至 reset 時間點；優先處理 `retry-after` header（secondary rate limit）
 - **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；以 `if c["commit"]["committer"]["email"] == github_mail:` 過濾出committer是自己帳號的commit；README 取 base64 解碼後前 300 字；`readme_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
 - **Load**：存兩份文檔集，`文檔集 github_repos`以 `repo_id` 為唯一鍵 upsert；`文檔集 github_summary` 以 `snapshot_date` 為鍵每日更新
@@ -282,35 +282,75 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
 
 **`github_repos`**（每筆 = 一個 repo）
 ```json
-{
-  "repo_id": 123456789,
-  "repo_name": "etl-pipeline",
-  "repo_full_name": "yourname/etl-pipeline",
-  "description": "...",
-  "language": "Python",
-  "is_private": false,
-  "role": "owner",
-  "created_at": "2024-01-01T00:00:00Z",
-  "pushed_at": "2025-04-23T10:00:00Z",
-  "commit_counts": 42,
-  "commits": [{ "sha": "abc123", "message": "init: scaffold ETL structure", "committed_at": "2025-04-20T09:00:00Z" }],
-  "readme_summary": "This project is an ETL pipeline...",
-  "readme_url": "https://github.com/yourname/etl-pipeline/blob/main/README.md",
-  "topics": ["etl", "python", "mongodb"],
-  "stars": 0,
-  "fetched_at": "2026-04-28T10:00:00Z"
-}
+  {
+      "_id" : ObjectId("6a04aa40cb2871934b2eb8d5"),
+      "repo_id" : NumberInt(1149454583),
+      "commit_counts" : NumberInt(77),
+      "commits" : [
+        {
+            "sha" : "b124ceb",
+            "message" : "Merge branch 'main' into Jessie",
+            "committed_at" : ISODate("2026-03-15T03:07:44.000+0000")
+        },
+        {
+            "sha" : "8a0efd9",
+            "message" : "fix: the logistic mistake on the duplicated death counts.",
+            "committed_at" : ISODate("2026-03-15T03:06:59.000+0000")
+        }],
+      "created_at" : ISODate("2026-02-04T06:06:12.000+0000"),
+      "description" : null,
+      "fetched_at" : ISODate("2026-07-25T01:29:57.204+0000"),
+      "is_private" : false,
+      "language" : "Python",
+      "pushed_at" : ISODate("2026-03-30T09:16:03.000+0000"),
+      "readme_summary" : "## 目錄\n1. [Project Description](#1-project-description-專案簡述)\n...",
+      "readme_url" : "https://github.com/CarlHung65/tjr104_t01/blob/main/README.md",
+      "repo_full_name" : "CarlHung65/tjr104_t01",
+      "repo_name" : "tjr104_t01",
+      "role" : "collaborator",
+      "stars" : NumberInt(0),
+      "topics" : []
+  }
 ```
 
 **`github_summary`**（每日快照）
 ```json
 {
-  "snapshot_date": "2026-04-28",
-  "total_repos": 15,
-  "by_role": { "owner": 12, "collaborator": 3 },
-  "by_language": { "Python": 8, "SQL": 2, "Shell": 1, "other": 4 },
-  "total_commits": 287,
-  "recent_repos": [{ "repo_name": "...", "pushed_at": "...", "language": "..." }]
+    "_id" : ObjectId("6a6411c659421c979c7062f9"),
+    "snapshot_date" : ISODate("2026-07-25T00:00:00.000+0000"),
+    "by_language" : {
+        "Python" : NumberInt(5),
+        "others" : NumberInt(1),
+        "JavaScript" : NumberInt(1),
+        "Jupyter Notebook" : NumberInt(1),
+        "HTML" : NumberInt(1)
+    },
+    "by_role" : {
+        "collaborator" : NumberInt(1),
+        "owner" : NumberInt(8)
+    },
+    "recent_three_repos" : [
+        {
+            "repo_name" : "user-level-files-for-agents",
+            "pushed_at" : ISODate("2026-07-24T14:46:11.000+0000"),
+            "language" : "HTML",
+            "description" : "To store and manage the files that shall be at user-level on premise and accessed by AI agents. Such as CLAUDE.md, setting.json, skills/<skill_name>/SKILL.md, and so on."
+        },
+        {
+            "repo_name" : "personnel_skill_library",
+            "pushed_at" : ISODate("2026-07-24T14:44:29.000+0000"),
+            "language" : "Python",
+            "description" : null
+        },
+        {
+            "repo_name" : "my-user-level-dotfile",
+            "pushed_at" : ISODate("2026-06-07T07:15:17.000+0000"),
+            "language" : "JavaScript",
+            "description" : "remotely manage and backup my dot-files for some settings of user-levels on-premise, such as ~/.claude/"
+        }
+    ],
+    "total_commits" : NumberInt(586),
+    "total_repos" : NumberInt(9)
 }
 ```
 
@@ -324,7 +364,7 @@ pymongo, requests, python-dotenv, loguru
 GITHUB_USERNAME=
 GITHUB_TOKEN=           # PAT (classic)
 GITHUB_MAIL=
-MONGO_URI=
+MONGO_ALTAS_URI=
 MONGO_DB_NAME=
 ```
 

@@ -92,7 +92,7 @@ task02_github_restapi_etl/
 | `repo_id`         | repo 識別碼（Upsert key）              | Integer                            | GitHub API `/user/repos` 之 `id`                  |
 | `repo_name`       | repo 名稱                             | String                             | GitHub API `name`                                 |
 | `repo_full_name`  | repo 完整名稱（owner/repo）           | String                             | GitHub API `full_name`                            |
-| `description`     | repo 描述                            | String                             | GitHub API `description`                           |
+| `description`     | repo 描述                            | String \| null                     | GitHub API `description`                           |
 | `language`        | 主要程式語言（空值填 `others`）       | String                             | GitHub API `language`                             |
 | `is_private`      | 是否為私有 repo                       | Bool                               | GitHub API `private`                              |
 | `role`            | 本人在此 repo 的角色                  | String (`owner` / `collaborator`)  | Transform：以 `owner.login == username` 判斷      |
@@ -156,12 +156,12 @@ task02_github_restapi_etl/
   "by_language": { "Python": 8, "SQL": 2, "Shell": 1, "others": 4 },
   "total_commits": 287,
   "recent_three_repos": [
-    { "repo_name": "etl-pipeline", "pushed_at": "2025-04-23T10:00:00Z", "language": "Python" }
+    { "repo_name": "etl-pipeline", "pushed_at": "2025-04-23T10:00:00Z", "language": "Python", "description": "This project is an ETL pipeline..." },
+    { "repo_name": "quick-notes", "pushed_at": "2025-04-20T08:00:00Z", "language": "Shell", "description": null }
   ]
 }
 ```
-> Collection 1 & 2 的實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。 \
-> 改進空間 (for developer)：`snapshot_date` 若改為 Datetime 型別會更便於比較與排序（除非需要精準的日期字串查詢）。
+> Collection 1 & 2 的實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
 
 ---
 
