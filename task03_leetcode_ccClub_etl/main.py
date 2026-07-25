@@ -127,5 +127,8 @@ def run_task03_ccclub() -> None:
 
 
 if __name__ == "__main__":
+    # # 地端執行時，需要 uncomment 下面兩行後再執行
+    # from dotenv import load_dotenv
+    # load_dotenv()
     run_task03_leetcode()
     run_task03_ccclub()
