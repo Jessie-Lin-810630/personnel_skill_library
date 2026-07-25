@@ -381,13 +381,13 @@ MONGO_DB_NAME=
 
 ### ETL 設計重點
 
-**LeetCode 側：**
-- 使用兩支 GraphQL query：`problemsetQuestionList`（已解題清單）+ `serProblemsSolved`（難度擊敗百分比）
-- `problemsetQuestionList` 不支援直接以 status 過濾，Python 端過濾 `status == "ac"`
-- 分頁以 `skip` 遞增，每頁 `limit=100`；每頁間主動 throttle 1 秒
+**LeetCode：**
+- 使用兩支 GraphQL query：`problemsetQuestionList`（已解題清單）+ `userProblemsSolved`（各難度已解題數，含 All）
+- Transform 端攤平 GraphQL 巢狀欄位與統計各 difficulty 題數
+- 已解題清單以單次請求抓取（`skip=0, limit=100`），目前未分頁、上限 100 題
 - Cookie 過期防呆：AC 數為 0 但題庫有題時，主動 warning 提示重新取得 cookie
 
-**ccClub 側：**
+**ccClub：**
 - 以 `requests.Session` 維持登入狀態；登入後重新取得 rotate 後的 csrftoken
 - 逐題呼叫 `GET /api/problem?problem_id={id}` 補齊 tags & difficulty
 - difficulty 標準化：`Low/Easy → Easy`、`Mid → Med.`、`High → Hard`
@@ -402,42 +402,83 @@ MONGO_DB_NAME=
 **`solved_problems_on_leetcode`**（每筆 = 一道 AC 題目）
 ```json
 {
-  "frontendQuestionId": "1",
-  "title": "Two Sum",
-  "topic": ["array", "hash-table"],
-  "difficulty": "Easy"
+    "_id" : ObjectId("6a0534b...."),
+    "frontendQuestionId" : "14",
+    "difficulty" : "Easy",
+    "title" : "Longest Common Prefix",
+    "topic" : [
+        "Array",
+        "String",
+        "Trie"
+    ]
 }
 ```
 
 **`solved_problems_on_ccClub`**（每筆 = 一道已解題目）
 ```json
 {
-  "problem_id": "180001",
-  "problem_type": "ACM",
-  "score": 0,
-  "topic": ["String"],
-  "difficulty": "Easy"
+    "_id" : ObjectId("6a0535...."),
+    "problem_id" : "180001",
+    "difficulty" : "Easy",
+    "problem_type" : "ACM",
+    "score" : NumberInt(0),
+    "topic" : [
+        "String"
+    ]
 }
 ```
 
 **`ccClub&leetcode_summary`**（每日快照，兩側合併）
 ```json
 {
-  "snapshot_date": "2026-04-28",
-  "totalSolvedProblemsOnCCclub": 264,
-  "totalSolvedProblemsOnLeetcode": 15,
-  "problemDifficultyOnLeetcode": [
-    { "difficulty": "Easy", "percentage": 81.71 },
-    { "difficulty": "Medium", "percentage": 17.74 },
-    { "difficulty": "Hard", "percentage": null }
-  ],
-  "problemDifficultyOnCCclub": [
-    { "difficulty": "Easy", "percentage": 75.0 },
-    { "difficulty": "Med.", "percentage": 20.0 },
-    { "difficulty": "Hard", "percentage": 5.0 }
-  ],
-  "topicsPercentOnCCclub": { "String": 20.0, "Math": 80.0 },
-  "topicsPercentOnLeetcode": { "array": 13.4, "hash-table": 12.6, "dynamic-programming": 74.0 }
+    "_id" : ObjectId("6a5ddeb7..."),
+    "snapshot_date" : ISODate("2026-07-25T00:00:00.000+0000"),
+    "problemDifficultyOnLeetcode" : [
+        {
+            "difficulty" : "All",
+            "count" : NumberInt(48)
+        },
+        {
+            "difficulty" : "Easy",
+            "count" : NumberInt(32)
+        },
+        {
+            "difficulty" : "Medium",
+            "count" : NumberInt(14)
+        },
+        {
+            "difficulty" : "Hard",
+            "count" : NumberInt(2)
+        }
+    ],
+    "topicsPercentOnLeetcode" : {
+        "Database" : 64.41,
+        "Math" : 8.47,
+        "String" : 6.78
+    },
+    "totalSolvedProblemsOnLeetcode" : NumberInt(48),
+    "problemDifficultyOnCCclub" : [
+        {
+            "difficulty" : "Easy",
+            "percentage" : 36.84
+        },
+        {
+            "difficulty" : "Hard",
+            "percentage" : 13.91
+        },
+        {
+            "difficulty" : "Med.",
+            "percentage" : 49.25
+        }
+    ],
+    "topicsPercentOnCCclub" : {
+        "Sorting" : 10.18,
+        "Dictionary" : 20.82,
+        "List" : 30.00,
+        "Input" : 19.00,
+        "Function" : 20.00,
+    },
+    "totalSolvedProblemsOnCCclub" : NumberInt(266)
 }
 ```
 
@@ -450,10 +491,10 @@ pymongo, requests, python-dotenv, loguru
 ```
 LEETCODE_USERNAME=
 LEETCODE_SESSION=       # 從瀏覽器 Cookie 取得，有時效性（數週）
-LEETCODE_CSRF_TOKEN=    # 從瀏覽器 Cookie 取得
+CSRF_TOKEN=             # 從瀏覽器 Cookie 取得
 CCCLUB_USERNAME=
 CCCLUB_PASSWORD=
-MONGO_URI=
+MONGO_ALTAS_URI=
 MONGO_DB_NAME=
 ```
 

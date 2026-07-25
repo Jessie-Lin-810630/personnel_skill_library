@@ -45,10 +45,10 @@ flowchart LR
 ```
 
 - **Extract**：所有跟 LeetCode / ccClub 溝通的邏輯都在這裡，含認證、分頁與逐題補資料。
-    - LeetCode：以兩支 GraphQL query 抓「已解題清單」與「難度擊敗百分比」；分頁以 `skip` 遞增、每頁 `limit=100`，每頁間 throttle 1 秒；cookie 過期防呆。
+    - LeetCode：以兩支 GraphQL query 抓「已解題清單」與「各難度已解題數」；已解題清單以單次請求抓取（`skip=0, limit=100`，未分頁、上限 100 題）；cookie 過期防呆。
     - ccClub：以 `requests.Session` 帳密登入並取得 rotate 後的 csrftoken；逐題呼叫 `GET /api/problem?problem_id={id}` 補齊 topic 與 difficulty，每題間隔 0.3 秒 throttle 保護 server。
 - **Transform**：把 API 回來的原始資料清洗成乾淨的題目文檔，並統計出摘要。
-    - LeetCode：過濾出 `status == "ac"` 的題目。
+    - LeetCode：攤平 GraphQL 巢狀欄位與統計各 difficulty 題數。
     - ccClub：difficulty 欄位值標準化。
 - **Load**： upsert 寫入 MongoDB。
 
@@ -97,6 +97,7 @@ task03_leetcode_ccClub_etl/
 
 | **欄位名稱**          | **欄位語意**          | **資料型別**    | **值來源**                                                            |
 | :-------------------- | :-------------------- | :-------------- | :------------------------------------------------------------------- |
+| `_id`                 | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId | MongoDB 自動產生                                              |
 | `frontendQuestionId`  | LeetCode 前台題號（Upsert key） | String  | LeetCode GraphQL `problemsetQuestionList.questions.frontendQuestionId` |
 | `title`               | 題目標題              | String          | LeetCode GraphQL `...questions.title`                                 |
 | `topic`               | 題目主題標籤          | Array (String)  | LeetCode GraphQL `...questions.topicTags` 之 `name`                   |
@@ -106,6 +107,7 @@ task03_leetcode_ccClub_etl/
 
 ```json
 {
+  "_id" : ObjectId("6a0534b...."),
   "frontendQuestionId": "1",
   "title": "Two Sum",
   "topic": ["array", "hash-table"],
@@ -120,6 +122,7 @@ task03_leetcode_ccClub_etl/
 
 | **欄位名稱**    | **欄位語意**          | **資料型別**    | **值來源**                                                                |
 | :-------------- | :-------------------- | :-------------- | :------------------------------------------------------------------------ |
+| `_id`           | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId  | MongoDB 自動產生                                              |
 | `problem_id`    | ccClub 題目 ID（Upsert key） | String    | ccClub REST API                                                           |
 | `problem_type`  | 題目類型              | String          | ccClub REST API                                                           |
 | `score`         | 得分                  | Integer         | ccClub REST API                                                           |
@@ -130,6 +133,7 @@ task03_leetcode_ccClub_etl/
 
 ```json
 {
+  "_id" : ObjectId("6a0535...."),
   "problem_id": "180001",
   "problem_type": "ACM",
   "score": 0,
@@ -145,10 +149,11 @@ task03_leetcode_ccClub_etl/
 
 | **欄位名稱**                     | **欄位語意**              | **資料型別**                        | **值來源**                                             |
 | :------------------------------- | :----------------------- | :---------------------------------- | :----------------------------------------------------- |
-| `snapshot_date`                  | 快照日（Upsert key）      | Date (`YYYY-MM-DD`)                 | task03 Load 階段自訂函式                               |
+| `_id`                            | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId             | MongoDB 自動產生                                       |
+| `snapshot_date`                  | 快照日（Upsert key）      | Date (ISO 8601) (時間部分均歸零)   | task03 Load 階段自訂函式                               |
 | `totalSolvedProblemsOnCCclub`    | ccClub 已解題總數        | Integer                             | collection `solved_problems_on_ccClub`                 |
 | `totalSolvedProblemsOnLeetcode`  | LeetCode 已解題總數      | Integer                             | collection `solved_problems_on_leetcode`               |
-| `problemDifficultyOnLeetcode`    | LeetCode 各難度擊敗百分比 | Array (Object)                      | LeetCode GraphQL `matchedUser.problemsSolvedBeatsStats` |
+| `problemDifficultyOnLeetcode`    | LeetCode 各難度已解題數 | Array (Object)              | LeetCode GraphQL `submitStatsGlobal.acSubmissionNum`   |
 | `problemDifficultyOnCCclub`      | ccClub 各難度百分比      | Array (Object)                      | 從 collection `solved_problems_on_ccClub` 計算         |
 | `topicsPercentOnCCclub`          | ccClub 各主題百分比      | Object (Embedded Float)             | 從 collection `solved_problems_on_ccClub` 計算         |
 | `topicsPercentOnLeetcode`        | LeetCode 各主題百分比    | Object (Embedded Float)             | 從 collection `solved_problems_on_leetcode` 計算       |
@@ -157,13 +162,15 @@ task03_leetcode_ccClub_etl/
 
 ```json
 {
-  "snapshot_date": "2026-04-28",
+  "_id" : ObjectId("6a5ddeb7..."),
+  "snapshot_date": ISODate("2026-07-25T00:00:00.000+0000"),
   "totalSolvedProblemsOnCCclub": 264,
   "totalSolvedProblemsOnLeetcode": 15,
   "problemDifficultyOnLeetcode": [
-    { "difficulty": "Easy", "percentage": 81.71 },
-    { "difficulty": "Medium", "percentage": 17.74 },
-    { "difficulty": "Hard", "percentage": null }
+    { "difficulty": "All", "count": 15 },
+    { "difficulty": "Easy", "count": 11 },
+    { "difficulty": "Medium", "count": 3 },
+    { "difficulty": "Hard", "count": 1 }
   ],
   "problemDifficultyOnCCclub": [
     { "difficulty": "Easy", "percentage": 75.0 },
@@ -190,8 +197,8 @@ task03 的資料來源為兩個線上刷題平台的 API，無需事先準備任
 
 | Query / Endpoint                              | 用途                          | 備註                                          |
 | --------------------------------------------- | ----------------------------- | --------------------------------------------- |
-| GraphQL `problemsetQuestionList`              | 抓已解題清單                   | Python 端過濾 `status == "ac"`，每頁 `limit=100` |
-| GraphQL `matchedUser.problemsSolvedBeatsStats` | 抓各難度擊敗百分比             |  -                                          |
+| GraphQL `problemsetQuestionList`              | 抓已解題清單                   | 單次請求，`limit=100`、未分頁（上限 100 題） |
+| GraphQL `userProblemsSolved` → `submitStatsGlobal.acSubmissionNum` | 抓各難度已解題數（含 All） |  -                          |
 | `POST /api/login`                             | ccClub 帳密登入取得 session    | 登入後重新取得 rotate 的 csrftoken            |
 | `GET /api/problem?problem_id={id}`            | 逐題補齊 topic 與 difficulty   | 每題間隔 0.3 秒 throttle                       |
 
