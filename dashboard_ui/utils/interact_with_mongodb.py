@@ -1,11 +1,10 @@
 """Dashboard 的 MongoDB 查詢封裝：集中連線建立與各頁所需的 collection 讀取。
 
-1. 函式 get_db 與 get_db_atlas 分別以 MONGO_URI 與 MONGO_ALTAS_URI 建立連線，後者為跨頁共用的 module-level 單例。
+1. 函式 get_db_atlas 以 MONGO_ALTAS_URI 建立連線，後者為跨頁共用的 module-level 單例。
 2. 其餘查詢函式把各 collection 讀成 Streamlit 頁面直接可用的 DataFrame 或 dict。
 
 Required .env keys:
     MONGO_ALTAS_URI   MongoDB Atlas connection string (used by get_db_atlas singleton).
-    MONGO_URI         MongoDB connection string used by get_db.
     MONGO_DB_NAME     Target database name.
 """
 
@@ -18,18 +17,6 @@ from pymongo import MongoClient
 from pymongo.database import Database
 
 load_dotenv()
-
-
-def get_db() -> Database:
-    mongo_uri = os.getenv("MONGO_URI")
-    db_name = os.getenv("MONGO_DB_NAME")
-
-    if not all([mongo_uri, db_name]):
-        logger.error("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
-        raise EnvironmentError("請確認 .env 已設定 MONGO_URI / MONGO_DB_NAME")
-
-    client = MongoClient(mongo_uri)
-    return client[db_name]
 
 
 _atlas_db: Database | None = None
@@ -108,7 +95,7 @@ def get_obsidian_kpi(db: Database, collection: str = "obsidian_summary") -> tupl
         note_delta = df["total_notes"].iloc[0] - df["total_notes"].iloc[1]  # int
     else:
         note_delta = df["total_notes"].iloc[0]  # int
-    topic_counts = df["by_topic"].iloc[0]  # dict
+    topic_counts = df["by_topic_in_archived_notes"].iloc[0]  # dict
     snapshot_date = df["snapshot_date"].iloc[0]  # date
     return curr_total, note_delta, topic_counts, snapshot_date
 

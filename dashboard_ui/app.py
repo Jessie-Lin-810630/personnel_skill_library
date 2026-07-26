@@ -50,7 +50,7 @@ de_tasks = _radar_tasks_from_df(de_radar_detail_df)
 
 # —— B: KPI ——
 obsidian_total, obsidian_delta_raw, obsidian_topics, obsidian_updated_at = mongo_utils.get_obsidian_kpi(
-    db, "obsidian_summary"
+    db, "notes_summary"
 )
 github_total, github_delta_raw, github_updated_at = mongo_utils.get_github_kpi(db, "github_summary")
 problem_kpi = mongo_utils.get_problem_kpi_donut(db, "ccClub&leetcode_summary")
