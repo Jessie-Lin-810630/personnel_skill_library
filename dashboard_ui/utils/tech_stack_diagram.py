@@ -418,8 +418,9 @@ LAYERS: list[dict] = [
         "accent": "#14B8A6",
         "techs": [
             ("Google Cloud Platform", "gcp"),
-            ("Vertex AI / Gemini", "vertex_ai"),
-            ("gemini-embedding-2 (1536-dim)", "gemini_embed"),
+            ("Agent Platform / Vertex AI", "vertex_ai"),
+            ("gemini-flash series multimodal models", "gemini_embed"),
+            ("gemini-embedding-2 model", "gemini_embed"),
             ("Cohere", "cohere"),
             ("LangChain Text Splitters", "langchain"),
         ],
