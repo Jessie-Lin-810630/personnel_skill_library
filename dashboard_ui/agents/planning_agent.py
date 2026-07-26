@@ -88,7 +88,7 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = Pla
     }
     contents = history_user_model_msg + [current_user_msg]
 
-    # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
+    # ── Step 6: 呼叫 Agent Platform (Gemini Enterprise) ────────────────────────────
     logger.info(f"呼叫模型 {PlanningAgent.MODEL}，挾帶 {len(chunks)} 筆 chunks")
     response = client.models.generate_content(
         model=PlanningAgent.MODEL,
@@ -170,7 +170,7 @@ def refine_learning_map(followup_query: str, session_id: str, planning_top_k: in
     }
     contents = history_user_model_msg + [current_user_msg]
 
-    # ── Step 6: 呼叫 Vertex AI (Gemini Enterprise Agent Platform) ────────────────────────────
+    # ── Step 6: 呼叫 Agent Platform (Gemini Enterprise) ────────────────────────────
     logger.info(f"呼叫模型 {PlanningAgent.MODEL}，多輪追問調整")
     response = client.models.generate_content(
         model=PlanningAgent.MODEL,

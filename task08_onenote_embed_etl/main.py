@@ -11,8 +11,8 @@ Required .env keys:
     MONGO_ALTAS_URI                   MongoDB Atlas connection string.
     MONGO_DB_NAME                     Target database name (skill_dashboard).
     GCS_USER_CREDENTIALS              (On-premise only) GCS service account JSON path.
-    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI gemini-embedding-2 service account key.
-    GCP_PROJECT_ID                    Vertex AI project.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
+    GCP_PROJECT_ID                    Agent Platform project.
 
 Optional .env keys:
     ONENOTE_GCS_BUCKET                GCS data lake bucket (defaults to onenote-vaults).

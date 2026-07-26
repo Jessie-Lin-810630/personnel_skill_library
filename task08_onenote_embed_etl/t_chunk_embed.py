@@ -7,8 +7,8 @@ chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy �
 與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、血緣欄命名 md_path（存 archived md 路徑）。
 
 Required .env keys:
-    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI gemini-embedding-2 service account key.
-    GCP_PROJECT_ID                    Vertex AI project.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
+    GCP_PROJECT_ID                    Agent Platform project.
     GCS_USER_CREDENTIALS              (On-premise only) path to GCS service account JSON (for downloading archived md).
 
 Optional .env keys:
@@ -54,7 +54,7 @@ def _get_genai_client() -> genai.Client:
     """初始化 google-genai client。
 
     Returns:
-        已認證、指向 Vertex AI 的 genai.Client。
+        已認證、指向 Agent Platform 的 genai.Client。
 
     Raises:
         EnvironmentError: 缺少 AGENT_PLATFORM_USER_CREDENTIALS 或 GCP_PROJECT_ID 環境變數時。

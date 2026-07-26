@@ -1,7 +1,7 @@
 """與 MongoDB Atlas 互動，負責 Router、RAG、Planning 三個 agent 的對話紀錄存取。
 
 1. 函式 load_chat_history 讀取某 session 最近 N 輪對話，回傳格式直接對齊 google-genai SDK 的 contents 格式，
-   讀完即可送進 Vertex AI API，不需二次轉換。
+   讀完即可送進 Agent Platform API，不需二次轉換。
 2. 函式 save_chat_history 寫入一筆對話紀錄到 chat_history collection，並帶三層安全防護：
    單筆 content 超過 2000 字元就截斷、單一 session 超過 100 筆就刪最舊。
 """

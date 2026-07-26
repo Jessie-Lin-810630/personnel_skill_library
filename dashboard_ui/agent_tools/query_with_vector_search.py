@@ -1,17 +1,17 @@
 """query 向量化並對 Atlas 執行 $vectorSearch，回傳 top-K 相關 chunk。
 
 職責: 接收使用者輸入的 query 文字，
-      呼叫 Vertex AI gemini-embedding-2 將其向量化（與 ETL task06 同一向量空間），
+      呼叫 Agent Platform gemini-embedding-2 將其向量化（與 ETL task06 同一向量空間），
       再對 MongoDB Atlas note_vectors_multimodal 執行 $vectorSearch，
       回傳 top-K 筆相關 chunk。
 
 依賴:
-  - google-genai SDK（Vertex AI，與 ETL task06 相同 embedding model，確保向量空間一致）
+  - google-genai SDK（Agent Platform，與 ETL task06 相同 embedding model，確保向量空間一致）
   - pymongo (MongoDB 連線)
 
 Required .env keys:
-    GCP_PROJECT_ID                    Vertex AI project id.
-    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI service account JSON path.
+    GCP_PROJECT_ID                    Agent Platform project id.
+    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform service account JSON path.
 
 注意:
   embedding model 與入庫側（task06_obsidian_embed_etl/t_chunk_embed.py）必須 1:1 對齊：
@@ -43,12 +43,12 @@ VECTOR_COLLECTION = NoteCollections.VECTOR
 
 
 def _get_embed_client() -> genai.Client:
-    """初始化指向 Vertex AI 的 google-genai client (限定給 location=us 供 embedding 模型用)。
+    """初始化指向 Agent Platform 的 google-genai client (限定給 location=us 供 embedding 模型用)。
 
     與 connect_to_google_genai.get_genai_client 分開，因為該函式只調用在 us-central1 的模型。
 
     Returns:
-        指向 Vertex AI (location=us) 的 google-genai Client 物件。
+        指向 Agent Platform (location=us) 的 google-genai Client 物件。
 
     Raises:
         EnvironmentError: 缺少 GCP_PROJECT_ID 或 AGENT_PLATFORM_USER_CREDENTIALS 時拋出。
