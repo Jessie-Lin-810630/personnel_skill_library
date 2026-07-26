@@ -96,26 +96,29 @@ task07_silver_service/
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `page_id` | OneNote 頁面 ID | String | Graph API |
-| `html_sha_hash` | 該版本 HTML 的 sha256 | String | Bronze Extract |
-| `timestamp` | 此筆 log 寫入 MongoDB 的時間 | ISODate | Silver Transform 執行時間 |
-| `model` | 使用的 LLM 模型 | String | 常數 `gemini-2.5-flash` |
-| `cache_hit` | 是否能取得快取 (=沿用生成過的 md)? | Bool | 快取查找結果 |
-| `trigger` | 觸發原因（on_demand / regenerate） | String | 呼叫參數 |
-| `status` | 該次結果（success / failure） | String | Silver Transform |
-| `input_tokens` / `output_tokens` / `total_tokens` | 消耗的 token 數；使用快取時均為 0；應呼叫但呼叫失敗時為 null | Int32 / null |  Gemini usage metadata |
-| `latency_ms` | LLM 呼叫耗時 | Int32 | `time.perf_counter()` |
-| `error_msg` | 錯誤訊息 | String / null | 例外處理 |
+| `page_id` | OneNote 頁面 ID | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `html_sha_hash` | 該版本 HTML 的 sha256 | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `timestamp` | 此筆 log 寫入 MongoDB 的時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `log_enrichment_call()` |
+| `event_type` | 事件類型（固定 `llm_enrichment_call`） | String | `task07_common/audit_log.py` 的 `log_enrichment_call()` |
+| `model` | 使用的 LLM 模型 | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `cache_hit` | 是否能取得快取 (=沿用生成過的 md)? | Bool | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `trigger` | 觸發原因（on_demand / regenerate） | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `status` | 該次結果（success / failure） | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `input_tokens` / `output_tokens` / `total_tokens` | 消耗的 token 數；使用快取時均為 0；應呼叫但呼叫失敗時為 null | Int32 / null | `t_enrich_html_to_markdown.py` 的 `_call_llm()` |
+| `latency_ms` | LLM 呼叫耗時 | Int32 | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `environment` | 執行環境（local / dev / prod） | String | `task07_common/audit_log.py` 的 `log_enrichment_call()` |
+| `error_msg` | 錯誤訊息 | String / null | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
 
 ## Collection 2 — `onenote_note_metadata`
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `enriched_md_path` | enriched 後的 md 在 GCS 的路徑 | String | Silver Load |
-| `md_md5_hash` | enriched 後的 md 的 GCS md5 | String | GCS blob metadata |
-| `enriched_md_exported_at` | enriched md 匯出時間 | ISODate | Silver Load |
-| `status` | 資料生命週期狀態 | String | Silver 判斷 |
-| `updated_at` | 更新時間 | ISODate | `task07_common/audit_log.py` 集中維護 |
+| `enriched_md_path` | enriched 後的 md 在 GCS 的路徑 | String | `task07_silver_service/l_save_markdown.py` 的 `save_enriched_md()` |
+| `md_md5_hash` | enriched 後的 md 的 GCS md5 | String | `task07_common/gcs.py` 的 `upload_text()` |
+| `enriched_md_exported_at` | enriched md 匯出時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `now_utc()` |
+| `status` | 資料生命週期狀態 | String | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `error_msg` | 錯誤訊息（成功為 null） | String / null | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
+| `updated_at` | 更新時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `upsert_version_meta()` |
 
 > status: LLM call 執行順利時，status 將會從 `bronze_stored` 變化成 `fetched`、然後`pending_review`。若失敗，則從 `bronze_stored` 變化成 `fetched`，最後 `fetched_failed`。此欄位在 Gold 服務執行時，status 將覆蓋上新的值。
 
