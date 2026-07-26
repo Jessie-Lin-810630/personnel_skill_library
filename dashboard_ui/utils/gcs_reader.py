@@ -2,22 +2,13 @@
 
 1. 函式 read_text 從指定 bucket 讀取 HTML 或 md 文字內容，找不到時回傳空字串。
 2. 函式 read_bytes_as_base64 讀取圖片 blob 並轉成 base64 字串，供頁面內嵌顯示。
-
-Optional .env keys:
-    SOURCE_BUCKET   GCS data lake bucket (defaults to onenote-vaults).
 """
 
 import base64
-import os
 from functools import lru_cache
 
-from dotenv import load_dotenv
 from google.cloud import storage
 from loguru import logger
-
-load_dotenv()
-
-SRC_BUCKET = os.getenv("SOURCE_BUCKET", "onenote-vaults")
 
 
 @lru_cache(maxsize=1)
@@ -54,9 +45,10 @@ def read_bytes_as_base64(src_bucket: str, blob_path: str) -> str:
 
 
 def _split_gs_uri(uri: str) -> tuple[str, str]:
-    """gs://bucket/key... → (bucket, key)。非 gs:// 開頭則回 (SRC_BUCKET, uri)。"""
+    """gs://bucket/key... → (bucket, key)。非 gs:// 開頭則回 ("", uri) 讓上游函式讀取失敗並記 warning。"""
     if not uri.startswith("gs://"):
-        return SRC_BUCKET, uri
+        logger.warning(f"Not a gs:// URI: {uri}")
+        return "", uri
     bucket, _, key = uri[len("gs://") :].partition("/")
     return bucket, key
 
