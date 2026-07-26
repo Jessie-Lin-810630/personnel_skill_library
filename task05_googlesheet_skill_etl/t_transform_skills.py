@@ -198,7 +198,8 @@ def build_summary_for_radar(df: pd.DataFrame, radar_plot_name) -> pd.DataFrame:
     df_group["level"] = pd.cut(df_group["單軸總分"], bins=bins, labels=labels, right=False).astype(int)
 
     df_group["雷達圖名稱"] = radar_plot_name
-    df_group["snapshot_date"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    # snapshot_date 存 datetime 物件、但只表示到日（時分秒毫秒歸零），供以日為粒度的複合鍵 upsert 與排序。
+    df_group["snapshot_date"] = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     df_final = df_group.loc[
         :,
