@@ -322,7 +322,6 @@ google-genai, google-auth, google-cloud-storage
 ```
 ONENOTE_CLIENT_ID=                # Azure App Registration Client ID（公用用戶端）
 ONENOTE_GCS_BUCKET=               # 資料湖 bucket（預設 onenote-vaults）
-ONENOTE_NOTEBOOK_IDS=             # （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇
 GCS_USER_CREDENTIALS=             # GCS service account JSON 路徑
 AGENT_PLATFORM_USER_CREDENTIALS=  # Agent Platform API service account JSON 路徑
 GCP_PROJECT_ID=                   # GCP 專案 ID

@@ -74,16 +74,21 @@ task07_silver_service/
 - **地端開發**：把 key/value 寫進專案根目錄 `.env`（複製 `.env.example` 後填入）。
 - **雲端部署**：改存 GCP Secret Manager，容器啟動時注入為環境變數（見 [(Option 3)](#option-3-run-as-cloud-run-service)）。
 
-| 變數名稱                          | 說明                                                                | 預設值             | 必填 |
+| 變數名稱                          | 說明                                                                | .env.example 預設值             | 必填 |
 | --------------------------------- | ------------------------------------------------------------------- | ----------------- | --- |
 | `MONGO_ALTAS_URI`                 | MongoDB Atlas 連線字串                                              | 無，需自訂         | ✅  |
 | `MONGO_DB_NAME`                   | 目標 database 名稱                                                  | skill_dashboard | ✅  |
 | `GCP_PROJECT_ID`                  | Agent Platform 專案 ID                      | 無，需自訂         | ✅  |
+| `ENVIRONMENT`              | 執行環境名稱                                              |  無，需自訂<br>([只能賦值為 local、dev、或 prod 其中之一](../task07_common/audit_log.py))  |  ✅  |
 | `AGENT_PLATFORM_USER_CREDENTIALS` | **地端執行時**才需要：呼叫 Agent Platform Gemini 用的 service account JSON key 檔路徑。雲端執行不需要此變數 | 無，地端需自訂 | 地端 ✅ |
 | `GCS_USER_CREDENTIALS`            | **地端執行時**才需要：讀 `raw-notes/` html、寫 `processed-notes/` md 用的 GCS service account JSON key 檔路徑。雲端執行不需要此變數。 | 無，地端需自訂 | 地端 ✅ |
-| `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  |  onenote-vaults  | 選填 (若不定義此環境變數，腳本函式內亦預設傳入 onenote-vaults) |
+| `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  | onenote-vaults  | 選填 (若未宣告此環境變數，腳本函式內亦預設使用 onenote-vaults，程式不會拋例外) |
 
 > **如何備妥 service account JSON key**：GCP Console → IAM & Admin → Service Accounts → 建立 SA（GCS 讀寫授予 `Storage Object User`；Agent Platform 授予 `Agent Platform User`）→ Keys → Add Key → JSON，下載後存到專案內（例如 `./env/`），在 `.env` 填入 JSON key 檔的路徑。
+
+> **地端執行的憑證接線**（地端執行需解除兩處註解）：
+> - **GCS**：取消 [t_enrich_html_to_markdown.py](./t_enrich_html_to_markdown.py) 的 `t_enrich_html_to_markdown()` 中「地端測試跑下面區塊」的註解後，程式便會從 `GCS_USER_CREDENTIALS` 讀取憑證來連上 GCS。該處呼叫的 `get_client_on_premise()` 與 [`task07_common/gcs.py`](../task07_common/gcs.py) 其他函式呼叫的 `_get_client()` 共用同一個 global `_client`，因此只要在此連線一次，其他 [`task07_common/gcs.py`](../task07_common/gcs.py) 內的函式不需要大幅改動，都能使用這份憑證。
+> - **Agent Platform**：取消 [t_enrich_html_to_markdown.py](./t_enrich_html_to_markdown.py) 的 `_get_genai_client()` 中「地端測試跑下面區塊」的註解後，程式便會從 `AGENT_PLATFORM_USER_CREDENTIALS` 讀取憑證來連上 Agent Platform。
 
 
 # Schema of Collections (Tables) in Database of MongoDB Atlas
@@ -154,7 +159,8 @@ curl -X POST http://localhost:8002/enrich \
 ## (Option 1) Run on-premise without Docker Container
 
 1. 建立兩個 GCP service account：一個授予 `Storage Object User`（讀 html／寫 processed md），一個授予 `Agent Platform User`（呼叫 LLM）；各下載 JSON key 存到專案內（例如 `./env/`），並在 `.env` 分別把 `GCS_USER_CREDENTIALS`、`AGENT_PLATFORM_USER_CREDENTIALS` 設為對應路徑。
-2. 在專案根目錄啟動 Flask 服務（監聽 8002）：
+2. 依 [Configuration](#configuration) 的「地端執行的憑證接線」指示解除腳本中的註解。
+3. 在專案根目錄啟動 Flask 服務（監聽 8002）：
 
     ```bash
     poetry run python -m task07_silver_service.app
@@ -162,7 +168,7 @@ curl -X POST http://localhost:8002/enrich \
 
 ## (Option 2) Run on-premise with Docker Container
 
-1. 完成 Option 1 的步驟 1（兩個 SA JSON key）。
+1. 完成 Option 1 的[步驟 1–2](#option-1-run-on-premise-without-docker-container)（兩個 SA JSON key、解除註解）。
 2. 確認 Docker Desktop 已安裝且 daemon 執行中。
 3. 從根目錄 build image：
 
@@ -187,7 +193,7 @@ docker run --rm --env-file ./.env \
 ## (Option 3) Run as Cloud Run Service
 
 1. **Service Account**：使用 `psd-enrich-task`，授予 `Agent Platform User`、`Storage Object User`、`Secret Manager Secret Accessor`。
-2. **Secret Manager**：把 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`（及選填 `ONENOTE_GCS_BUCKET`）存為 secrets。
+2. **Secret Manager**：把 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`（及選填 `ONENOTE_GCS_BUCKET`）存為 secrets。憑證接線的兩處註解維持原狀（不做 Option 1 步驟 2 的解除），GCS 與 Agent Platform 皆改由 `psd-enrich-task` 的 ADC 供給。
 3. **Build image**（Cloud Run 監聽的 port 需在容器內對齊，通常改對外 8080）：
 
     ```bash

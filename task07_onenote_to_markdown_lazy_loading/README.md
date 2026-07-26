@@ -72,9 +72,9 @@ task07_common/
 | `ONENOTE_CLIENT_ID`    | Azure App Registration Client ID（公用用戶端，Notes.Read scope）     | 無，需自訂         | ✅  |
 | `MONGO_ALTAS_URI`      | MongoDB Atlas 連線字串                                              | 無，需自訂         | ✅  |
 | `MONGO_DB_NAME`        | 目標 database 名稱                                                  | skill_dashboard | ✅  |
-| `GCS_USER_CREDENTIALS` | **地端執行時**才需要：寫入 `raw-notes/` 用的 GCS service account JSON key 檔路徑。雲端跑 Cloud Run 時由 runtime SA 提供 ADC，不需此變數 | 無，地端需自訂 | 地端 ✅ |
-| `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  |  onenote-vaults  | 選填 (若不定義此環境變數，腳本函式內亦預設傳入 onenote-vaults) |
-| `ONENOTE_NOTEBOOK_IDS` | JSON array，指定要下載的 notebook ID。省略則於終端機互動選擇          | 無（互動選擇）     | 選填 |
+| `ENVIRONMENT`              | 執行環境名稱                                              |  無，需自訂<br>([只能賦值為 local、dev、或 prod 其中之一](../task07_common/audit_log.py))  |  ✅  |
+| `GCS_USER_CREDENTIALS` | 寫入 `raw-notes/` 用的 GCS service account JSON key 檔路徑。 | 無，需自訂 | ✅ |
+| `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  |  onenote-vaults  | 選填 (若未宣告此環境變數，腳本函式內亦預設使用 onenote-vaults，程式不會拋例外) |
 
 > **如何取得 `ONENOTE_CLIENT_ID`**：Azure Portal → App registrations → 註冊一個「公用用戶端（行動與桌面）」應用程式、加入 `Notes.Read` 委派權限，複製其 Application (client) ID。首次執行會走裝置流程，終端機顯示一組代碼供在瀏覽器登入授權。
 
