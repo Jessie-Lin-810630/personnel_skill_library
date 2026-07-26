@@ -7,13 +7,8 @@
 
 設計要點：
 - 不在 ETL 主動執行；提供 t_enrich_html_to_markdown(page_id, dt) 函式供 UI on-demand 呼叫。
-- 服務級守門：LLM API 連續失敗達門檻則暫停 on-demand 一段時間，期間筆記維持
-  bronze_stored、不懲罰單一筆記；取代原本綁「單筆記版本次數」的斷路器。
-- regenerate quota：同一 html_hash 最多 regenerate 2 次 (per-note 成本上限)。
-
-Required .env keys:
-    AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Vertex AI Gemini service account JSON.
-    GCP_PROJECT_ID                    GCP project ID for Vertex AI.
+- LLMServiceGuard：LLM API 連續失敗達門檻則暫停 on-demand 一段時間，期間筆記維持 bronze_stored。
+- regenerate quota：同一 html_hash 最多 regenerate 2 次。
 """
 
 import os
@@ -43,7 +38,7 @@ load_dotenv()
 RESHAPE_MODEL = "gemini-2.5-flash"
 REGENERATE_QUOTA = 2
 
-# 內嵌圖片以 gs:// URI 直接交給 Vertex AI 多模態判讀，副檔名 → mime type
+# 內嵌圖片以 gs:// URI 直接交給 Agent Platform 多模態判讀，副檔名 → mime type
 _IMG_MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -120,12 +115,12 @@ _guard = _LLMServiceGuard()
 
 
 def _get_genai_client() -> genai.Client:
-    """初始化指向 Vertex AI 的 google-genai client (限定給 location=us-central1 模型用)。
+    """初始化指向 Agent Platform 的 google-genai client (限定給 location=us-central1 模型用)。
 
     與 query_with_vector_search._get_embed_client 分開，因為該函式只調用在 us 的模型。
 
     Returns:
-        指向 Vertex AI (location=us-central1) 的 google-genai Client 物件。
+        指向 Agent Platform (location=us-central1) 的 google-genai Client 物件。
 
     Raises:
         EnvironmentError: 缺少 GCP_PROJECT_ID 或 AGENT_PLATFORM_USER_CREDENTIALS 時拋出。
@@ -301,6 +296,9 @@ def t_enrich_html_to_markdown(
     Returns:
         dict: {status, cache_hit, md_path, circuit_open, error}；不同分支帶不同欄位。
     """
+    # # 地端執行的話，加跑下面一行區塊：
+    # gcs.get_client_on_premise()
+
     # 1. 組裝後續 enriched document markdown 在 GCS 上的存放路徑前綴字
     meta = get_version_meta(page_id, dt)
     if not meta:

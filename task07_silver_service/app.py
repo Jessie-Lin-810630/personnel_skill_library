@@ -13,11 +13,15 @@ Usage:
 Required .env keys:
     MONGO_ALTAS_URI                  MongoDB Atlas connection URI.
     MONGO_DB_NAME                    MongoDB database name.
-    AGENT_PLATFORM_USER_CREDENTIALS  (On-premise only) Vertex AI Gemini service account JSON.
-    GCP_PROJECT_ID                   GCP project ID for Vertex AI.
+    AGENT_PLATFORM_USER_CREDENTIALS  (On-premise only) Agent Platform Gemini service account JSON;
+                                     uncomment the on-premise block in _get_genai_client() to use it.
+    GCS_USER_CREDENTIALS             (On-premise only) GCS service account JSON; uncomment the
+                                     on-premise block in t_enrich_html_to_markdown() to use it.
+    GCP_PROJECT_ID                   GCP project ID for Agent Platform.
+    ENVIRONMENT                      Deploymeny environment. Either of local, dev or prod.
 
 Optional .env keys:
-    ONENOTE_GCS_BUCKET             GCS data lake bucket (defaults to onenote-vaults).
+    ONENOTE_GCS_BUCKET               GCS data lake bucket (defaults to onenote-vaults).
 """
 
 from dotenv import load_dotenv
