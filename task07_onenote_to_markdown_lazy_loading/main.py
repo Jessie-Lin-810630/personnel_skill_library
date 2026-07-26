@@ -9,7 +9,8 @@ Usage:
 Required .env keys:
     ONENOTE_CLIENT_ID      Azure App Registration Client ID (public client, Notes.Read scope).
     ONENOTE_GCS_BUCKET     GCS bucket serving as the data lake.
-    GCS_USER_CREDENTIALS   (On-premise only) GCS service account JSON.
+    ENVIRONMENT            Deploymeny environment. Either of local, dev or prod.
+    GCS_USER_CREDENTIALS   GCS service account JSON.
 """
 
 from dotenv import load_dotenv

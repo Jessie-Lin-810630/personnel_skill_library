@@ -4,20 +4,8 @@
 有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata（status=bronze_stored、
 含 attached_images 圖片血緣與 topic 初判）。
 本層完全不呼叫 LLM；Silver enrichment 改由 UI on-demand 觸發。
-
-Usage:
-    poetry run python -m task07_onenote_to_markdown_lazy_loading.e_onenote_download
-
-Required .env keys:
-    ONENOTE_CLIENT_ID                Azure App Registration Client ID (public client, Notes.Read scope).
-    ONENOTE_GCS_BUCKET               GCS bucket serving as the data lake.
-    GCS_USER_CREDENTIALS   (On-premise only) GCS service account JSON.
-
-Optional .env keys:
-    ONENOTE_NOTEBOOK_IDS   JSON array of notebook IDs; interactive select if omitted.
 """
 
-import json
 import os
 import re
 import sys
@@ -715,7 +703,7 @@ def download_notebooks(
 def e_onenote_download() -> int:
     """Bronze Extract 入口：取得 token、決定 notebook 清單、下載並回傳新版本數。
 
-    取得 token → 從 ONENOTE_NOTEBOOK_IDS 讀取或互動選擇 notebook →
+    取得 token → 從互動模式選擇要下載得 notebook →
     以今日 dt 呼叫 download_notebooks() → 回傳本次寫入 GCS 的新版本數。
 
     Returns:
@@ -726,14 +714,9 @@ def e_onenote_download() -> int:
     limiter = RateLimiter()
     dt = date.today().isoformat()
 
-    ids_from_env = os.getenv("ONENOTE_NOTEBOOK_IDS", "").strip()
-    if ids_from_env:
-        notebook_ids = json.loads(ids_from_env)
-        logger.info(f"Using ONENOTE_NOTEBOOK_IDS from .env: {notebook_ids}")
-    else:
-        logger.info("Fetching notebook list...")
-        notebooks = list_notebooks(headers, limiter, app, cache)
-        notebook_ids = prompt_selection(notebooks)
+    logger.info("Fetching notebook list...")
+    notebooks = list_notebooks(headers, limiter, app, cache)
+    notebook_ids = prompt_selection(notebooks)
 
     if not notebook_ids:
         logger.warning("No notebooks selected. Exiting.")
