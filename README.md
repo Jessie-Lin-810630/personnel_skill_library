@@ -109,7 +109,8 @@ personnel_skill_library/            # 專案根目錄
 先 clone：
 
 ```bash
-git clone https://github.com/Jessie-Lin-810630/personnel_skill_library.git
+git clone -b main --single-branch --depth 1 https://github.com/Jessie-Lin-810630/personnel_skill_library.git
+
 cd personnel_skill_library
 ```
 
