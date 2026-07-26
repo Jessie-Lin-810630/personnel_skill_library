@@ -84,6 +84,7 @@ task05_googlesheet_skill_etl/
 
 | **欄位名稱**                               | **欄位語意**              | **資料型別**             | **值來源**                          |
 | :----------------------------------------- | :----------------------- | :----------------------- | :---------------------------------- |
+| `_id`                                      | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId   | MongoDB 自動產生                    |
 | `雷達軸`                                   | 所屬雷達軸（複合鍵之一）   | String                   | Google Sheet `生技` worksheet       |
 | `經手任務`                                 | 任務名稱（複合鍵之一）     | String                   | Google Sheet `生技` worksheet       |
 | `複雜性 - 純紀錄`                          | 複雜性能力旗標            | Number (Integer 0/1)     | Google Sheet（經 Transform: 轉換為 0 或 1）         |
@@ -109,6 +110,7 @@ task05_googlesheet_skill_etl/
 
 | **欄位名稱**                               | **欄位語意**              | **資料型別**             | **值來源**                          |
 | :----------------------------------------- | :----------------------- | :----------------------- | :---------------------------------- |
+| `_id`                                      | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId   | MongoDB 自動產生                    |
 | `雷達軸`                                   | 所屬雷達軸（複合鍵之一）   | String                   | Google Sheet `資料工程` worksheet   |
 | `經手任務`                                 | 任務名稱（複合鍵之一）     | String                   | Google Sheet `資料工程` worksheet   |
 | `複雜性 - 純紀錄與理解`                    | 複雜性能力旗標            | Number (Integer 0/1)     | Google Sheet（經 Transform: 轉換為 0 或 1）         |
@@ -134,31 +136,33 @@ task05_googlesheet_skill_etl/
 
 | **欄位名稱**       | **欄位語意**                      | **資料型別**        | **值來源**                                           |
 | :----------------- | :-------------------------------- | :------------------ | :--------------------------------------------------- |
+| `_id`              | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId    | MongoDB 自動產生                                     |
+| `snapshot_date`    | 快照日（複合鍵之一）               | Date (ISO 8601) (時間部分均歸零) | Load                            |
 | `雷達圖名稱`       | 雷達圖名稱（複合鍵之一）           | String              | Transform                                            |
 | `雷達軸`           | 雷達軸（複合鍵之一）               | String              | Transform                                            |
 | `經手任務個數`     | 該軸任務數量                       | Integer             | collection `skill_scores_biotech` / `skill_scores_data_eng` |
-| `任務經驗值`       | round(log2(經手任務個數), 6)    | Number (Float)      | Transform                                            |
+| `任務經驗值`       | round(log(經手任務個數), 6)    | Number (Float)      | Transform                                            |
 | `各軸向任務最高分` | 該軸單項任務最高分                 | Integer             | collection `skill_scores_biotech` / `skill_scores_data_eng` |
 | `單軸總分`         | round(各軸向任務最高分 + 任務經驗值, 2) | Number (Float) | Transform                                            |
 | `level`            | 雷達軸層級（1–5，雷達圖軸刻度）     | Integer             | Transform：依單軸總分區間映射                        |
-| `snapshot_date`    | 快照日（複合鍵之一）               | Date (YYYY-MM-DD) | task05 Load 階段自訂函式                             |
 
 - example of a row in JSON
 
 ```json
 {
+  "_id" : ObjectId("6a0517...."),
+  "snapshot_date": ISODate("2026-05-09T00:00:00.000+0000")
   "雷達圖名稱": "雷達圖2資料工程",
   "雷達軸": "Orchestration",
   "經手任務個數": 4,
-  "任務經驗值": 2.0,
+  "任務經驗值": 0.60206,
   "各軸向任務最高分": 27,
-  "單軸總分": 29.0,
+  "單軸總分": 27.6,
   "level": 5,
-  "snapshot_date": "2026-05-09"
 }
 ```
 
-> **`level` 分級規則（for developer）**：`< 5` → 1、`5 ≤ score < 12` → 2、`12 ≤ score < 15` → 3、`15 ≤ score < 23` → 4、`≥ 23` → 5。各能力旗標的完整權重表見 [`doc/branch_etl_pipeline_summary.md`](../doc/branch_etl_pipeline_summary.md) 的「計分規則」。
+> **`level` 分級規則（for developer）**：`< 5` → 1、`5 ≤ score < 12` → 2、`12 ≤ score < 15` → 3、`15 ≤ score < 23` → 4、`≥ 23` → 5。各能力旗標的完整權重表見 [`doc/branch_etl_pipeline_summary.md「計分規則」`](../doc/branch_etl_pipeline_summary.md#計分規則)。
 
 > Collection 1 & 2  & 3 的實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
 
@@ -176,7 +180,7 @@ task05 的資料來源為一份 Google Sheet，**您可複製[這份 Personal Sk
 
 | 生技雷達軸                          | 資料工程雷達軸                |
 | ----------------------------------- | ----------------------------- |
-| 製程技術 (細胞分注、反應器操作) 操作能力 | ELT/ELT pipeline 操作與維護   |
+| 製程技術 (細胞分注、反應器操作) 操作能力 | ETL/ELT pipeline 操作與維護   |
 | 流程設計能力                        | 雲端 (GCP) 服務技術           |
 | 跨專案數據整合能力                  | Orchestration                 |
 | 文件撰寫能力                        | 資料庫資料模型設計            |
