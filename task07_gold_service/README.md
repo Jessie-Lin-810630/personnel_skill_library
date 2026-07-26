@@ -40,7 +40,7 @@ flowchart LR
     Proc[GCS<br/>`processed-notes/` md] -. approve 讀 md .-> G
     Raw[GCS<br/>`raw-notes/` 圖片] -. approve 讀圖片 .-> G
     G -. approve 複製 md 與圖片 .-> Arch[GCS<br/>`archived-notes/`]
-    C3[(Collection<br/>`onenote_note_metadata`)] <-. 讀版本／upsert 歸檔或退件 .-> G
+    C3[(Collection<br/>`onenote_note_metadata`)] <-. 讀版本／upsert 歸檔或退件筆記的品質欄位 .-> G
 ```
 
 - **端點**：接收 request.POST 後，解析request body 的 `page_id`、`dt`、`role`、`action`判斷是否要回覆 400、404、409、422、500 或 200。
@@ -94,20 +94,22 @@ task07_gold_service/
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `archived_md_path` | 歸檔筆記在 GCS 的完整路徑 | String | Gold approve 複製後 |
-| `archived_at` | 歸檔時間 | ISODate | Gold Load |
-| `attached_images.archived_image_path` | 歸檔後圖片路徑（approve 回填） | String | Gold approve 複製後 |
-| `attached_images.archived_image_md5` | 歸檔後圖片 md5（approve 回填） | String | Gold GCS blob metadata |
-| `md_frontmatter` | 歸檔／退件筆記的 frontmatter（tags/date/type/alias） | Object | Gold 解析 md |
-| `md_body` | 內文品質（valid_img_count/word_count/recomputed_at） | Object | Gold 資料品質寫入階段 |
-| `dismatched_img_count` | 失效圖片數（檔名未命中歸檔/raw 圖片者） | Integer | Gold 資料品質寫入階段 |
-| `md_has_dismatched_img` | 是否有失效圖片 | Bool | Gold 資料品質寫入階段 |
-| `topic` | 以 `md_frontmatter.tags` 加頁面標題重算的主題 | String | Gold metadata 更新階段 |
-| `status` | 生命週期狀態（`archived` / `review_closed` / `archive_failed`） | String | Gold 判斷 |
-| `review_result` | 審核結果（`approved` / `rejected` / `overwritten`） | String | Gold metadata 更新階段 |
-| `reviewed_by_role` | 審核者角色 | String | 視[互動頁面](../dashboard_ui/README.md#configuration)登入層級 |
-| `reviewed_at` | 審核時間 | ISODate | Gold Load |
-| `updated_at` | 更新時間 | ISODate | `task07_common/audit_log.py` 集中維護 |
+| `archived_md_path` | 歸檔筆記在 GCS 的完整路徑 | String | `task07_gold_service/l_archive_note.py` 的 `archive_note()` |
+| `md_md5_hash` | 歸檔 md 的 GCS md5（approve 覆蓋 silver 值、以 gold 為主） | String | `task07_common/gcs.py` 的 `copy_blob()` |
+| `archived_at` | 歸檔時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `now_utc()` |
+| `attached_images.archived_image_path` | 歸檔後圖片路徑（approve 回填） | String | `task07_gold_service/l_archive_note.py` 的 `archive_note()` |
+| `attached_images.archived_image_md5` | 歸檔後圖片 md5（approve 回填） | String | `task07_common/gcs.py` 的 `copy_blob()` |
+| `md_frontmatter` | 歸檔／退件筆記的 frontmatter（tags/date/type/alias） | Object | `task07_gold_service/l_archive_note.py` 的 `_build_md_quality_meta()` |
+| `md_body` | 內文品質（valid_img_count/word_count/recomputed_at） | Object | `task07_gold_service/l_archive_note.py` 的 `_build_md_quality_meta()` |
+| `dismatched_img_count` | 失效圖片數（檔名未命中歸檔/raw 圖片者） | Integer | `task07_gold_service/l_archive_note.py` 的 `_build_md_quality_meta()` |
+| `md_has_dismatched_img` | 是否有失效圖片 | Bool | `task07_gold_service/l_archive_note.py` 的 `_build_md_quality_meta()` |
+| `topic` | 以 `md_frontmatter.tags` 加頁面標題重算的主題 | String | `task07_common/topic.py` 的 `infer_topic()` |
+| `status` | 生命週期狀態（`archived` / `review_closed` / `archive_failed`） | String | `task07_gold_service/l_archive_note.py` 的 `archive_note()`／`reject_note()` |
+| `review_result` | 審核結果（`approved` / `rejected` / `overwritten`） | String | `task07_gold_service/l_archive_note.py` 的 `archive_note()`／`reject_note()` |
+| `reviewed_by_role` | 審核者角色（role 來自[審查頁](../dashboard_ui/README.md#configuration)登入層級） | String | `task07_gold_service/l_archive_note.py` 的 `archive_note()`／`reject_note()` |
+| `reviewed_at` | 審核時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `now_utc()` |
+| `error_msg` | 錯誤訊息（成功為 null） | String / null | `task07_gold_service/l_archive_note.py` 的 `archive_note()`／`reject_note()` |
+| `updated_at` | 更新時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `upsert_version_meta()` |
 
 > **status 與 review_result 欄位值流轉**：
 >(1) approve 成功 → `status=archived`、`review_result=approved`。
