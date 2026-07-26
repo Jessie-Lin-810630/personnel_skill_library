@@ -279,9 +279,9 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             img_archive_paths.append(archived_uri)
             attached_images.append({**img, "archived_image_path": archived_uri, "archived_image_md5": archived_md5})
     except Exception as e:  # noqa: BLE001
-        upsert_version_meta(page_id, dt, set_fields={"error_msg": f"[gold:copy] {e}"})
+        upsert_version_meta(page_id, dt, set_fields={"status": "archive_failed", "error_msg": f"[gold:copy] {e}"})
         logger.exception(f"[gold] 歸檔複製失敗: page_id={page_id}, dt={dt}")
-        return {"status": meta.get("status"), "error": f"[gold:copy] {e}"}
+        return {"status": "archive_failed", "error": f"[gold:copy] {e}"}
 
     # 4. 更新 metadata：歸檔狀態與路徑
     upsert_version_meta(
