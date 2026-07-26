@@ -74,7 +74,7 @@ def run_task01_v2():
 
 if __name__ == "__main__":
     # # --------------------------------------------------------------------
-    # # 本地運行時請 comment out 以下後執行。
+    # # 本地運行時請 uncomment 以下後執行。
     # from pathlib import Path
     # from dotenv import load_dotenv
 
