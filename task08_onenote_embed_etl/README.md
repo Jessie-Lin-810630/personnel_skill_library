@@ -26,7 +26,7 @@
 
 # DataFlow
 
-主要邏輯是從 [task07](../task07_gold_service/README.md) 已歸檔、尚未向量化的 Obsidian 筆記中挑出待處理者，執行資料切塊、向量化，最終寫入 MongoDB Atlas 的 `note_vectors_multimodal`。
+主要邏輯是從 [task07](../task07_gold_service/README.md) 已歸檔、尚未向量化的 OneNote 筆記中挑出待處理者，執行資料切塊、向量化，最終寫入 MongoDB Atlas 的 `note_vectors_multimodal`。
 
 ```mermaid
 flowchart LR
@@ -101,7 +101,7 @@ task08_onenote_embed_etl/
 | `chunk_total` | 該筆記的總 chunk 數 | Integer | Transform 向量化產出 |
 | `tags` | 筆記標籤 | Array (String) | `onenote_note_metadata` 的 `md_frontmatter.tags` |
 | `note_type` | 筆記類型 | String | `onenote_note_metadata` 的 `md_frontmatter.type` |
-| `date` | 筆記日期 | ISODate | `onenote_note_metadata` 的 `md_frontmatter.date` |
+| `date` | 筆記日期 | Date (ISO 8601) \| null | `onenote_note_metadata` 的 `md_frontmatter.date`（無有效日期時為 null） |
 | `section` | chunk 在內文所屬的標題路徑 | String | Transform 的切塊函式 |
 | `content` | chunk 原始文字 | String | Transform 的切塊函式 |
 | `image_paths` | 該 chunk 引用圖片在 archived layer 的路徑 | Array (String) | Transform 解析 chunk 內圖片路徑後產出 |
@@ -127,17 +127,20 @@ task08_onenote_embed_etl/
 
 ```json
 {
-  "md_path": "gs://onenote-vaults/archived-notes/.../dt=2026-07-01/MongoDB 索引設計.md",
-  "file_name": "MongoDB 索引設計.md",
+  "_id": ObjectId("6a6304..."),
+  "md_path": "gs://onenote-vaults/archived-notes/.../dt=2026-07-08/CHO Cell代謝.md",
+  "file_name": "CHO Cell代謝",
   "chunk_index": 0,
-  "chunk_total": 4,
-  "tags": ["mongodb", "index", "database"],
-  "note_type": "knowledge_summary",
-  "date": "2026-07-01T00:00:00Z",
-  "section": "索引設計 > 複合索引",
-  "content": "複合索引的欄位順序遵循 ESR 原則...![](_images/res-abc.png)",
-  "image_paths": ["gs://onenote-vaults/archived-notes/.../dt=2026-07-01/_images/res-abc.png"],
-  "embedding": [0.0123, -0.0045, ..., 0.0312] // 長度等同 vector dimension
+  "chunk_total": 5,
+  "tags": ["cho-cell", "tca-cycle", "warburg-effect", "dhfr"],
+  "note_type": "knowledge-summary",
+  "date": ISODate("2026-07-08T00:00:00.000+0000"),
+  "section": "CHO Cell 代謝 > Lactate > 糖質新生",
+  "content": "### 糖質新生  \n*   相當耗能，需消耗 6 ATP。  \n![機器產生的替代文字: Lacta te Precursor Alanine Glycerol Glucose](_images/0-6405132e916140c3ac8e2cbdc585c9f0!1-A5F7F5395D4FB9F!209.png)  \nAI生成圖釋:\n此圖示列出了糖質新生（Gluconeogenesis）的幾種前驅物。\n這些前驅物包括乳酸（Lactate）、丙胺酸（Alanine）和甘油（Glycerol）。",
+  "image_paths": [
+    "gs://onenote-vaults/archived-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-08/_images/0-6405132e916140c3ac8e2cbdc585c9f0!1-A5F7F5395D4FB9F!209.png"
+  ],
+  "embedding": [0.01, -0.02, ..., 0.0312] // 長度等同 vector dimension
 }
 ```
 > Collection 與其他 tasks 的 collection 實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
@@ -216,4 +219,4 @@ task08 資料來自 **task07 gold service 的執行結果**，您應該先開通
 > 建議額外創一支單純的 service account `cloud-scheduler-trigger`，僅給予 `Cloud Run Developer` 角色。
 > 建議排在 task07 歸檔之後執行，向量才會跟上最新歸檔的版本。
 
-> **若您 fork 本專案分支**：repo 內已備好 GitHub Actions workflow（`.github/workflows/deploy_task08_onenote_embed_etl.yml`），當 push 到 `develop` 且 `task08_onenote_embed_etl/**` 或 `docker/Dockerfile.task08` 有變動時，會自動 build image、push 到 Artifact Registry 並 deploy 到 Cloud Run Job。要啟用它，需自行在 GCP 申請 Workload Identity Federation（讓 GitHub Actions 免存 SA JSON key 即可認證 GCP）。若您不打算 fork，忽略本註即可——上述 1–6 步手動流程已足夠。
+> **若您 fork 本專案分支**：repository 內已備好 GitHub Actions workflow（`.github/workflows/deploy_task08_onenote_embed_etl.yml`），當 push 到 `develop` 且 `task08_onenote_embed_etl/**` 或 `docker/Dockerfile.task08` 有變動時，會自動 build image、push 到 Artifact Registry 並 deploy 到 Cloud Run Job。要啟用它，需自行在 GCP 申請 Workload Identity Federation（讓 GitHub Actions 免存 SA JSON key 即可認證 GCP）。若您不打算 fork，忽略本註即可——上述 1–6 步手動流程已足夠。

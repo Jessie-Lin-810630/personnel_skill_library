@@ -1,18 +1,21 @@
-# Feature Branch: `feature/html-to-markdown` — Task07 v02（純 Lazy Loading 改版）開發執行成果摘要
+# Feature Branch: `feature/html-to-markdown` — Task07 v02 與 Task08 開發執行成果摘要
 
-> **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：(1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）；(2) **省 multimodal LLM enrichment 的 token**：ETL 階段完全不呼叫 LLM，所有 enrichment 改為 UI **on-demand** 觸發，並以 `html_sha_hash` 為冪等鍵建立 md 快取，使用者重複點擊同一版本不再產生額外 token。
+> **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown 的 data pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：
+> (1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）。
+> (2) **省 multimodal LLM enrichment 的 token**：轉成 markdown 的過程並非自動呼叫 LLM 來執行，而是改為 UI **on-demand** 觸發才呼叫 LLM 做文檔語意增強擴寫 (enrichment) 同時存為 markdown，並以 `html_sha_hash` 為冪等鍵為 生成的 enriched markdown 建議快取機制，當使用者重複點擊同一版本時，就沿用已經生成過的 enriched markdown 、不再產生額外 token。
+> (3) **向量化視文件的生命週期狀態而選擇性呼叫 embedding model**：當 task07 v02 開發完成後進行 task08 開發，task08 需讀取 task07 v02 執行完成後更新的 onenote note metadata 表，以 SQL query 結果決定要批次處理哪些筆記的向量化工作，並非全數文檔都做向量化。此外，向量化開始後，其程式執行步驟，幾乎參照 task06 v02 設計，然後存放在同一個向量資料庫中。
 
 > **開發起始日期**：2026-07-01（於 `feature/html-to-markdown` 分支內另建 v02 變體資料夾）
 
 > **需求來源**：[`task07_onenote_versioned_etl_hand_over_v2.md`](./task07_onenote_versioned_etl_hand_over_v2.md)
 
-> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB Atlas / GCS 資料湖 / Azure App Registration（公用用戶端，委派式驗證）/ Vertex AI Gemini
+> **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB Atlas / GCS 資料湖 / Azure App Registration（公用用戶端，委派式驗證）/ Agent Platform (前 Vertex AI)
 
 > **與 v01 的差異**：
 > - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 主鍵為 `page_id`，一個筆記只存一個版本。
 > - v02 改存 onenote 筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；ETL 只做到 Bronze layer；呼叫 LLM 生成 markdown 由前端 on-demand 觸發 (Silver layer)；人工核可後歸檔 (Gold layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
 
-> **三服務拆分（未來各自部署容器）**：v02 已從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點 8002）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點 8003）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化再解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task01_v2/task06_v2）共寫同一張向量表 `note_vectors_multimodal`。
+> - **三服務拆分部署容器**：task07 v02 從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task06_v2）共寫同一張向量表 `note_vectors_multimodal`。
 
 ---
 
@@ -128,7 +131,7 @@ ETL 主腳本**只做到 Bronze，全程不呼叫 LLM**。流程：
 2. **regenerate 配額檢查**：`trigger="regenerate"` 且同一 `html_sha_hash` 已成功 regenerate ≥ `REGENERATE_QUOTA (=2)` 次則拒絕（per-note 成本上限）
 3. **html_sha_hash 快取查找**：非 regenerate 時 `find_cached_md_by_hash()` 找相同 `html_sha_hash` 且 `enriched_md_path != null` 的既有版本——**命中則零 token**（寫一筆 `cache_hit=True, tokens=0` 的 C2 log、upsert C3 進 `pending_review`、直接回傳既有 md_path）
 4. **服務級斷路器**：cache miss 時先檢查 `_LLMServiceGuard`——LLM API **連續失敗達門檻（預設 5 次）即開斷路冷卻（預設 300s）**，期間筆記維持 `bronze_stored`、**不懲罰單一筆記**、不鎖使用者操作（取代 v01 綁「單筆記版本次數」的斷路器）
-5. **多模態 LLM 呼叫**：從 GCS 下載 HTML、`convert_img_tag_to_md_str()` 把 `<img>` 轉 `![alt](src)` 後 `get_text()` 取純文字；連同 C3 `attached_images[].raw_image_path` 內的 `gs://` 圖片 URI 一併送入 Vertex AI Gemini（`gemini-2.5-flash`），要求 model 實際判讀每張圖並生成「AI生成圖釋」；structured JSON 輸出 schema 強制 `tags`（5–10 中英混合關鍵字）、`alias`（1–2 個簡短別名）、`new_content`（重整後 Markdown）；`temperature=0.2`
+5. **多模態 LLM 呼叫**：從 GCS 下載 HTML、`convert_img_tag_to_md_str()` 把 `<img>` 轉 `![alt](src)` 後 `get_text()` 取純文字；連同 C3 `attached_images[].raw_image_path` 內的 `gs://` 圖片 URI 一併送入 Agent Platform API（`gemini-2.5-flash`），要求 model 實際判讀每張圖並生成「AI生成圖釋」；structured JSON 輸出 schema 強制 `tags`（5–10 中英混合關鍵字）、`alias`（1–2 個簡短別名）、`new_content`（重整後 Markdown）；`temperature=0.2`
 6. **frontmatter 組合**：`_build_markdown()` 產出可被 Obsidian 開啟的 YAML frontmatter（`tags` / `date` / `type` / `alias`）；`type` 由 `_classify_note_type()` 依檔名是否含日期分類 `daily_log` / `knowledge_summary`
 7. **稽核**：每次呼叫寫 C2 `multimodal_llm_enrichment_logs`（含 `cache_hit`、`trigger`、input/output/total tokens、latency）；失敗時 token 欄位寫 `None`（非 0）以區別 cache hit
 
@@ -158,7 +161,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 ---
 
-## MongoDB Collections
+### MongoDB Collections
 > 總計三份 collections, C1, C2 and C3
 > 由 `task07_common/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
 
@@ -292,25 +295,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 > - 新增 `html_sha_hash`、`embedded_status`、`attached_images`、`topic`、`md_body`、`dismatched_img_count`/`md_has_dismatched_img`、`created_at`/`updated_at`；
 > - 欄位改名：silver md → `enriched_md_path`/`enriched_md_exported_at`、gold md → `archived_md_path`、圖片血緣由 `img_md5`/`img_path`/`img_archive_path` 三平行陣列重構為 `attached_images` Object 陣列。
 
----
-
-## Task 08 — OneNote 向量化（`task08_onenote_embed_etl/`）
-
-向量化從 task07 解耦成獨立 pipeline，目標是讓 **OneNote（task07 歸檔）** 與 **Obsidian（task01_v2 歸檔）** 兩種來源，向量化後寫入**同一張** `note_vectors_multimodal`（同一 Atlas Vector Search index），供同一條 RAG 檢索。chunk/embed/normalize 邏輯 copy 自 `task06_obsidian_embed_etl_v2`，僅替換 ingestion 與圖片解析；`task06_v2` 本分支完全不動。
-
-| 面向 | 設計 |
-|------|------|
-| gate（`e_scan_metadata.py`） | 讀 C3 挑 `status="archived"` 且 `embedded_status=false`，投影 `archived_md_path`/`md_md5_hash`/`md_frontmatter`/`page_title`/`attached_images` |
-| 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
-| 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)`（非 wiki-link），以 basename 對上 `attached_images[].archived_image_path` |
-| embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize（逐 chunk 多模態） |
-| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
-| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
-| purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
-
----
-
-## v01 → v02 關鍵差異對照
+### 補充: task07 v01 → task07 v02 關鍵差異對照
 
 | 面向 | v01（`task07_onenote_to_markdown`） | v02（`task07_onenote_to_markdown_lazy_loading`） |
 |------|-----------------------------------|-----------------------------------------------|
@@ -325,60 +310,85 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 | 變動判定鍵 | — | html 原始碼 sha256（非 Graph API `lastModifiedDateTime`） |
 
 ---
-
-## 套件依賴
+### 套件依賴
 
 ```
-pymongo, msal, requests, beautifulsoup4, python-dotenv, loguru,
+pymongo, msal, requests, beautifulsoup4, flask, python-dotenv, python-frontmatter, loguru,
 google-genai, google-auth, google-cloud-storage
 ```
 
-## .env 金鑰
+### .env 金鑰
 
 ```
 ONENOTE_CLIENT_ID=                # Azure App Registration Client ID（公用用戶端）
 ONENOTE_GCS_BUCKET=               # 資料湖 bucket（預設 onenote-vaults）
 ONENOTE_NOTEBOOK_IDS=             # （選填）JSON array，指定要下載的 notebook ID；省略則互動選擇
-GOOGLE_APPLICATION_CREDENTIALS=   # GCS service account JSON
-AGENT_PLATFORM_USER_CREDENTIALS=  # Vertex AI Gemini service account JSON
-GCP_PROJECT_ID=                   # GCP 專案 ID（Vertex AI）
+GCS_USER_CREDENTIALS=             # GCS service account JSON 路徑
+AGENT_PLATFORM_USER_CREDENTIALS=  # Agent Platform API service account JSON 路徑
+GCP_PROJECT_ID=                   # GCP 專案 ID
 MONGO_ALTAS_URI=                  # MongoDB Atlas 連線字串
 MONGO_DB_NAME=                    # MongoDB 資料庫名稱
 ENVIRONMENT=                      # local | dev | prod
 ```
 
----
+## Task 08 — OneNote 向量化（`task08_onenote_embed_etl/`）
 
-## Unit Tests
+目標是讓 **OneNote (task07 v2)** 歸檔筆記，向量化後寫入**跟 task06 v2 同一張的向量資料表** `note_vectors_multimodal`（同一 Atlas Vector Search index），供同一條 RAG 檢索。task08 處理邏輯幾乎承襲 task06 v2，僅有 task08 在向量化前處理階段，解析圖片語法的手法不一樣。
 
-以 `unittest` 撰寫，全部 mock（不連 MongoDB / GCS / LLM）；在 import 前先注入假 env 以繞過模組層守門。四個測試檔涵蓋 Bronze/Silver 服務本體、Silver 端點、Gold 端點與 task08 向量化。
+| 面向 | 設計 |
+|------|------|
+| gate（`e_scan_metadata.py`） | 讀 C3 挑 `status="archived"` 且 `embedded_status=false`，投影 `archived_md_path`/`md_md5_hash`/`md_frontmatter`/`page_title`/`attached_images` |
+| 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
+| 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)` (*此處就是跟 task06 v2 不同點*)，以 basename 對上 `attached_images[].archived_image_path` |
+| embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize |
+| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
+| CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
+| purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
 
-**`tests/test_task07_onenote_to_markdown_v02.py`（Bronze + Silver 本體 + task07_common）**
+### MongoDB Collections
 
-| 測試類別 | 測試對象 | 測試重點 |
-|---------|---------|---------|
-| `LogApiCallTests` | `log_api_call()` | 寫入 `html_sha_hash`/`downloaded`/`event_type`、MongoDB 失敗不 raise |
-| `LogEnrichmentCallTests` | `log_enrichment_call()` | cache hit 時 tokens=0、`trigger`/`event_type` 正確 |
-| `UpsertVersionMetaTests` | `upsert_version_meta()` | filter key `(page_id, dt)`、`$set` 帶 `updated_at`、insert 補 `created_at`、db 失敗不 raise |
-| `HashingTests` / `GcsPrefixTests` / `SanitizeTests` | hashing / gcs / sanitize | 決定性 hash、raw/processed prefix、禁用字元替換 |
-| `ApiGetTests` | `api_get()` | 4xx 不重試、傳輸層錯誤重試、重試耗盡收尾 log 後 raise、timeout 常數 |
-| `DownloadNotebooksFailedBranchTests` | `download_notebooks()` | 失敗路徑 `fetched_failed`、`$set`/`$setOnInsert` 無 key 重疊 |
-| `DownloadNotebooksSuccessBranchTests` | `download_notebooks()` | 成功路徑寫 `html_sha_hash`/`html_md5_hash`/`attached_images`(raw 端)/`topic`，不含舊欄位名 |
-| `CircuitGuardTests` / `ClassifyNoteTypeTests` / `ConvertImgTagTests` / `CallLlmMultimodalTests` | Silver 本體 helper | 斷路器、note_type 分類、img 轉 md、多模態 contents/token usage |
-| `EnrichPageTests` | on-demand 入口 | not_found / cache-hit 略過 LLM / circuit-open 維持 bronze / regenerate 配額超限 |
-
-**`tests/test_silver_service_endpoint.py`（`POST /enrich`）**：缺欄位 400、trigger 非法 400、查無版本 404、業務結果 200、未預期例外 500。
-
-**`tests/test_gold_service_endpoint.py`（`POST /archive` + 歸檔/退件本體）**：端點狀態碼（400/404/409/422/200）、`_build_md_quality_meta`（`md_frontmatter` 不含 valid_img、`md_body.valid_img_count`、`dismatched_img_count`/`md_has_dismatched_img`）、approve 退役同頁版本（`html_sha_hash` 判 overwritten/rejected）、reject 回寫品質欄位、型別正規化。
-
-**`tests/test_task08_onenote_embed.py`（向量化）**：gate 過濾與投影、markdown `![]()` 圖片 basename 解析、向量 doc 結構（`md_path`=archived 路徑、L2 normalize）、切塊為空仍算已處理、失敗檔不列入 CAS、先刪後插、`md_md5_hash` 守衛 CAS 命中/未命中。
-
-執行方式：
-```bash
-poetry run python -m unittest discover -s tests
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
+```json
+{
+    "_id" : ObjectId("6a6304..."),
+    "md_path" : "gs://onenote-vaults/archived-notes/.../.../.../dt=2026-07-08/CHO Cell代謝.md",
+    "file_name" : "CHO Cell代謝",
+    "chunk_index" : 0,
+    "chunk_total" : 5,
+    "tags" : [
+        "cho-cell",
+        "tca-cycle",
+        "warburg-effect",
+        "dhfr"
+    ],
+    "note_type" : "knowledge-summary",
+    "date" : ISODate("2026-07-08T00:00:00.000+0000"),
+    "section" : "CHO Cell 代謝 > Lactate > 糖質新生",
+    "content" : "### 糖質新生  \n*   相當耗能，需消耗 6 ATP。  \n![機器產生的替代文字: Lacta te Precursor Alanine Glycerol Glucose](_images/0-6405132e916140c3ac8e2cbdc585c9f0!1-A5F7F5395D4FB9F!209.png)  \nAI生成圖釋:\n此圖示列出了糖質新生（Gluconeogenesis）的幾種前驅物。\n這些前驅物包括乳酸（Lactate）、丙胺酸（Alanine）和甘油（Glycerol）。\n這些物質可以在細胞內被轉化為葡萄糖（Glucose），以補充能量或維持血糖水平。\n這強調了糖質新生在細胞能量平衡中的重要作用。",
+    "image_paths" : [
+        "gs://onenote-vaults/archived-notes/lucky460721/生技製劑筆記本/General technical knowledge/dt=2026-07-08/_images/0-6405132e916140c3ac8e2cbdc585c9f0!1-A5F7F5395D4FB9F!209.png"
+    ]
+    "embedding": [0.01, -0.02, ..., 0.0312] // 長度等同 vector dimension
+  }
 ```
 
-> **測試狀態**：全套 **154 個測試全數通過**（`Ran 154 tests OK`）。測試 import／`@patch` 目標與函式名皆已對齊三服務 package（`task07_common`、`task07_silver_service`、`task07_gold_service`）與 `task08_onenote_embed_etl`。
+### 套件依賴
+
+```
+pymongo, python-dotenv, python-frontmatter, loguru, google-genai, google-auth,
+google-cloud-storage, langchain-text-splitters
+```
+
+### .env 金鑰
+
+```
+ONENOTE_GCS_BUCKET=               # 資料湖 bucket（預設 onenote-vaults）
+GCS_USER_CREDENTIALS=             # GCS SA JSON 路徑（地端會被寫進 GOOGLE_APPLICATION_CREDENTIALS 供 ADC）
+AGENT_PLATFORM_USER_CREDENTIALS=  # Vertex AI gemini-embedding-2 service account JSON
+GCP_PROJECT_ID=                   # GCP 專案 ID（Vertex AI）
+MONGO_ALTAS_URI=                  # MongoDB Atlas 連線字串
+MONGO_DB_NAME=                    # MongoDB 資料庫名稱
+```
 
 ---
 
@@ -397,9 +407,9 @@ poetry run python -m unittest discover -s tests
 **後續待開發**
 - [x] 端到端本地實跑（清空 C1/C2/C3 後重跑 Bronze→Silver→Gold→task08，核對新欄位）——需真實 GCS/Mongo/LLM
 - [x] 跨分支：`note_vectors_multimodal` 的 task06_v2 `raw_md_path`→`md_path`。
-- [ ] 回到 `dashboard-ui` 分支上開發使用頁面。
-- [ ] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
+- [x] 回到 `dashboard-ui` 分支上開發使用頁面。
+- [x] 雲端部署（Bronze 每週 Cloud Run Job；Silver/Gold/task08 各自 Cloud Run 容器，權限分離）
 
 ---
 
-*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-09 更新至三服務拆分、C3 schema 對齊與 task08 落地。*
+*本摘要涵蓋 `feature/html-to-markdown` 分支中 task07 v02（`task07_common` + Bronze ETL + `task07_silver_service` + `task07_gold_service`）與 task08 向量化（`task08_onenote_embed_etl/`）的所有腳本與測試，於 2026-07-01 起記錄，2026-07-26 總彙整。*
