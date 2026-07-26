@@ -85,7 +85,7 @@ if not st.session_state.get("authenticated"):
         st.markdown(
             f"""
 <div style="
-    background: rgba(255,255,255,0.03);
+    background: rgba(200,100,0,0.03);
     border: 1px solid #2a3550;
     border-radius: 16px;
     padding: 2rem 2rem 1.5rem;
@@ -117,7 +117,7 @@ if not st.session_state.get("authenticated"):
 
         st.markdown(
             """
-    <p style="color:#4a5568; font-size:0.78rem; text-align:center; margin-top:1rem;">
+    <p style="color:#e0e8f8; font-size:0.78rem; text-align:center; margin-top:1rem;">
         此平台僅供授權人員使用<br>登入即代表您同意以指定角色進行操作
     </p>
 </div>

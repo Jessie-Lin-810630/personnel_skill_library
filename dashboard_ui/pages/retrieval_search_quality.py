@@ -137,7 +137,7 @@ else:
     chunks_df["outlier_type"] = chunks_df.apply(classify_outlier, axis=1)
     chunks_df["file_name"] = chunks_df["file_path"].apply(lambda x: x.split("/")[-1] if isinstance(x, str) else x)
     color_map_outlier = {
-        "Similarity score 與 Rerank score 屬常態": color_map["LIGHTBLUE"],
+        "Similarity score 與 Rerank score 屬常態": color_map["GREEN"],
         "Similarity score 偏高、Rerank score 偏低": color_map["RED"],
         "Similarity score 偏低、Rerank score 偏高": color_map["ORANGE"],
     }
@@ -177,7 +177,7 @@ else:
     outlier_counts = chunks_df["outlier_type"].value_counts()
     o1, o2, o3 = st.columns(3)
     o1.metric(
-        "正常 chunks",
+        "🟢 正常 chunks",
         int(outlier_counts.get("Similarity score 與 Rerank score 屬常態", 0)),
         help="Similarity 和 Rerank 大致正相關",
     )
@@ -277,7 +277,7 @@ with col_right:
 
         fig_tree = px.treemap(
             treemap_df,
-            path=["heat", "file_name"],
+            path=[px.Constant("all"), "heat", "file_name"],
             values="display_count",
             color="display_count",
             # color_discrete_map=color_map_heat,
