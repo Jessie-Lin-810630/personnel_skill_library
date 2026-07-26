@@ -191,31 +191,34 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
 **`obsidian_note_metadata`**（每筆 = 一份 `.md`，唯一鍵 `raw_md_path`）
 ```json
 {
-  "_id" : ObjectId("6a4f4f4820b3b24ebe23b72f"),
-  "note_user_id": "lucky460721",
+  "_id" : ObjectId("6a4f4f..."),
+  "note_user_id": "lucky12345",
   "notebook": "data-engineering",
   "section": "01-daily-logs",
-  "file_name": "20250909 xxx.md",
-  "raw_md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
+  "file_name": "20250909 Mac安裝Python.md",
+  "raw_md_path": "gs://personal-vaults/raw-notes/.../01-daily-logs/20250909 Mac安裝Python.md",
   "raw_md_md5_hash": "abc==",
-  "raw_md_updated_at": ISODate("..."),
-  "archived_md_path": "gs://personal-vaults/archived-notes/.../xxx.md",
+  "raw_md_updated_at": ISODate("2026-07-09T09:09:40.349+0000"),
+  "archived_md_path": "gs://personal-vaults/archived-notes/.../01-daily-logs/20250909 Mac安裝Python.md",
   "archived_md_md5_hash": "def==",
-  "archived_at": ISODate("..."),
+  "archived_at": ISODate("2026-07-21T02:11:24.601+0000"),
   "attached_images": [
     { "raw_image_path": "raw-notes/.../_attachment/x.png",
       "raw_image_md5": "...",
       "archived_image_path": "gs://.../archived-notes/.../_attachment/x.png", "archived_image_md5": "..." }
   ],
-  "archived_md_frontmatter": { "tags": ["python"], "date": ISODate("..."), "type": "daily-log", "alias": [] },
+  "archived_md_frontmatter": { "tags": ["python"],
+                               "date": ISODate("2025-09-09T00:00:00.000+0000"),
+                               "type": "daily-log",
+                               "alias": ["python環境安裝"] },
   "topic": "python",              // 由 tags＋檔名比對 TOPIC_KEYWORDS 推導；全不中時預設 "other-in-de"
   "word_count": 1250,
   "status": "archived",           // archived / deleted / error
   "embedded_status": false,       // task06 v2 完成向量化時翻 true
   "error_msg": "",
-  "created_at": ISODate("..."),
-  "updated_at": ISODate("..."),
-  "embedded_at": ISODate("...")   // task06 v2 CAS 翻 true 時蓋
+  "created_at": ISODate("2026-07-21T02:11:25.057+0000"),
+  "updated_at": ISODate("2026-07-24T06:21:18.247+0000"),
+  "embedded_at": ISODate("2026-07-24T06:21:18.247+0000") // task06 v2 寫入
 }
 ```
 > 決策：attachment 改**單表內嵌**而非 v1 之外的獨立 collection 加 `_id` 參考。因圖片掛在各筆記自己的 `_attachment/`、天然不跨筆記共用，正規化去重的效益低，卻要固定擔 join 與 N+1 成本。
@@ -223,7 +226,7 @@ GCS bucket `personal-vaults` 的 **Bronze 層 `raw-notes/`**，由本機以 `gcl
 **`notes_summary`**（固定每週一次快照，快照日之日期部分作為唯一鍵 `snapshot_date`，快照日當天只存最後一次快照資料）
 ```json
   {
-    "_id" : ObjectId("6a4f4f4820b3b24ebe23b72f"),
+    "_id" : ObjectId("6a4f4f..."),
     "snapshot_date" : ISODate("2026-07-09T00:00:00.000+0000"),  // 快照日當天只認一筆，故不存時、分、秒、毫秒。
     "archived_notes" : 84,
     "by_tag_in_archived_notes" : {

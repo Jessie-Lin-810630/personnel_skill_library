@@ -108,13 +108,13 @@ task01_obsidian_etl_v2/
 | `_id` | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId | MongoDB 自動產生 |
 | `raw_md_path` | 原始筆記在 Bronze 層 GCS 的完整路徑（Upsert key） | String | Bronze bucket name + blob.name |
 | `raw_md_md5_hash` | 原始筆記在 GCS 的 MD5，**MD5 變更會觸發 CDC** | String | Bronze GCS blob metadata |
-| `raw_md_updated_at` | 原始筆記在 GCS 的最後修改時間 | ISODate | Bronze GCS blob metadata |
+| `raw_md_updated_at` | 原始筆記在 GCS 的最後修改時間 | Date (ISO 8601) | Bronze GCS blob metadata |
 | `archived_md_path` | 歸檔筆記在 Gold 層 GCS 的完整路徑 | String | Gold bucket name + blob.name |
 | `archived_md_md5_hash` | 歸檔筆記在 GCS 的 MD5，用於完整性校驗 | String | Gold GCS blob metadata |
-| `archived_at` | 歸檔到 Gold 層的時間 | ISODate | Load task 執行完成當下 |
+| `archived_at` | 歸檔到 Gold 層的時間 | Date (ISO 8601) | Load task 執行完成當下 |
 | `archived_md_frontmatter` | 歸檔筆記的 Frontmatter（含下方四個子欄位） | Object | Transform 解析 markdown frontmatter |
 | `archived_md_frontmatter.tags` | 標籤列表，**影響 RAG 檢索品質** | Array (String) | markdown frontmatter |
-| `archived_md_frontmatter.date` | 筆記開始記錄的日期 | ISODate | markdown frontmatter |
+| `archived_md_frontmatter.date` | 筆記開始記錄的日期 | Date (ISO 8601) \| null | markdown frontmatter |
 | `archived_md_frontmatter.type` | 筆記類型（日誌／知識總整／專案） | String | markdown frontmatter |
 | `archived_md_frontmatter.alias` | 筆記別名／可讀標題 | Array (String) | markdown frontmatter |
 | `attached_images` | 筆記內圖片連結與 MD5 列表（含下方四個子欄位） | Array (Object) | GCS blob metadata + markdown body |
@@ -131,8 +131,9 @@ task01_obsidian_etl_v2/
 | `status` | 流程處置狀態（archived / deleted / error） | String | ETL 流程判斷後指派 |
 | `embedded_status` | 自上次更新後是否已向量化 | Bool | Load 初始化 false，task06 v2 完成後翻 true |
 | `error_msg` | 處理過程錯誤訊息（無則空字串） | String | 系統錯誤捕捉例外訊息 |
-| `created_at` | 該筆文檔建立時間 | ISODate | Load task 執行時間 |
-| `updated_at` | 該筆文檔更新時間 | ISODate | 任何新增/更新欄位的發生時間 |
+| `created_at` | 該筆文檔建立時間 | Date (ISO 8601) | Load task 執行時間 |
+| `updated_at` | 該筆文檔更新時間 | Date (ISO 8601) | 任何新增/更新欄位的發生時間 |
+| `embedded_at` | 完成向量化的時間 | Date (ISO 8601) | task06 v2 完成向量化後於此寫入 true |
 
 > **Index**：`raw_md_path`。
 >
@@ -148,38 +149,38 @@ task01_obsidian_etl_v2/
   "file_name": "20250909 xxx.md",
   "raw_md_path": "gs://personal-vaults/raw-notes/.../xxx.md",
   "raw_md_md5_hash": "abc==",
-  "raw_md_updated_at": "2026-07-09T09:11:01Z",
+  "raw_md_updated_at": ISODate("2026-07-09T09:11:01.000+0000"),
   "archived_md_path": "gs://personal-vaults/archived-notes/.../xxx.md",
   "archived_md_md5_hash": "def==",
-  "archived_at": "2026-07-10T11:00:19Z",
+  "archived_at": ISODate("2026-07-10T11:00:19.000+0000"),
   "attached_images": [
     { "raw_image_path": "raw-notes/.../_attachment/x.png", "raw_image_md5": "...",
       "archived_image_path": "gs://.../archived-notes/.../_attachment/x.png", "archived_image_md5": "..." }
   ],
-  "archived_md_frontmatter": { "tags": ["python"], "date": "2026-06-18T00:00:00Z", "type": "daily-log", "alias": [] },
+  "archived_md_frontmatter": { "tags": ["python"], "date": ISODate("2026-06-18T00:00:00.000+0000"), "type": "daily-log", "alias": [] },
   "topic": "python",
   "word_count": 1250,
   "status": "archived",
   "embedded_status": false,
   "error_msg": "",
-  "created_at": "2026-07-10T11:00:19Z",
-  "updated_at": "2026-07-10T11:00:19Z"
+  "created_at": ISODate("2026-07-10T11:00:19.000+0000"),
+  "updated_at": ISODate("2026-07-10T11:00:19.000+0000")
 }
 ```
 
 ## Collection 2 — `notes_summary`
 
-- Obsidian 與 OneNote 筆記庫的狀態快照，固定頻率（例如每週一次），快照日當天以最後一次執行結果為主。
+- Obsidian 與 OneNote 筆記庫，`obsidian_note_metadata` 與 `onenote_note_metadata` 兩表的狀態快照，固定頻率（例如每週一次），快照日當天以最後一次執行結果為主。
 - Upsert key：`snapshot_date`。
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
 | `_id` | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId | MongoDB 自動產生 |
-| `snapshot_date` | 快照日（Upsert key，只取日期不取時間） | ISODate | Load task 執行當下日期 |
-| `total_notes` | 兩表中 status 為 archived 或 rejected 的筆記總數 | Integer | `obsidian_note_metadata` + `onenote_note_metadata` |
-| `archived_notes` | 兩表中 `status=archived` 的筆記數 | Integer | `obsidian_note_metadata` + `onenote_note_metadata` |
-| `rejected_notes` | 兩表中 `status=rejected` 的筆記數 | Integer | `obsidian_note_metadata` + `onenote_note_metadata` |
-| `embedded_notes` | 兩表中 `embedded_status=true` 的筆記數 | Integer | `obsidian_note_metadata` + `onenote_note_metadata` |
+| `snapshot_date` | 快照日（Upsert key，只取日期不取時間） | Date (ISO 8601) (時間部分均歸零) | Load task 執行當下日期 |
+| `total_notes` | 兩表中 status 為 archived 或 rejected 的筆記總數 | Integer | 兩表  |
+| `archived_notes` | 兩表中 `status=archived` 的筆記數 | Integer | 兩表  |
+| `rejected_notes` | 兩表中被退件（`status=review_closed` 且 `review_result=rejected`）的筆記數 | Integer | 兩表  |
+| `embedded_notes` | 兩表中 `embedded_status=true` 的筆記數 | Integer | 兩表  |
 | `by_tag_in_archived_notes` | 歸檔筆記的標籤出現頻率 | Object | 兩表 |
 | `by_type_in_archived_notes` | 歸檔筆記的 type 出現頻率 | Object | 兩表 |
 | `by_topic_in_archived_notes` | 歸檔筆記的 topic 出現頻率 | Object | 兩表 |
