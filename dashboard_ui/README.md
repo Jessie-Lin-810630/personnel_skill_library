@@ -112,6 +112,7 @@ dashboard_ui/
 | `GCP_PROJECT_ID`                  | Agent Platform 專案 ID            | 無，需自訂         | ✅ |
 | `AGENT_PLATFORM_USER_CREDENTIALS` | 頁面 'ai_knowledge_agent' & 'OneNote_review' 呼叫 Agent Platform 用的 service account JSON key 檔路徑。| 無，地端需自訂 | **地端執行時** |
 | `COHERE_API_KEY`                  | 頁面 'ai_knowledge_agent' 使用 reranker model 時所需要的 API key | 無，需自申請 | ✅ |
+| `AI_AGENT_RATE_LIMIT` | 頁面 'ai_knowledge_agent' 單次對話中，能呼叫 LLM 的次數上限 | 預設 20 | 選填 |
 | `GOOGLE_APPLICATION_CREDENTIALS`  | 用於從 GCS 讀取圖像讓頁面 'knowledge_factory'&'OneNote_review' 渲染。 | 無，地端需自訂 | **地端執行時** |
 | `SILVER_ENDPOINT_URL`             | 頁面 'OneNote_review' 呼叫 Silver enrichment service URL                          | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8002/enrich` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8002/enrich`<br>**雲端環境執行時**: 部署實際 URL |
 | `GOLD_ENDPOINT_URL`               | 頁面 'OneNote_review' 呼叫 Gold archive service URL                 | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8003/archive` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8003/archive`<br>**雲端環境執行時**: 部署實際 URL|
