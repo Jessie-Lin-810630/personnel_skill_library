@@ -132,7 +132,7 @@ dashboard_ui/
 | :--- | :--- | :--- | :--- |
 | `_id` | MongoDB 自動生成的唯一識別碼 | ObjectId | MongoDB 自動產生 |
 | `session_id` | 使用者點「開新對話」時生成的 uuid4，區分不同次對話 | String | pages/ai_knowledge_agent.py |
-| `timestamp` | 紀錄寫入時間 | ISODate | save_chat_history() 執行時間 |
+| `timestamp` | 紀錄寫入時間 | Date (ISO 8601) | save_chat_history() 執行日期時間 |
 | `agent_type` | 此筆發生在與 `router` / `rag` / `planning` 的互動 | String | 各 agent 傳入固定值 |
 | `role` | 此筆是 `model` 或 `user` 的訊息 | String | 各 agent 流程傳入 |
 | `content` | 訊息文字（router+user 為 null；rag+user 為原始查詢；rag+model 為最後答案；超 2000 字元截斷並記 warning） | String | 依 agent 流程傳入模型輸出或使用者輸入 |
@@ -149,6 +149,78 @@ dashboard_ui/
     | `rewritten_query` | query rewriter 重寫後、用於向量搜尋的查詢語句 | String | rewrite_query() |
     | `recommended_tags` | query rewriter 推薦塞入 rewritten_query 的 tags，以增強 recall | Array (String) | rewrite_query() |
 
+    - example of a row in JSON
+        ```json
+        {
+            "_id" : ObjectId("6a65..."),
+            "session_id" : "8b491863-84a0-41bb-b83b-7aefe6d812d7",
+            "agent_type" : "rag",
+            "role" : "model",
+            "content" : "您好，關於 MongoDB `$regex` 的修飾符，目前的筆記片段中並未直接
+            列出有哪些修飾符可供使用。\n\n筆記中僅有提到 `$regex` 的語法結構為
+             `/文字模板pattern/修飾符modifier`，並提供了一個範例圖片
+              `MondoDB_regex_operator_image01.png`，但圖片內容無法在此呈現。\n\n
+              **來源：** [MongoDB - MySQL語法對照 (資料表&文檔集層級 - READ).md] ....",
+            "timestamp" : ISODate("2026-07-26T01:42:59.069+0000"),
+            "metadata" : {
+                "model" : "gemini-2.5-flash-lite",
+                "retrieved_chunks" : [
+                    {
+                        "file_path" : "gs://personal-vaults/archived-notes/...
+                        /MongoDB - MySQL語法對照 (資料表&文檔集層級 - READ).md",
+                        "chunk_index" : 18,
+                        "score" : 0.8647,
+                        "rerank_score" : 0.5787
+                    },
+                    {
+                        "file_path" : "gs://personal-vaults/archived-notes/...
+                        /MongoDB - MySQL語法對照 (資料表&文檔集層級 - READ).md",
+                        "chunk_index" : 17,
+                        "score" : 0.8675,
+                        "rerank_score" : 0.2628
+                    },
+                    {
+                        "file_path" : "gs://personal-vaults/archived-notes/...
+                        /MongoDB - MySQL語法對照 (資料表&文檔集層級 - Query Optimization).md",
+                        "chunk_index" : 1,
+                        "score" : 0.8698,
+                        "rerank_score" : 0.1874
+                    },
+                    {
+                        "file_path" : "gs://personal-vaults/archived-notes/...
+                        /MongoDB - MySQL 語法對照 (資料表&文檔集層級 - 索引).md",
+                        "chunk_index" : 1,
+                        "score" : 0.8625,
+                        "rerank_score" : 0.1555
+                    },
+                    {
+                        "file_path" : "gs://personal-vaults/archived-notes/...
+                        /MongoDB - MySQL語法對照 (資料表&文檔集層級 - READ).md",
+                        "chunk_index" : 25,
+                        "score" : 0.8627,
+                        "rerank_score" : 0.1306
+                    }
+                ],
+                "note_files" : [
+                    "MongoDB - MySQL語法對照 (資料表&文檔集層級 - Query Optimization).md",
+                    "MongoDB - MySQL 語法對照 (資料表&文檔集層級 - 索引).md",
+                    "MongoDB - MySQL語法對照 (資料表&文檔集層級 - READ).md"
+                ],
+                "search_optimize_method" : "rewrite_expand_rerank",
+                "rewritten_query" : "MongoDB `$regex` 語法中，修飾符有哪些？",
+                "recommended_tags" : [
+                    "mongodb",
+                    "mysql",
+                    "sql",
+                    "dql",
+                    "query",
+                    "explain",
+                    "optimize"
+                ]
+            }
+        }
+        ```
+
 - **`metadata` 內嵌欄位（當 `agent_type="router"` 且 `role="model"`）**：
 
     | **內嵌欄位** | **欄位語意** | **資料型別** | **值來源** |
@@ -158,6 +230,26 @@ dashboard_ui/
     | `model` | 使用 `method="r2_llm"` 時所配合的 model | String | types_and_constants.py |
     | `user_query` | router 接收的使用者原始查詢 | String | pages/ai_knowledge_agent.py |
 
+    - example of a row in JSON
+        ```json
+            {
+                "_id" : ObjectId("6a6566..."),
+                "session_id" : "8b491863-84a0-41bb-b83b-7aefe6d812d7",
+                "agent_type" : "router",
+                "role" : "model",
+                "content" : "rag_agent",
+                "timestamp" : ISODate("2026-07-26T01:42:55.547+0000"),
+                "metadata" : {
+                    "method" : "r2_llm",
+                    "intent_score" : 0.95,
+                    "model" : "gemini-2.5-flash-lite",
+                    "user_query" : "```\nuse <資料庫名稱>;\n
+                    db.<文檔集名稱>.find( { <欄位名稱>: { $regex:
+                    /文字模板pattern/修飾符modifier } } );\n```\n
+                    這個是我要的沒錯，追問 修飾符 有哪些?"
+                }
+            }
+        ```
 - 當 `role="user"` 時，`metadata` 內嵌欄位為空物件({})。
 
 
