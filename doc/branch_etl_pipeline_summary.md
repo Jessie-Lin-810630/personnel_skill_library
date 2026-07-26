@@ -828,19 +828,28 @@ MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內�
 **`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
 ```json
 {
-  "md_path": "gs://personal-vaults/archived-notes/.../xxx.md",
-  "file_name": "xxx.md",
-  "chunk_index": 0,
-  "chunk_total": 6,
-  "tags": ["python"],
-  "note_type": "daily-log",
-  "date": ISODate("..."),
-  "section": "標題 > 子標題",
-  "content": "chunk 文字，保留 ![[ ]] 寫法",
-  "image_paths": ["gs://.../archived-notes/.../_attachment/x.png"],
-  "embedding": [0.01, -0.02, "..."]
-}
+    "_id" : ObjectId("6a6304..."),
+    "md_path" : "gs://personal-vaults/archived-notes/.../data-engineering/01-daily-logs/20250910 Python資料型別-Float浮點數.md",
+    "file_name" : "20250910 Python資料型別-Float浮點數.md",
+    "chunk_index" : 0,
+    "chunk_total" : 5,
+    "tags" : [
+        "data-type",
+        "float",
+        "int",
+        "python",
+        "built-in-mathematical-methods"
+    ],
+    "note_type" : "daily-log",
+    "date" : ISODate("2025-09-10T00:00:00.000+0000"),
+    "section" : "筆記大綱",
+    "content" : "# 筆記大綱\n歸納python資料型別之二 float 與 interger 的常用函式或方法。",
+    "image_paths" : ["gs://personal-vaults/archived-notes/.../data-engineering/01-daily-logs/_attachment/diagram.png"
+    ],
+    "embedding": [0.01, -0.02, ..., 0.0312] // 長度等同 vector dimension
+  }
 ```
+
 > `embedding` 長度 1536、已 L2 normalize。需在 Atlas Console 手動建 `note_vectors_multimodal` 的 Vector Search index `obsidian_vectors_index2`，維度 1536、similarity cosine（與 task08 共用同一 index）。
 
 ### 套件依賴

@@ -102,7 +102,7 @@ task06_obsidian_embed_etl_v2/
 | `chunk_total` | 該筆記的總 chunk 數 | Integer | Transform 向量化產出  |
 | `tags` | 筆記標籤 | Array (String) | `obsidian_note_metadata` 的 `archived_md_frontmatter.tags` |
 | `note_type` | 筆記類型 | String | `obsidian_note_metadata` 的 `archived_md_frontmatter.type` |
-| `date` | 筆記日期 | ISODate | `obsidian_note_metadata` 的 `archived_md_frontmatter.date` |
+| `date` | 筆記日期 | Date (ISO 8601) \| null | `obsidian_note_metadata` 的 `archived_md_frontmatter.date`（無有效日期時為 `null`） |
 | `section` | chunk 在內文所屬的標題路徑 | String | Transform 的切塊函式 |
 | `content` | chunk 原始文本 | String | Transform 的切塊函式 |
 | `image_paths` | 該 chunk 引用的圖片之 GCS 路徑 | Array (String) | Transform 解析 chunk 內圖片路徑後產出 |
@@ -133,7 +133,7 @@ task06_obsidian_embed_etl_v2/
   "chunk_total": 6,
   "tags": ["python"],
   "note_type": "knowledge-summary",
-  "date": "2025-09-09T00:00:00Z",
+  "date": ISODate("2025-09-09T00:00:00.000+0000"),
   "section": "浮點數筆記 > 精度問題",
   "content": "浮點數在二進位下無法精確表示...![[diagram.png]]",
   "image_paths": ["gs://personal-vaults/archived-notes/.../_attachment/diagram.png"],
