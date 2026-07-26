@@ -87,19 +87,24 @@ task07_common/
 
 ## Collection 1 — `onenote_graph_api_logs`
 
-- 每筆 = 一次 Graph API 請求嘗試`downloaded=false` 代表雜湊未變動而跳過存檔。
+- 每筆 = 一次 Graph API 請求嘗試 `downloaded=false` 代表雜湊未變動而跳過存檔。
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `page_id` | OneNote 頁面 ID（非 page 型請求可為 null） | String / null | Graph API |
-| `request_id` | 同一邏輯請求的追蹤 ID（retry 共用） | String | `uuid.uuid4().hex[:12]` 或呼叫端傳入 |
-| `attempt_id` | 第幾次嘗試（首次為 1） | Integer | retry loop 計數 |
-| `status` / `status_code` | 該次 attempt 結果與 HTTP 碼（傳輸層錯誤記 0） | String / Integer | HTTP response / 例外處理 |
-| `latency_ms` | 該次請求耗時（毫秒） | Integer | `time.perf_counter()` |
-| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 冪等鍵） | String / null | Bronze Extract |
-| `html_path` | HTML 寫入 GCS 的完整路徑 | String / null | Bronze Extract |
-| `downloaded` | 本次是否實際寫入新版本到 GCS（雜湊相同則 false） | Bool | Bronze Extract |
-| `error_msg` | 錯誤訊息 (成功為 null) | String / null | HTTP response / 例外 |
+| `page_id` | OneNote 頁面 ID（若不是在 [fetch endpoint of content](#data-source) 則都會是 null） | String / null | `e_onenote_download.py` 的 `api_get()`／`download_notebooks()` |
+| `timestamp` | 該次 attempt 的寫入時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `log_api_call()` |
+| `event_type` | 事件類型（固定 `onenote_api_download`） | String | `task07_common/audit_log.py` 的 `log_api_call()` |
+| `method` | HTTP method（此 task 均為 GET） | String | `e_onenote_download.py` 的 `api_get()` |
+| `api_endpoint` | 請求的 API endpoint | String | `e_onenote_download.py` 的 `api_get()` |
+| `request_id` | 同一邏輯請求的追蹤 ID（retry 共用） | String | `e_onenote_download.py` 的 `api_get()`（`uuid.uuid4().hex[:12]`） |
+| `attempt_id` | 第幾次嘗試（首次為 1） | Integer | `e_onenote_download.py` 的 `api_get()` |
+| `status` / `status_code` | 該次 attempt 結果與 HTTP 碼（傳輸層錯誤記 0） | String / Integer | `e_onenote_download.py` 的 `api_get()`／`download_notebooks()` |
+| `latency_ms` | 該次請求耗時（毫秒） | Integer | `e_onenote_download.py` 的 `api_get()` |
+| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 冪等鍵） | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
+| `html_path` | HTML 寫入 GCS 的完整路徑 | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
+| `downloaded` | 本次是否實際寫入新版本到 GCS（雜湊相同則 false） | Bool | `e_onenote_download.py` 的 `download_notebooks()` |
+| `environment` | 執行環境（local / dev / prod） | String | `task07_common/audit_log.py` 的 `log_api_call()` |
+| `error_msg` | 錯誤訊息 (成功為 null) | String / null | `e_onenote_download.py` 的 `api_get()` |
 
 ## Collection 2 — `onenote_note_metadata`（Bronze 寫入的欄位）
 
@@ -109,28 +114,28 @@ task07_common/
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `page_id` | OneNote 頁面 ID（主鍵之一） | String | Graph API |
-| `dt` | 下載日（主鍵之一，版本鍵） | String (`YYYY-MM-DD`) | Bronze 執行日 |
-| `onenote_user_id` | 筆記使用者 id | String | section `self` URL 解析 |
-| `notebook` / `section` / `page_title` | 筆記本 / 章節 / 頁面標題 | String | Graph API |
-| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 冪等鍵） | String | Bronze Extract |
-| `html_md5_hash` | GCS html 物件 md5 | String | Bronze GCS blob metadata |
-| `html_path` | html 在 GCS 的路徑 | String | Bronze GCS bucket + blob.name |
-| `html_downloaded_at` | HTML 下載時間 | ISODate | Bronze Extract |
-| `attached_images` | 圖片路徑血緣與 md5 hash | Array (Object) | Bronze GCS blob metadata |
-| `topic` | 以頁面標題初判的主題 | String | `topic.py` |
-| `status` | 資料生命週期狀態 | String | Bronze 判斷 |
-| `embedded_status` | 是否已向量化（Bronze 初始化 false，task08 翻 true） | Bool | Bronze 初始化 |
-| `created_at` / `updated_at` | 建立 / 更新時間 | ISODate | `audit_log.py` 集中維護 |
+| `page_id` | OneNote 頁面 ID（主鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `dt` | 下載日（主鍵之一，版本鍵） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
+| `onenote_user_id` | 筆記使用者 id | String | `e_onenote_download.py` 的 `_extract_user_account()` |
+| `notebook` / `section` / `page_title` | 筆記本 / 章節 / 頁面標題 | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 冪等鍵） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
+| `html_md5_hash` | GCS html 物件 md5 | String | `task07_common/gcs.py` 的 `upload_text()` |
+| `html_path` | html 在 GCS 的路徑 | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `html_downloaded_at` | HTML 下載時間 | Date (ISO 8601) | `task07_common/audit_log.py` |
+| `attached_images` | 圖片路徑血緣與 md5 hash | Array (Object) | `e_onenote_download.py` 的 `download_notebooks()` |
+| `topic` | 以頁面標題初判的主題 | String | `task07_common/topic.py` 的 `infer_topic()` |
+| `status` | 資料生命週期狀態 | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `embedded_status` | 是否已向量化（Bronze 初始化 false，task08 翻 true） | Bool | `e_onenote_download.py` 的 `download_notebooks()` |
+| `created_at` / `updated_at` | 建立 / 更新時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `upsert_version_meta()` |
 
-> status: Bronze 任務執行完之後只會分成 `bronze_stored` 與 `fetched_failed`，於 Silver / Gold 服務執行時， status 可有更多不同變化。
+> status: Bronze 任務執行完之後只會分成 `bronze_stored` 與 `fetched_failed`，於 Silver / Gold 服務執行時，status 可有更多不同變化。
 
 > Collection 1 & 2 實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
 
 
 # Data Source
 
-Bronze 的資料來源是透過 Microsoft Graph API 存取 **個人Microsoft OneNote**，，您只需要開啟 OneNote APP 後建立任何筆記內容即會有資料可從 API 上獲取。無需額外下載準備 dataset。
+Bronze 的資料來源是透過 Microsoft Graph API 存取 **個人 Microsoft OneNote**，您只需要開啟 OneNote APP 後建立任何筆記內容即會有資料可從 API 上獲取。無需額外下載準備 dataset。
 
 | API 端點 | 用途 |
 | -------- | ---- |

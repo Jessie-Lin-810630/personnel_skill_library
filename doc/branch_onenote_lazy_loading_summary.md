@@ -168,9 +168,9 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 ```json
 {
-  "_id" : ObjectId("6a44ce421996a609c157b692"),
+  "_id" : ObjectId("6a44ce..."),
   "page_id": "0-c69860f9dd8507...",
-  "timestamp": ISODate("2026-07-01T10:00:00.012Z+0000"),
+  "timestamp": ISODate("2026-07-26T02:28:06.306+0000"),
   "event_type": "onenote_api_download",
   "method": "GET",
   "api_endpoint": ".../pages/{id}/content",
@@ -193,10 +193,10 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 ```json
 {
-  "_id": ObjectId("6a4526abcf5f1da7406adebd"),
+  "_id": ObjectId("6a4526..."),
   "page_id": "0-c69860f9dd8507...",
   "html_sha_hash": "sha256...",
-  "timestamp": ISODate("2026-07-01T10:00:00.012Z+0000"),
+  "timestamp": ISODate("2026-07-24T08:19:12.773+0000"),
   "event_type": "llm_enrichment_call",
   "model": "gemini-2.5-flash",
   "cache_hit": false,
@@ -220,10 +220,10 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 ```json
 // bronze 階段的 enriched_*/archived_*/md_frontmatter/md_body 等為 null，Silver/Gold 逐步補。
 {
-  "_id": ObjectId("6a4526abcf5f1da7406adebd"),
+  "_id": ObjectId("6a4526a..."),
   "page_id": "0-c69860f9dd8507...",
   "dt": "2026-07-01",
-  "onenote_user_id": "lucky460721",
+  "onenote_user_id": "lucky12345",
   "notebook": "工作筆記",
   "section": "資料工程",
   "page_title": "MongoDB 索引設計",
@@ -232,7 +232,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
   "html_sha_hash": "sha256...",             // 變動判定 / enrichment 冪等鍵
   "html_md5_hash": "base64...",             // GCS html 物件 md5
   "html_path": "gs://onenote-vaults/raw-notes/.../dt=2026-07-01/MongoDB 索引設計.html",
-  "html_downloaded_at": ISODate("2026-07-01T08:22:26.093+0000"),
+  "html_downloaded_at": ISODate("2026-07-08T08:20:50.848+0000"),
   "attached_images": [
     {
       "raw_image_path": "gs://onenote-vaults/raw-notes/.../_images/res-abc.png",
@@ -250,7 +250,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
   // 生命週期 / 審核
   "status": "bronze_stored",
-  "embedded_status": false,                 // task08 向量化冪等依據
+  "embedded_status": false,                 // 向量化完成進度，也是 task08 向量化冪等依據
   "review_result": null,                    // null / approved / rejected / overwritten
   "reviewed_by_role": null,                 // ML engineer / note_owner / dept_senior_specialist
   "reviewed_at": null,
@@ -265,8 +265,8 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
   "md_has_dismatched_img": null,            // dismatched_img_count > 0
 
   // 稽核時間戳（upsert_version_meta 集中維護）
-  "created_at": ISODate("2026-07-01T08:22:26.093+0000"),
-  "updated_at": ISODate("2026-07-01T08:22:26.093+0000")
+  "created_at": ISODate("2026-07-08T08:20:50.848+0000"),
+  "updated_at" : ISODate("2026-07-08T08:20:50.848+0000")
 }
 ```
 
