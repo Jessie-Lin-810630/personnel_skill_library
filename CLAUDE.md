@@ -126,6 +126,8 @@ Optional .env keys:
 > **v1 已除役、v2／lazy_loading 扶正**：`task01_obsidian_etl`、`task06_obsidian_embed_etl`、`task07_onenote_to_markdown` 三個 v1 資料夾均已淘汰，上表即為扶正後的版本。task01 過渡期仍並寫 v1 的 `obsidian_summary`，待 backfill 到 `notes_summary` 後擇期淘汰。
 
 > **分支職責**：
+> - `main` — 一切分支的最終彙整；push 到此觸發 **prod** 環境部署。
+> - `develop` — feature 分支的整合處；push 到此觸發 **dev** 環境部署。
 > - task01–task06（含 task01_v2、task06_v2）：`feature/etl-pipeline`
 > - task07（lazy_loading）的 Bronze ETL、task08：`feature/html-to-markdown`
 > - task07（lazy_loading）的 Silver／Gold 服務本體：`feature/html-to-markdown` 起草 → `feature/dashboard-ui` 定稿 → 合併回 `feature/html-to-markdown`
@@ -158,7 +160,7 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 
 **GCP 憑證**
 - `GCS_USER_CREDENTIALS` — GCS service account JSON key 的路徑。task01／task06／task08 在 `main.py` 的 `if __name__ == "__main__"` 區塊把它轉寫成 `GOOGLE_APPLICATION_CREDENTIALS`；task07 三服務由 `task07_common/gcs.py` 的 `get_client_on_premise()` 直接讀。兩條路徑都**只有地端需要、且需先解除腳本內的註解**，雲端改由 Cloud Run runtime SA 的 ADC 供給。
-- `AGENT_PLATFORM_USER_CREDENTIALS` — Agent Platform（Gemini）service account JSON key 的路徑，同樣是地端解除註解才生效（task06、task07 Silver、task08、`dashboard_ui/agent_tools/`）。
+- `AGENT_PLATFORM_USER_CREDENTIALS` — Agent Platform（前身是 Vertex AI）service account JSON key 的路徑，同樣是地端解除註解才生效（task06、task07 Silver、task08、`dashboard_ui/agent_tools/`）。
 - `GCP_PROJECT_ID` — 呼叫 Agent Platform 的 GCP 專案 ID（雲端與地端都要）。
 - `GOOGLE_APPLICATION_CREDENTIALS` — 不需為 ETL 手動填寫：它是上述轉寫的產物，或 dashboard／task07 服務在地端走 ADC 時的憑證來源。
 
@@ -171,7 +173,7 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 
 **資料湖與稽核**
 - `ONENOTE_GCS_BUCKET`（task07／task08，選填）— 資料湖 bucket 名稱，未宣告則預設 `onenote-vaults`。task01／task06 的 `personal-vaults` 是寫死在程式常數裡的，沒有對應變數。
-- `ENVIRONMENT`（task07 Bronze／Silver 必填）— 只能是 `local`／`dev`／`prod`，會寫進 audit log；未知值會 raise。task07 Gold 不讀此變數。
+- `ENVIRONMENT`（task07 Bronze／Silver 必填）— 只能是 `local`／`dev`／`prod`，會寫進 audit log；未知值會 raise。task07 Gold 不讀此變數。Silver 在雲端由 workflow 依分支寫入（`--set-env-vars ENVIRONMENT=<env>`），地端才需自己填進 `.env`。
 
 **Dashboard（`dashboard_ui/`）**
 - `SILVER_ENDPOINT_URL`、`GOLD_ENDPOINT_URL` — 審查頁 POST 的端點（本機預設 `http://localhost:8002/enrich`、`http://localhost:8003/archive`）
@@ -182,4 +184,12 @@ task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `perso
 
 ## 部署架構（Phase II+）
 
-ETL tasks 各自打包為 Docker image，透過 GitHub Actions 推送至 GCP Artifact Registry，以 Cloud Run Job 執行。Dashboard 以 Cloud Run Service 部署，開放 8080 port。機密改由 GCP Secret Manager 管理。
+每個 task 與服務各自打包 Docker image，由 `.github/workflows/deploy_*.yml`（九支，一支對一個資源）推送到 Artifact Registry repo `personal-skill-dashboard`，機密由 GCP Secret Manager 管理。
+
+**環境由分支決定**：push 到 `main` → `prod`，其餘分支（`develop`）→ `dev`。Cloud Run 資源以後綴區分（`task01-obsidian-etl-prod`／`-dev`、`dashboard-ui-prod`／`-dev`）。兩環境共用同一組 Secret Manager secrets。
+
+**Image tag 一律不可變**：同一份 image 貼三個 tag——`<sha7>`、`<env>-latest`、`<env>-<sha7>`；部署一律指定 `<env>-<sha7>`，`latest` 已停用，以保留回滾與除錯的可追溯性。
+
+**資源型態**：task01–06、task08 是 Cloud Run **Job**（Cloud Scheduler 觸發）；`dashboard_ui`、task07 Silver／Gold 是 Cloud Run **Service**（8080）。dashboard 對外開放，Silver／Gold 需 ID token 驗證、由 dashboard 的 runtime SA 以 Cloud Run Invoker 呼叫；dashboard 的 `SILVER_ENDPOINT_URL`／`GOLD_ENDPOINT_URL` 由 workflow 在部署前查出同環境 Service URL 動態帶入。**task07 Bronze ETL 不納入部署**（互動式裝置流程授權，僅地端執行）。
+
+**沒有檔案變更就不會觸發**（`paths` 過濾只對 push 生效）；要以同一份程式碼重新部署時，走各 workflow 的 `workflow_dispatch` 手動觸發。
