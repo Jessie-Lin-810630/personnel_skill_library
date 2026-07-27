@@ -3,15 +3,21 @@ name: Deploy task02-github-restapi-etl
 on:
   workflow_dispatch:
   push:
-    branches: [develop]
+    branches: [develop, main]
     paths:
       - 'task02_github_restapi_etl/**'
       - 'docker/Dockerfile.task02'
       - 'requirements.txt'
       - '.github/workflows/deploy_task02_github_restapi_etl.yml'
 
+env:
+  REGION: asia-east1
+  GCP_PROJECT: causal-inquiry-484423-e7
+  AR_REPO: personal-skill-dashboard
+  JOB_NAME: task02-github-restapi-etl
+
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,6 +27,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 分支 main -> 環境 prod、其餘分支（develop）-> 環境 dev；SHORT_SHA 取 commit sha 前七碼
+      # IMAGE 由上方 env 的 REGION／GCP_PROJECT／AR_REPO／JOB_NAME 組出
+      - name: Resolve environment name, short SHA and image path
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "ENV_NAME=prod" >> "$GITHUB_ENV"
+          else
+            echo "ENV_NAME=dev" >> "$GITHUB_ENV"
+          fi
+          echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "IMAGE=${REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/${JOB_NAME}" >> "$GITHUB_ENV"
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -28,22 +46,28 @@ jobs:
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
 
+      # 同一份 image 貼三個 tag：不可變的 <sha>、環境浮動的 <env>-latest、可回滾的 <env>-<sha>
       - name: Build and Push
         run: |
           docker build \
             --platform=linux/amd64 \
             -f docker/Dockerfile.task02 \
-            -t asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest \
+            -t "${IMAGE}:${SHORT_SHA}" \
+            -t "${IMAGE}:${ENV_NAME}-latest" \
+            -t "${IMAGE}:${ENV_NAME}-${SHORT_SHA}" \
             .
-          docker push asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest
+          docker push "${IMAGE}:${SHORT_SHA}"
+          docker push "${IMAGE}:${ENV_NAME}-latest"
+          docker push "${IMAGE}:${ENV_NAME}-${SHORT_SHA}"
 
+      # 部署一律指定完整不可變 tag，保留回滾與除錯時的可追溯性
       - name: Deploy to Cloud Run Job
         run: |
-          gcloud run jobs deploy task02-github-restapi-etl \
-            --image asia-east1-docker.pkg.dev/causal-inquiry-484423-e7/personal-skill-dashboard/task02-github-restapi-etl:latest \
-            --region asia-east1 \
-            --project causal-inquiry-484423-e7 \
-            --service-account psd-no-gcs-task@causal-inquiry-484423-e7.iam.gserviceaccount.com \
+          gcloud run jobs deploy "${JOB_NAME}-${ENV_NAME}" \
+            --image "${IMAGE}:${ENV_NAME}-${SHORT_SHA}" \
+            --region "${REGION}" \
+            --project "${GCP_PROJECT}" \
+            --service-account psd-no-gcs-task@${GCP_PROJECT}.iam.gserviceaccount.com \
             --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,GITHUB_USERNAME=GITHUB_USERNAME:latest,GITHUB_MAIL=GITHUB_MAIL:latest
