@@ -1,0 +1,10 @@
+[theme]
+base = "dark"
+backgroundColor = "#3e485c"
+secondaryBackgroundColor = "#1a2235"
+textColor = "#e0e8f8"
+primaryColor = "#00d4c8"
+
+[client]
+# 維持streamlit的sidebar自動導航功能但是隱藏自動導航到的頁面名稱、而是改用自定義的頁面名稱。
+showSidebarNavigation = false

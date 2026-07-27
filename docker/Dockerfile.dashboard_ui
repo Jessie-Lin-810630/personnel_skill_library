@@ -1,0 +1,19 @@
+FROM python:3.14.2-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY dashboard_ui/ ./dashboard_ui/
+COPY .streamlit/ ./.streamlit/
+
+# Streamlit預設監聽8501
+# 但因為以後要遷移streamlit到cloud run執行，為了配合cloud Run習慣，在啟動指令中指定監聽8080
+EXPOSE 8080
+
+# 啟動指令：--server.address=0.0.0.0 是容器化運行的關鍵、讓streamlit監聽所有網路介面
+CMD ["python", "-m", "streamlit", "run", "dashboard_ui/app.py", \
+    "--server.port=8080", \
+    "--server.address=0.0.0.0", \
+    "--server.headless=true"]

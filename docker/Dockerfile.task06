@@ -1,0 +1,13 @@
+FROM python:3.14.2-slim
+
+# 設定工作目錄
+WORKDIR /app
+
+COPY requirements.txt .
+# 升級 pip 並安裝套件
+RUN python -m pip install  --no-cache-dir -U pip setuptools wheel && \
+    python -m pip install --no-cache-dir -r requirements.txt
+
+COPY task06_obsidian_embed_etl_v2/ ./task06_obsidian_embed_etl_v2/
+
+CMD ["python", "-m", "task06_obsidian_embed_etl_v2.main"]

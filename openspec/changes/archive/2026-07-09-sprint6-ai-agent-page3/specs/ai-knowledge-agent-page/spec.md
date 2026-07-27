@@ -1,0 +1,86 @@
+## ADDED Requirements
+
+### Requirement: Chat interface renders conversation
+Page 3 (`ai_knowledge_agent.py`) SHALL 提供 `st.chat_input` 輸入框與 `st.chat_message` 氣泡列表，讓使用者以對話形式與 AI Knowledge Agent 互動。
+
+#### Scenario: User submits a query
+- **WHEN** 使用者在 chat input 欄位輸入文字並按 Enter
+- **THEN** 使用者訊息立即以 `user` 氣泡顯示在對話區，接著 agent 回應以 `assistant` 氣泡顯示
+
+#### Scenario: Page loads with no messages
+- **WHEN** 使用者首次開啟 Page 3（或重整頁面）
+- **THEN** 對話區為空，僅顯示 chat input 欄位
+
+---
+
+### Requirement: Sources displayed under agent response
+當 agent 回傳非空的 `sources` 清單時，Page 3 SHALL 在回應氣泡下方顯示可展開的「📎 來源筆記」欄位，內含每筆來源的 `file_name`、`section`、`score`。
+
+#### Scenario: Agent returns sources
+- **WHEN** `rag_query()` 或 `generate_learning_map()` / `refine_learning_map()` 回傳非空 `sources`
+- **THEN** 回應氣泡下方顯示「📎 來源筆記」expander，展開後列出各 source 的 file_name、section、score
+
+#### Scenario: Agent returns no sources
+- **WHEN** agent 回傳空 `sources`（例如向量搜尋無結果）
+- **THEN** 回應氣泡下方不顯示 expander
+
+---
+
+### Requirement: Session is identified by uuid4 session_id
+Page 3 SHALL 在 `st.session_state` 中維護一個 `session_id`（uuid4 字串），初始化時自動生成，並在每次呼叫 agent 時傳入，以對應 MongoDB `chat_history` collection 中的對話紀錄。
+
+#### Scenario: Session initializes on page load
+- **WHEN** 使用者首次載入 Page 3（session_state 尚無 session_id）
+- **THEN** 自動生成 uuid4 作為 `session_id` 並存入 session_state
+
+#### Scenario: Session persists across reruns within the same tab
+- **WHEN** Streamlit rerun 被觸發（例如使用者送出訊息）
+- **THEN** `session_id` 維持不變，對話在同一 session 中累積
+
+---
+
+### Requirement: New conversation button resets session
+側邊欄 SHALL 提供「🔄 開新對話」按鈕，點擊後重置：`session_id`（重新生成 uuid4）、`messages`（清空）、`api_call_count`（歸零）、`planning_map_generated`（設為 False）。
+
+#### Scenario: User clicks new conversation
+- **WHEN** 使用者點擊側邊欄的「🔄 開新對話」按鈕
+- **THEN** 對話區清空，session_id 更新為新的 uuid4，LLM 呼叫計數歸零
+
+---
+
+### Requirement: Rate limiting blocks excess LLM calls
+Page 3 SHALL 在 `st.session_state["api_call_count"]` 達到上限（預設 20，可由環境變數 `AI_AGENT_RATE_LIMIT` 覆蓋）時，拒絕呼叫 agent 並在頁面上顯示提示訊息，引導使用者點「開新對話」。
+
+#### Scenario: Call count within limit
+- **WHEN** `api_call_count` < rate_limit
+- **THEN** 使用者送出的訊息正常進入 agent 流程，`api_call_count` 遞增 1
+
+#### Scenario: Call count reaches limit
+- **WHEN** `api_call_count` >= rate_limit
+- **THEN** agent 不被呼叫，chat input 停用，頁面顯示「已達本次對話 LLM 呼叫上限，請點『開新對話』繼續」
+
+---
+
+### Requirement: Intent router dispatches to correct agent
+Page 3 SHALL 對每筆使用者輸入呼叫 `intent_router_agent.route(query, session_id)`，並根據回傳值 (`"rag_agent"` 或 `"planning_agent"`) 分派至對應 agent 函式。
+
+#### Scenario: Router returns rag_agent
+- **WHEN** `route()` 回傳 `"rag_agent"`
+- **THEN** Page 3 呼叫 `rag_agent.rag_query(query, session_id)`
+
+#### Scenario: Router returns planning_agent (first call)
+- **WHEN** `route()` 回傳 `"planning_agent"` 且 `planning_map_generated` 為 False
+- **THEN** Page 3 呼叫 `planning_agent.generate_learning_map(query, session_id)`，完成後設 `planning_map_generated = True`
+
+#### Scenario: Router returns planning_agent (follow-up)
+- **WHEN** `route()` 回傳 `"planning_agent"` 且 `planning_map_generated` 為 True
+- **THEN** Page 3 呼叫 `planning_agent.refine_learning_map(query, session_id)`
+
+---
+
+### Requirement: Auth placeholder for future st.login()
+Page 3 SHALL 在檔案頂部包含清楚的 `# TODO: st.login()` 注解區塊，標示 Google OAuth 驗證層的預留位置，待 credentials 建立後實作。
+
+#### Scenario: Page loads without auth gate
+- **WHEN** 使用者開啟 Page 3（OAuth 尚未設定）
+- **THEN** 頁面直接顯示，不進行身份驗證

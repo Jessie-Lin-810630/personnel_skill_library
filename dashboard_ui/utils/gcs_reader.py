@@ -1,0 +1,68 @@
+"""GCS 讀取工具：從資料湖 bucket 讀出文字與圖片，供 Streamlit 頁面唯讀取用。
+
+1. 函式 read_text 從指定 bucket 讀取 HTML 或 md 文字內容，找不到時回傳空字串。
+2. 函式 read_bytes_as_base64 讀取圖片 blob 並轉成 base64 字串，供頁面內嵌顯示。
+"""
+
+import base64
+from functools import lru_cache
+
+from google.cloud import storage
+from loguru import logger
+
+
+@lru_cache(maxsize=1)
+def _get_client() -> storage.Client:
+    return storage.Client()
+
+
+def read_text(src_bucket: str, blob_path: str) -> str:
+    """從 src_bucket (staging vaults) 讀取文字內容（HTML 或 MD）。找不到回傳空字串。"""
+    try:
+        client = _get_client()
+        blob = client.bucket(src_bucket).blob(blob_path)
+        return blob.download_as_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"GCS read_text failed: {src_bucket}/{blob_path} — {e}")
+        return ""
+
+
+def read_bytes_as_base64(src_bucket: str, blob_path: str) -> str:
+    """從 src_bucket (staging vaults) 讀取二進位內容（PNG）並回傳 base64 data URI。找不到回傳空字串。"""
+    try:
+        client = _get_client()
+        blob = client.bucket(src_bucket).blob(blob_path)
+        # debug: 看一下 GET URI 的 URI 長怎樣
+        # logger.debug(f"Attempting to read blob: repr={repr(blob)}")
+        data = blob.download_as_bytes()
+        ext = blob_path.rsplit(".", 1)[-1].lower()
+        mime = "image/png" if ext == "png" else f"image/{ext}"
+        encoded = base64.b64encode(data).decode("utf-8")
+        return f"data:{mime};base64,{encoded}"
+    except Exception as e:
+        logger.warning(f"GCS read_bytes_as_base64 failed: {src_bucket}/{blob_path} — {e}")
+        return ""
+
+
+def _split_gs_uri(uri: str) -> tuple[str, str]:
+    """gs://bucket/key... → (bucket, key)。非 gs:// 開頭則回 ("", uri) 讓上游函式讀取失敗並記 warning。"""
+    if not uri.startswith("gs://"):
+        logger.warning(f"Not a gs:// URI: {uri}")
+        return "", uri
+    bucket, _, key = uri[len("gs://") :].partition("/")
+    return bucket, key
+
+
+def read_text_by_uri(uri: str) -> str:
+    """以完整 gs:// URI 讀取文字物件（HTML 或 MD）。找不到回傳空字串。
+
+    供 task07 lazy_loading 變體使用（其 metadata 存完整 gs:// URI，非本機路徑）。
+    """
+    bucket, key = _split_gs_uri(uri)
+    return read_text(bucket, key)
+
+
+def read_image_base64_by_uri(uri: str) -> str:
+    """以完整 gs:// URI 讀取圖片並回傳 base64 data URI。找不到回傳空字串。"""
+    bucket, key = _split_gs_uri(uri)
+    return read_bytes_as_base64(bucket, key)
