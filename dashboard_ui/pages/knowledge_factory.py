@@ -96,7 +96,7 @@ _lineage_items = [
     (":red[DAG01 - Obsidian 文本清理]", "task01_v2_link.svg"),
     (":violet[DAG02 - GitHub 實作履歷擷取]", "task02_link.svg"),
     (":blue[DAG03 - Programming skill 履歷擷取]", "task03_link.svg"),
-    (":green[DAG04 - Google Sheet 表格自動處理]", "task05_link.svg"),
+    (":green[DAG05 - Google Sheet 表格自動處理]", "task05_link.svg"),
     (":orange[DAG06 - Obsidian 文本向量化]", "task06_v2_link.svg"),
     (":3rd_place_medal: DAG07 - OneNote 文本萃取", "task07_v2_bronze_link.svg"),
     (":2nd_place_medal: DAG08 - OneNote 文本增強擴寫", "task07_v2_silver_link.svg"),
