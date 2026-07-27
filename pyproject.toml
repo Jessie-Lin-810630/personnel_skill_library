@@ -52,6 +52,7 @@ ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107", "D415"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "E402"]             # 測試不要求 docstring 格式；E402 為 sys.path 先設定再 import 的刻意寫法
+"dashboard_ui/app.py" = ["E402"]      # E402 為 ARROW_DEFAULT_MEMORY_POOL 需早於 pyarrow import 的刻意寫法
 "**/__init__.py" = ["D104", "F401"]   # 套件入口檔放寬
 
 [tool.ruff.lint.pydocstyle]

@@ -1,12 +1,23 @@
 """個人技能看板首頁（HOME），讀取所有 MongoDB collection 並繪製總覽圖表。
 
-以 module-level 單例連上 MongoDB Atlas 後由上而下組裝四段：生技與資料工程兩張雷達圖、
-KPI 卡片、GitHub 最近專案卡片，以及刷題三相 donut chart。資料查詢封裝於
+資料讀取切成雷達圖、KPI、GitHub 專案、題目特徵四個 st.cache_data loader，切換表格或下拉選單
+造成的 rerun 直接命中快取；畫面再由上而下組裝生技與資料工程兩張雷達圖、KPI 卡片、
+GitHub 最近專案卡片，以及刷題三相 donut chart。資料查詢封裝於
 utils.interact_with_mongodb，繪圖與版面元件取自 utils.precomputing 與 utils.ui_elements。
 
 Usage:
     poetry run streamlit run dashboard_ui/app.py
 """
+
+import os
+
+# pyarrow 內建的 mimalloc 配置器會在 mi_thread_init 段錯誤，導致整個 Streamlit 進程被 SIGSEGV 中止。
+# 觸發條件：pandas 3 的 infer_string 讓每個字串欄位都經 ArrowStringArray 進入 pyarrow C 層配置記憶體，
+# 而 Streamlit 每次 rerun 都另起一條短命的 ScriptRunner 執行緒，切換表格時尤其密集。
+# 改用系統 malloc 規避；此設定必須早於 pyarrow 被 import，故置於其餘 import 之前。
+# 參考文件1: https://github.com/streamlit/streamlit/pull/15947
+# 參考文件2: https://github.com/apache/arrow/issues/50471
+os.environ.setdefault("ARROW_DEFAULT_MEMORY_POOL", "system")
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -24,63 +35,130 @@ from utils.precomputing import (
 )
 from utils.ui_elements import color_map, make_radar, render_side_bar, render_task_selectbox, render_task_table
 
-# get_db_atlas() 內部已是 module-level 單例（client 只建立一次、跨頁共用連線池）
-db = mongo_utils.get_db_atlas()
+# ─────────────────────────────────────────
+# 讀取 MongoDB 資料（依區塊切分並以 st.cache_data 快取）
+# ─────────────────────────────────────────
+# 切換表格／下拉選單只觸發 Streamlit rerun，資料本身不變，命中快取即可不再打 Atlas。
+# 每個 loader 只回傳畫面實際用到的輕量結果，中繼 DataFrame 不進快取以節省記憶體。
+_CACHE_TTL = 900  # 秒；上游 ETL 為日更，15 分鐘過期已足夠
 
-# ─────────────────────────────────────────
-# 讀取 MongoDB 資料
-# ─────────────────────────────────────────
+
+@st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入技能雷達…")
+def load_radar_data() -> dict:
+    """讀取雙雷達圖的軸標籤、分數、更新日期與任務明細。
+
+    執行流程：
+    1. 讀 skill_radar_summary，依雷達圖名稱切成生技／資料工程兩組，取軸標籤、level 與最近更新日。
+    2. 讀 skill_scores_biotech／skill_scores_data_eng，整理成各軸對應的任務明細 dict。
+    """
+    db = mongo_utils.get_db_atlas()
+    radar_df = mongo_utils.get_radar_summary_df(db, "skill_radar_summary")
+    bio_df = radar_df[radar_df["雷達圖名稱"].str.contains("生技", na=False)]
+    de_df = radar_df[radar_df["雷達圖名稱"].str.contains("資料工程", na=False)]
+    return {
+        "biotech_updated_at": _latest_date_from_df(bio_df),
+        "de_updated_at": _latest_date_from_df(de_df),
+        "biotech_labels": [_format_radar_label(label) for label in bio_df["雷達軸"].to_list()],
+        "biotech_values": bio_df["level"].to_list(),
+        "de_labels": [_format_radar_label(label) for label in de_df["雷達軸"].to_list()],
+        "de_values": de_df["level"].to_list(),
+        "biotech_tasks": _radar_tasks_from_df(mongo_utils.get_a_radar_detail(db, "skill_scores_biotech")),
+        "de_tasks": _radar_tasks_from_df(mongo_utils.get_a_radar_detail(db, "skill_scores_data_eng")),
+    }
+
+
+@st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入 KPI…")
+def load_kpi_data() -> dict:
+    """讀取 KPI 卡片所需的知識庫、GitHub 與刷題數字，並先組好 delta 文案。
+
+    執行流程：
+    1. 分別讀 notes_summary、github_summary、ccClub&leetcode_summary 取總數與增減量。
+    2. 以 _format_update_date／_format_delta 把更新日期與增減量轉成卡片要顯示的字串。
+    """
+    db = mongo_utils.get_db_atlas()
+    obsidian_total, obsidian_delta_raw, obsidian_topics, obsidian_updated_at = mongo_utils.get_obsidian_kpi(
+        db, "notes_summary"
+    )
+    github_total, github_delta_raw, github_updated_at = mongo_utils.get_github_kpi(db, "github_summary")
+    problem_kpi = mongo_utils.get_problem_kpi_donut(db, "ccClub&leetcode_summary")
+
+    obsidian_updated_at = _format_update_date(obsidian_updated_at)
+    github_updated_at = _format_update_date(github_updated_at)
+    problem_updated_at = _format_update_date(problem_kpi["snapshot_date"])
+    return {
+        "obsidian_total": obsidian_total,
+        "obsidian_topics": obsidian_topics,
+        "obsidian_delta": _format_delta(obsidian_delta_raw, f" nodes | 最近更新日期：{obsidian_updated_at}"),
+        "github_total": github_total,
+        "github_delta": _format_delta(github_delta_raw, f" repos | 最近更新日期：{github_updated_at}"),
+        "leetcode_sql": problem_kpi["leetcode_sql"],
+        "leetcode_python": problem_kpi["leetcode_python"],
+        "ccclub_total": problem_kpi["ccclub_total"],
+        "leetcode_sql_delta": _format_delta(problem_kpi["leetcode_sql_delta"], f"｜最近更新日期：{problem_updated_at}"),
+        "leetcode_python_delta": _format_delta(
+            problem_kpi["leetcode_python_delta"], f"｜最近更新日期：{problem_updated_at}"
+        ),
+    }
+
+
+@st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入 GitHub 專案…")
+def load_recent_repos() -> list[dict]:
+    """讀取 github_repos 並整理成最近專案卡片要用的欄位。"""
+    db = mongo_utils.get_db_atlas()
+    return _github_repos_for_cards(mongo_utils.get_github_detail(db, "github_repos"))
+
+
+@st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入題目特徵…")
+def load_topic_features(leetcode_total: int, ccclub_total: int) -> dict:
+    """讀取刷題題型佔比，換算成三相各自的題目特徵題數。
+
+    執行流程：
+    1. 讀 ccClub&leetcode_summary 取各平台題型佔比。
+    2. 以 _percent_to_counts 依總題數換算成題數，LeetCode 再用 Database 標籤切成 SQL／Python 兩相。
+    """
+    db = mongo_utils.get_db_atlas()
+    problem_features = mongo_utils.get_problem_features(db, "ccClub&leetcode_summary")
+    leetcode_features = problem_features.get("LeetCode", {})
+    return {
+        "LeetCode SQL": _percent_to_counts(leetcode_features, leetcode_total, include={"Database"}),
+        "LeetCode Python": _percent_to_counts(leetcode_features, leetcode_total, exclude={"Database"}),
+        "ccClub Python": _percent_to_counts(problem_features.get("ccClub-Python", {}), ccclub_total),
+    }
+
 
 # —— A: 雷達圖資料 ——
-radar_df = mongo_utils.get_radar_summary_df(db, "skill_radar_summary")
-bio_radar_sum_df = radar_df[radar_df["雷達圖名稱"].str.contains("生技", na=False)]
-de_radar_sum_df = radar_df[radar_df["雷達圖名稱"].str.contains("資料工程", na=False)]
-biotech_updated_at = _latest_date_from_df(bio_radar_sum_df)
-de_updated_at = _latest_date_from_df(de_radar_sum_df)
-
-biotech_labels = [_format_radar_label(label) for label in bio_radar_sum_df["雷達軸"].to_list()]
-biotech_values = bio_radar_sum_df["level"].to_list()
-de_labels = [_format_radar_label(label) for label in de_radar_sum_df["雷達軸"].to_list()]
-de_values = de_radar_sum_df["level"].to_list()
-
-bio_radar_detail_df = mongo_utils.get_a_radar_detail(db, "skill_scores_biotech")
-de_radar_detail_df = mongo_utils.get_a_radar_detail(db, "skill_scores_data_eng")
-biotech_tasks = _radar_tasks_from_df(bio_radar_detail_df)
-de_tasks = _radar_tasks_from_df(de_radar_detail_df)
+radar_data = load_radar_data()
+biotech_updated_at = radar_data["biotech_updated_at"]
+de_updated_at = radar_data["de_updated_at"]
+biotech_labels = radar_data["biotech_labels"]
+biotech_values = radar_data["biotech_values"]
+de_labels = radar_data["de_labels"]
+de_values = radar_data["de_values"]
+biotech_tasks = radar_data["biotech_tasks"]
+de_tasks = radar_data["de_tasks"]
 
 # —— B: KPI ——
-obsidian_total, obsidian_delta_raw, obsidian_topics, obsidian_updated_at = mongo_utils.get_obsidian_kpi(
-    db, "notes_summary"
-)
-github_total, github_delta_raw, github_updated_at = mongo_utils.get_github_kpi(db, "github_summary")
-problem_kpi = mongo_utils.get_problem_kpi_donut(db, "ccClub&leetcode_summary")
-obsidian_updated_at = _format_update_date(obsidian_updated_at)
-github_updated_at = _format_update_date(github_updated_at)
-problem_updated_at = _format_update_date(problem_kpi["snapshot_date"])
-
-leetcode_sql = problem_kpi["leetcode_sql"]
-leetcode_python = problem_kpi["leetcode_python"]
-ccclub_total = problem_kpi["ccclub_total"]
-obsidian_delta = _format_delta(obsidian_delta_raw, f" nodes | 最近更新日期：{obsidian_updated_at}")
-github_delta = _format_delta(github_delta_raw, f" repos | 最近更新日期：{github_updated_at}")
-leetcode_sql_delta = _format_delta(problem_kpi["leetcode_sql_delta"], f"｜最近更新日期：{problem_updated_at}")
-leetcode_python_delta = _format_delta(problem_kpi["leetcode_python_delta"], f"｜最近更新日期：{problem_updated_at}")
+kpi_data = load_kpi_data()
+obsidian_total = kpi_data["obsidian_total"]
+obsidian_topics = kpi_data["obsidian_topics"]
+obsidian_delta = kpi_data["obsidian_delta"]
+github_total = kpi_data["github_total"]
+github_delta = kpi_data["github_delta"]
+leetcode_sql = kpi_data["leetcode_sql"]
+leetcode_python = kpi_data["leetcode_python"]
+ccclub_total = kpi_data["ccclub_total"]
+leetcode_sql_delta = kpi_data["leetcode_sql_delta"]
+leetcode_python_delta = kpi_data["leetcode_python_delta"]
 
 # —— C: GitHub 最近專案 ——
-recent_repos = _github_repos_for_cards(mongo_utils.get_github_detail(db, "github_repos"))
+recent_repos = load_recent_repos()
 
 # —— D: 刷題三相 donut ——
 donut_labels = ["ccClub Python", "LeetCode SQL", "LeetCode Python"]
 donut_values = [ccclub_total, leetcode_sql, leetcode_python]
 
 # —— E: 各相的題目特徵資料 ——
-problem_features = mongo_utils.get_problem_features(db, "ccClub&leetcode_summary")
-leetcode_total = leetcode_sql + leetcode_python
-topic_features = {
-    "LeetCode SQL": _percent_to_counts(problem_features.get("LeetCode", {}), leetcode_total, include={"Database"}),
-    "LeetCode Python": _percent_to_counts(problem_features.get("LeetCode", {}), leetcode_total, exclude={"Database"}),
-    "ccClub Python": _percent_to_counts(problem_features.get("ccClub-Python", {}), ccclub_total),
-}
+topic_features = load_topic_features(leetcode_sql + leetcode_python, ccclub_total)
 
 # ─────────────────────────────────────────
 # 頁面設定
