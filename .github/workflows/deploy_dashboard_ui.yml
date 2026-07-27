@@ -82,7 +82,7 @@ jobs:
             --project "${GCP_PROJECT}" \
             --service-account person-skill-dashboard@${GCP_PROJECT}.iam.gserviceaccount.com \
             --port 8080 \
-            --memory 2Gi \
+            --memory 1Gi \
             --concurrency 4 \
             --allow-unauthenticated \
             --set-env-vars "SILVER_ENDPOINT_URL=${SILVER_ENDPOINT_URL},GOLD_ENDPOINT_URL=${GOLD_ENDPOINT_URL}" \
