@@ -1,11 +1,80 @@
+# 目錄
+
+## [循環改進處、遇到過的問題彙整](#循環改進處遇到過的問題彙整)
+
+- [♻️ 改進中](#improving) — 尚未收斂的議題（LLM timeout、tag 治理、併發與部署自動化等）
+- [✅ 已解決](#resolved) — 已修正並記錄修法與取捨的問題
+
+## [Daily Work Log](#daily-work-log)
+
+### 2026-04 ～ 05｜ETL pipeline 起步與資料源探勘
+
+| 日期 | 主題 |
+|------|------|
+| [0423](#20260423-work-log) | 專案初始化：README 目標、`feature/etl-pipeline` 分支、pyenv + Poetry 環境 |
+| [0428](#20260428-work-log) | task02：研讀 GitHub REST API 官方文件 |
+| [0429](#20260429-work-log) | task02：GitHub REST API rate limit 規則與因應 |
+| [0503](#20260503-work-log) | task03：確認 LeetCode 採 GraphQL API，盤點可用 endpoint |
+| [0505](#20260505-work-log) | task03：調查 ccClub 判題系統的 API 可行性 |
+| [0508](#20260508-work-log) | task05：建立 Google Sheets 技能評分表 |
+| [0511](#20260511-work-log) | task02：修正跨分支重複計算 commit 的邏輯錯誤 |
+| [0512](#20260512-work-log) | Dashboard：以 Streamlit 建 HOME 頁與 `utils/` 前處理函式 |
+| [0513](#20260513-work-log) | README 里程碑整併，明確化開發與部署任務 |
+| [0525](#20260525-work-log-task-06-start) | **task06 起步**：[Embedding 模型選型](#evaluate-which-embedding-models-were-suitable)、[向量庫負載評估](#evaluate-the-loading-on-vector-database-mongodb-atlas) |
+| [0526](#20260526-work-log) | 選定 `text-embedding-3-small` 作為 MVP 階段主力模型 |
+| [0528](#20260528-work-log) | AI agent 方案評估，產出評估報告 |
+
+### 2026-06｜RAG agent 與 task07 OneNote pipeline
+
+| 日期 | 主題 |
+|------|------|
+| [0610](#20260610-work-log) | Intent router 與 RAG agent 首輪單元測試，發現意圖判斷缺陷 |
+| [0612](#20260612-work-log) | 開 `html-to-md` 分支；OneNote rate limiter 與 token 過期處理 |
+| [0613](#20260613-work-log) | HTML→MD 轉換草稿（S1 方案），測試 Gemini 2.5 flash lite 作為 RESHAPE model|
+| [0615](#20260615-work-log) | 定案採用 Gemini 2.5 flash lite 作為 RESHAPE model；補齊三條 audit log |
+| [0616](#20260616-work-log) | `t_html_to_markdown()` 改為逐頁即時落地；client 初始化與 timeout 踩坑 |
+| [0617](#20260617-work-log) | 歸檔 blob path 規劃；archive endpoint TOCTOU 與 except 拆分；審查頁上線 |
+| [0621](#20260621-work-log) | Planning agent 與聊天框；router 檢索品質與跨輪污染修正 |
+| [0624](#20260624-work-log) | 改用多模態 embedding (Gemini-embedding-2)；vector upsert 殘留 chunk、CDC 節流 |
+| [0625](#20260625-work-log) | RAG agent v2 重構：Query Rewrite → 無 prefilter 向量檢索 → Cohere rerank |
+
+### 2026-07｜task07 lazy loading、schema 對齊與雲端部署
+
+| 日期 | 主題 |
+|------|------|
+| [0701](#20260701-work-log) | task07 lazy loading 起步；MSAL、滑動窗口 limiter、`api_get()` 例外分層、`request_id` 注入 |
+| [0702](#20260702-work-log) | 審查頁 + Silver 端點實測（生成／regenerate／quota／reject／歸檔後新版）與前端設計調整 |
+| [0705](#20260705-work-log) | MongoDB 連線收斂為 module-level 單例，避免重複連線 |
+| [0707](#20260707-work-log) | task01  schema 拆表（Bronze／Silver／Gold 三層）與 task01 v2 建立，解耦三層任務 |
+| [0708](#20260708-work-log) | task01 v2／task07 schema 語意對齊到近似、對稱；task08 建立；歸檔 `.md` 時意外發生的髒 frontmatter 修正與 AirFlow XCom 取捨討論 |
+| [0709](#20260709-work-log) | 向量表更名 `note_vectors_multimodal`，agent tool 欄位對齊 |
+| [0712](#20260712-work-log) | 新增 `ingestion_data_quality`、`retrieval_search_quality` 兩頁 |
+| [0713](#20260713-work-log) | 合併至 `develop`；`pygsheets` pre-release 安裝坑；task01_v2／task06／task08 上 Cloud Run |
+| [0716](#20260716-work-log) | `knowledge_factory.py` 翻修；Cloud Run 服務間 OIDC token 與憑證踩坑 |
+| [0717](#20260717-work-log) | 依最小權限原則（PoLP）收斂各 service account 角色對照表 |
+| [0720](#20260720-work-log) | 統一各 task 的 try-except 三層模式與刻意吞例外的理由 |
+| [0727](#20260727-work-log) | 十份 README 與架構／dataflow 圖完成；GitHub Actions CD（dev／prod）；PyArrow segfault workaround |
+
+---
+
 # 循環改進處、遇到過的問題彙整
+
+<a id="improving"></a>
+
 ## ♻️ 改進中
 - README 與專案結構文件仍需隨任務演進持續修訂，包含各 ETL 任務產出的 MongoDB collection schema 與 Phase IV 部署里程碑。
 - Task03 LeetCode GraphQL API 缺少正式文件，且依賴 `LEECODE_SESSION` 與 CSRF token；cookie 過期會導致 403，雲端部署前需評估自動更新或替代認證流程。
 - Task06 MongoDB Atlas Vector Search 目前資料量仍小，M0 Free Tier 足夠；但後續筆記數、chunk 數、embedding 維度或 metadata 增加時，需重新估算儲存量與成本。
 - Phase III RAG agent v2 檢索受資料量不均影響：通識型主題（如 docker / k8s）在向量庫中的筆記量少於特定主題（如 dev container），rerank 後雖能命中、但回答易偏狹隘（見 20260625 測試 case 3）。後續需補充通識型筆記或評估針對主題覆蓋度的檢索策略。（20260625）
-- Phase III RAG agent v2 reranker 信心門檻未設：rerank 相對分數偏低（最高僅約 0.7）時模型仍會給出探索性回答，需評估是否設定 rerank 分數門檻或在回答中標示信心程度。（20260625）
 - Task07 長 context 筆記（如大型筆記本頁面）會造成 LLM 回應高延遲，需追蹤並建立監控機制以識別潛在卡頓點。（20260616）
+- Task07 Silver enrich 遇大檔案（圖片體積大／長 context）觸發 `regenerate` 時會 LLM timeout 失敗（log 呈現 `No JSON in response: None`），目前僅能重試；需評估壓縮圖片、切塊或改為非同步任務。（20260702）
+- Task07 LLM 生成 tags 完全依模型訓練資料，缺少企業自有的 tag reference set。基數膨脹會讓 rewriter 每輪 token 變貴、attention 被稀釋；同一概念散成多個同義 tag（k8s／kubernetes／容器編排）則削弱 tag 的集中效應，傷害形態是 recall miss 而非精度下降。需建立 tag 治理（受控詞彙與開放生成的比例）。（20260702）
+- Task07 併發情境未驗證：使用者在審查頁人工審閱期間，若 Bronze 排程同時下載新版 html 並寫入 `onenote_note_metadata`，前端讀取與後端寫入的交互影響尚未測試。（20260702）
+- Task07 LLM 回傳 enriched md 時可能隨機改動圖片檔名字元，導致圖片連結失效；system prompt 只能緩解。已用 `onenote_note_metadata.md_frontmatter` 記錄有效圖片數量以量化破圖率，仍需持續追蹤並擴展前端圖表。（20260702）
+- 目前的 Task01-v2 設計會讓 raw .md 在一次 loop iteration 內被 download_as_text 兩次（Transform 一次、Load 的 _upload_clean_md 一次），等於 double I/O；優化方案已討論且紀錄在當日日誌，但未實作。結論是可以把 `build_note_document + archive_note` 綁成同一個 task unit、只吐小 dict 給 Load。（20260708）
+- PyArrow 25.0.0 的 segfault 目前採 `ARROW_DEFAULT_MEMORY_POOL=system` 這條 workaround 繞開，並非修掉根因。Streamlit 1.60.0（2026-07-21 發布）已含正解，未來不強制但可留作評估直接自 1.59.2 升版，就可從腳本移除 `ARROW_DEFAULT_MEMORY_POOL` 環境變數。（20260727）
+
+<a id="resolved"></a>
 
 ## ✅ 已解決
 - Task02 GitHub REST API 需要處理 rate limit，以及 409、429、403 等例外狀態的邏輯；後續維護時仍須留意 API 規格與錯誤處理策略。
@@ -31,6 +100,27 @@
 - Task06 vector upsert 殘留 chunk：筆記重新切塊後 chunk 數變少時，舊 chunk 不會被 upsert 覆蓋而成為殘缺孤兒資料；已改為先依 `file_path` `deleteMany` 同筆記所有 chunk 再 insert 新 chunk，避免多輪 embedding 後殘留破碎 chunk。（20260624）
 - Task06 API 用量：導入 CDC（data capture change）機制，僅當 GCS 檔案變更且 `obsidian_notes` 中 `embedding_done=false` 時才呼叫 Vertex AI 進行 embedding，否則略過，節省 API 請求。（20260624）
 - Phase III Router/RAG Agent prefilter 雙面刃與跨輪上下文污染：舊版以 tag／file_path 對 vector search 做 boolean prefilter，初始命中錯誤或漏掉時反而把正確答案硬排除，且 `_looks_like_followup()` 追問繼承上輪 filter 易擴大污染、啟發式追問判定又會誤判同主題新查詢。已重構為 RAG agent v2——Router 職責單一化只做 intent 分類，retrieval 全封裝進 `rag_query()`：帶 chat history 的 Query Rewrite（改寫為獨立問句並推薦 tags 做 query expansion，不做 prefilter）→ 無 prefilter 的 vector search（top_k 10~15）→ Cohere cross-encoder rerank（用原始 query 取 top 5）→ LLM 生成。標籤缺失不再排除正確答案，追問由 rewrite 看 history 自動補全指代，多輪測試 case 1/2/3 大多通過（殘留資料量不均問題見改進中）。（20260625）
+- Task07 Bronze `api_get()` 例外處理：原本先 `requests.get()` 拿回應再逐一判斷 status_code，且未設 timeout——傳輸層例外（Timeout／ConnectionError／DNS 失敗／endpoint 壞掉）會直接穿透整個 retry 迴圈，既不重試也不留 log，伺服器 hang 住時更會卡死。已改為加 `timeout=(10, 60)`、以 `raise_for_status()` 把非 2xx 統一轉成 `HTTPError`，再分兩層接：`except HTTPError`（401 換 token、429／5xx 退避重試、其餘 4xx 記一筆 log 後直接 raise）與 `except RequestException`（記 `status_code=0` 後退避重試）。（20260701）
+- Task07 Bronze audit log 重複列：同一次失敗在 `api_get()` 與 `download_notebooks()` 各寫一筆 `onenote_graph_api_logs`，外層的 `status_code=0` 反而蓋掉內層真實狀態碼。已確立職責分離——request 層稽核全歸 `api_get()`（逐次 attempt 與 retry 耗盡的收尾列），page 層生命週期（`status=fetched_failed`）全歸 `download_notebooks()`。（20260701）
+- Task07 Bronze `request_id` 生成方式：改採「注入式」由呼叫端（一個 page 的邏輯操作範圍）先生成再傳進 `api_get()` 共用，取代「回傳式」——因為 api_get 會 raise 而失敗時拿不到回傳值、失敗 attempt log 是 mid-call 當下就寫入、且回傳 tuple 會破壞 `api_get(...).text` 的鏈式呼叫。listing 與圖片等獨立請求則不注入、由 api_get 自生成。（20260701）
+- Streamlit `st.components.v1.html` 在 1.56.0 已 deprecated（2026-06-01 移除）。審查頁渲染的是完整 HTML 文件加 base64 圖片，需要 iframe 沙箱隔離筆記 CSS、也需要固定高度捲動框，故改用 `st.iframe` 而非行內渲染的 `st.html`，warning 已消除。（20260702）
+- Task07 審查頁 reject 影響範圍：單一版本被 rejected 後應只讓該版按鈕失效並自前端消失，不影響同名筆記其他版本的操作；已修正。（20260702）
+- Task07 審查頁歸檔後新版無法審閱：原以 `page_id` + `dt` 管理按鈕狀態，導致某版 approved 歸檔後，同 page_id 因內容變動產生的新 dt 版本沒有按鈕可操作、也無法生成 enriched document。已改為前端先以 aggregation 篩選（濾掉 `review_result=rejected`，並以 `$setWindowFields` 取 `lastArchivedAt`，只留 `dt >= lastArchivedAt` 的版本），新 dt 版可重回 Silver 生成再進 Gold。（20260702）
+- Task07 圖片 alt 文字含 `]` 會破壞 Markdown 圖片語法 `![alt](path)` 導致圖片顯示失敗；已在 `convert_img_tag_to_md_str()` 一併取代掉 `]`（實測 `!`、`[`、`%` 夾在替代文字中不受影響，不需處理）。（20260702）
+- Dashboard MongoDB 連線結構：原 `get_db_atlas()` 每次呼叫都 `MongoClient(uri)` 建一個新 client（各帶一整個連線池），且 `onenote_review` 把它藏在 `@st.cache_data(ttl=60)` 內，TTL 到期或 `.clear()` 就再開一個，長期累積逼近 Atlas 連線上限。已收斂為 module-level lazy 單例，四頁與 `agent_tools` 共用同一 client 與連線池；不用 `@st.cache_resource` 是因為它綁 Streamlit script run context，而 `agent_tools` 非 page context。（20260705）
+- Task01-v2 歸檔 `.md` 帶著髒 frontmatter：`archive_note` 原以 `_copy_blob()` 把 raw `.md` 原樣複製到 `archived-notes/`，等於把未清洗的原始 frontmatter 搬進 Gold 層。已新增 `_upload_clean_md()` 取代該段——download → `frontmatter.loads` → 以 Transform 算好的乾淨 frontmatter 覆寫 → `dumps` → upload；圖片仍走 `_copy_blob` 二進位原樣搬，並保證 GCS 檔案與 MongoDB 欄位為單一事實來源。（20260708）
+- 向量表命名與欄位語意對齊：collection 由 `obsidian_vectors_v2` 更名為 `note_vectors_multimodal`（task06_v2 與 task08 共寫），血緣欄由 `raw_md_path` 改為 `md_path`、圖片欄改為 `image_paths`，去除筆記 APP 綁定並明確 embed 來源為 Gold 層 archived notes。演進路徑為 `obsidian_vectors`（純文字模型）→ `obsidian_vectors_multimodal` → `note_vectors_multimodal`；`agent_tools` 的查詢字串亦已同步。（20260709）
+- `dashboard_ui/pages/onenote_review.py` 第 328／342 行欄位用錯導致版本清單誤判為「尚未生成」，已改用 `enriched_md_path`。（20260709）
+- Dashboard 前端設計調整：版本切換由圓點改為側邊下拉選單（標題為版號 dt，並提示可審閱版本數量）；歸檔後的 tag／note_type 分佈視覺化，則由新建的 `ingestion_data_quality` 與 `retrieval_search_quality` 兩頁承接。（20260702、20260712）
+- `knowledge_factory.py` 翻修：舊版以寫死的 stacks list 與 ETL_TASKS list 靠 `st.markdown` 手刻 HTML，無外部資料來源、也無互動；本次整頁換掉。（20260716）
+- Docker build 依賴安裝：`pip install --no-cache-dir -r requirements.txt` 不會安裝 PEP 440 pre-release 版本，且 requirements.txt 誤寫成 `pygsheet==0.1.19b25`（正確套件名為 `pygsheets`），導致 task05 容器內 import 失敗。已在 requirements.txt 指定正確套件名與版本。（20260713）
+- Cloud Run 服務間呼叫需帶 OIDC token：dashboard 未帶 Authorization header 時 Silver 端點回 401（log 顯示 "The request was not authenticated"），前端則因回應非 JSON 而拋 `JSONDecodeError`、畫面持續轉圈。另確認「endpoint URL 設錯」時 log 只會出現在前端，可用此快速定位問題落在哪一層。（20260716）
+- Agent Platform 憑證：service account JSON key 僅地端需要，上雲後改由 service account、IAM 與各 cloud API permission 供給 Cloud Run job／service 間的溝通。（20260716）
+- Service account 權限依最小權限原則（PoLP）重新收斂，各 Cloud Run job／service 對 Artifact Registry、Cloud Storage、Agent Platform 等的角色對照表已整理成表（見 20260717 work log）。（20260717）
+- 各 ETL task 的 try-except 統一為三層模式：inner 就近捕捉網路與解析錯誤（只記業務短訊息、純 raise）→ middle 補「哪個 repo／branch／problem」context 後純 raise 並保留原例外型別 → outer 入口 `run_taskNN` 以 `logger.opt(exception=True).critical()` 印一次完整 traceback 後 raise。涵蓋 task02／03／05／06／07（silver／gold／common）／08，確保例外不被無聲吞掉、型別顆粒度不被 broad-except 弄粗、traceback 只印一次。刻意吞例外不外拋的位置（task06／08 per-note 續跑並靠 CDC gate 重試、task07 `audit_log.py` 回安全預設值、`_call_llm()` 視為業務結果、`l_archive_note` 的 frontmatter 重試、兩個 Flask `app.py` 端點 handler 回結構化 JSON 與 500）皆已記錄理由。（20260720）
+- CI/CD 自動化補齊：以 GitHub Actions workflow 完成各 Cloud Run service／job 的持續部署，並分 `dev`／`prod` 兩個環境（`dev` 保留給 system prompt 調整、pipeline 重構、UI 優化等實驗）。原「task06 workflow 只 build image、Cloud Run Job 仍需手動部署」的待辦（20260713）一併結案。（20260727）
+- 文件與架構圖補齊：完成十份 README.md（根目錄與各 task），以 Lucidchart 繪製 sequence diagram 架構圖並引用於根 README，另以 mermaid 產出各 task（DAG）的 dataflow SVG 嵌入 `dashboard_ui/pages/knowledge_factory.py`。（20260727）
+- Streamlit rerun 時 PyArrow segfault：PyArrow 25.0.0 綁的 mimalloc 3.3.1 在「函式庫首次於短生命週期的 worker thread 載入、之後另一 thread 才做 Arrow allocation」時會 segfault，而 Streamlit 的 ScriptRunner 生命週期正好觸發此模式。已依官方建議在 **import PyArrow 之前**設 `ARROW_DEFAULT_MEMORY_POOL=system`，讓 PyArrow 改用 `malloc` 繞開 mimalloc（屬 workaround，升版方案見改進中）。（20260727）
 
 # Daily Work Log
 ## 20260423 Work log
@@ -1920,3 +2010,17 @@ json.decoder.JSONDecodeError: Expecting value: line 2 column 1 (char 1)
     - **task07 `t_enrich_html_to_markdown` 的 _call_llm() 處的try-except**：LLM 失敗，是因達到 regenerte quota、rate-limit、API error 等，這屬業務執行結果而非服務崩潰，故不 raise。
     - **task07 `l_archive_note` 的 frontmatter 重試 except**（`archive_note`／`reject_note` 內）：主流程才是歸檔是否成功，而不是 frontmatter 寫入 MongoDB 是否順利，故選擇吞掉例外，用 `continue` 進入迴圈下一輪的。
     - **task07 兩個 `app.py` 的端點 handler（enrich／archive）**：Flask 邊界屬於 web service，所以不向外 raise，否則影響使用者體驗，而是要改捕捉例外後，使用 `logger.exception()` 在 stderr 印一次 traceback，然後return `結構化 JSON` 與 `500`。
+
+## 20260727 Work log
+1. Completed all the README.md files for each task and root README.md. There are ` ten` README.md files in this project.
+
+2. Illustrated the [architecture of sequence diagrams](./architecture.png) using lucid chart web tool. The diagram were cited from the root [README.md](../README.md).
+
+3. Illustrated the dataflow of each task (precisely said DAGs) with mermaid codes. The output SVG were embedded in the [frontend page](../dashboard_ui/pages/knowledge_factory.py).
+
+4. Completed the deployment job to GCP cloud run service/job by using GitHub Actions workflows to utilize the automatically Continuous Deployment. The environment to deploy were `dev` and `prod`. Environment `dev` was lefted for feature optimization such as system prompt revision, data pipelines refactor and UI improvement, and so on.
+
+5. During the deployment, another new issue occurred and avoided based on the [official's recommendation](https://docs.streamlit.io/develop/quick-reference/release-notes/2026). The root cause was that [PyArrow 25.0.0 bundles mimalloc 3.3.1, which can segfault when the library is first loaded on a short-lived worker thread and a later thread performs an Arrow
+allocation. And Streamlit's ScriptRunner lifecycle triggers this pattern.](https://github.com/streamlit/streamlit/pull/15947). The workround for this was set the environment variable of `'ARROW_DEFAULT_MEMORY_POOL=system'` **before importing PyArrow.**. This avioded PyArrow from using the `mimalloc 3.3.1` but made pyarrow use `malloc`. Note the solution did not aim to fix the bug originated from the PyArrow 25.0.0.
+
+6. Another solution might be upgrading the Streamlit version from 1.59.2 to 1.60.0 which has been released on [July 21, 2026.](https://docs.streamlit.io/develop/quick-reference/release-notes/2026). So far, I chose the quick fix solution mentioned at 5.
