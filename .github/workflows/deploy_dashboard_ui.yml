@@ -82,6 +82,8 @@ jobs:
             --project "${GCP_PROJECT}" \
             --service-account person-skill-dashboard@${GCP_PROJECT}.iam.gserviceaccount.com \
             --port 8080 \
+            --memory 2Gi \
+            --concurrency 4 \
             --allow-unauthenticated \
             --set-env-vars "SILVER_ENDPOINT_URL=${SILVER_ENDPOINT_URL},GOLD_ENDPOINT_URL=${GOLD_ENDPOINT_URL}" \
             --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,COHERE_API_KEY=COHERE_API_KEY:latest,ERD_LINK=ERD_LINK:latest,AI_AGENT_RATE_LIMIT=AI_AGENT_RATE_LIMIT:latest,ROLE_ML_USERNAME=ROLE_ML_USERNAME:latest,ROLE_ML_PASSWORD=ROLE_ML_PASSWORD:latest,ROLE_OWNER_USERNAME=ROLE_OWNER_USERNAME:latest,ROLE_OWNER_PASSWORD=ROLE_OWNER_PASSWORD:latest,ROLE_SENIOR_USERNAME=ROLE_SENIOR_USERNAME:latest,ROLE_SENIOR_PASSWORD=ROLE_SENIOR_PASSWORD:latest,ROLE_GUEST_USERNAME=ROLE_GUEST_USERNAME:latest,ROLE_GUEST_PASSWORD=ROLE_GUEST_PASSWORD:latest

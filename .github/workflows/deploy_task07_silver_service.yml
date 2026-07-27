@@ -73,6 +73,8 @@ jobs:
             --project "${GCP_PROJECT}" \
             --service-account psd-enrich-task@${GCP_PROJECT}.iam.gserviceaccount.com \
             --port 8080 \
+            --memory 1Gi \
+            --concurrency 2 \
             --no-allow-unauthenticated \
             --set-env-vars "ENVIRONMENT=${ENV_NAME}" \
             --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest
