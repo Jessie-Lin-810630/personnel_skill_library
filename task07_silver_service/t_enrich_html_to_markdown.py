@@ -170,7 +170,8 @@ def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
     soup = BeautifulSoup(html_content, "html.parser")
     for img in soup.find_all("img"):
         alt = " ".join(img.get("alt", "").split()) or "image"
-        alt = alt.replace("]", "-")  # alt 替代避免文字可能會有 ] 符號會讓 md 檔圖片顯示失敗
+        # alt 替代避免文字可能會有 ] 、 [ 、 ! 符號會讓 md 檔圖片顯示失敗
+        alt = alt.replace("]", "-").replace("[", "-").replace("!", "-").replace("！", "-")
         src = img.get("src", "")
 
         # conver to string to meet the link syntax of image in a markdown file
