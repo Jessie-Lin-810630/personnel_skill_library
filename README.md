@@ -24,10 +24,12 @@
 
 ## About
 
-**Personnel Skill Library** 是一套以資料工程手法打造的**個人技能看板**：把散落在多個平台的學習與工作足跡（Obsidian／OneNote 筆記、GitHub、LeetCode／ccClub 刷題、Google Sheet 個人 KPI 統整表）透過多條 ETL pipeline 匯整進 MongoDB Atlas 與 GCS 資料湖，再以 Streamlit 呈現技能雷達、專案架構、資料管線健康度等頁面，最後串接一個以向量檢索為基礎的 **AI 知識 Agent**，用自然語言查詢知識庫。
+**Personnel Skill Library** 是一套以資料工程手法打造的**個人技能看板**：把散落在多個平台的學習與工作足跡（Obsidian／OneNote 筆記、GitHub、LeetCode／ccClub 刷題、Google Sheet 個人 KPI 統整表）透過 ETL 任務組合多條 data pipelines 匯整進 MongoDB Atlas 與 GCS 資料湖，再以 Streamlit 呈現技能雷達、專案架構、資料管線健康度等頁面，最後串接一個以向量檢索為基礎的 **AI 知識 Agent**，用自然語言查詢知識庫。
 
-**運作概念**：運行 7 支 data pipelines，其中有 4 支中型資料管道 [task01](#feature)、[task06](#feature)、[task07](#feature)、[task08](#feature)，以資料的 hash 演算結果保證管道重試時的冪等性 (idempotency)，以 data pipeline 程式腳本大量強調資料血緣的可追溯性，保護向量檢索庫指向 single truth，亦是本專案所希望強調的資料治理品質。這類 data pipeline 採用 **Bronze、Silver、Gold** medallion 架構為每段腳本的資料產出品質分層設計，Silver 層之後為乾淨的知識文檔 (筆記)，Gold 層則以一個預設的工作流程將乾淨文檔執行歸檔任務後，自動執行向量化，供 RAG Agent 檢索。  \
-RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動，並實作前後端服務讀寫權限分離，避免資料表誤改、誤刪等污染風險。各 data pipelines 與前端介面的實作引導連結，詳見 [Feature Table](#feature)。
+**運作概念**：運行 7 支 data pipelines，其中有 2 支中型資料管道 [task01](#feature)、[task07](#feature)，這 2 支 data pipeline 按照期待的資料產出品質，切出 **Bronze、Silver、Gold** medallion 架構三層，每一層根據資料治理目標有各自的 ETL 實作步驟。Bronze 層為原始資料萃取與導入 GCS 資料湖，即 data ingestion。Silver 層之後為乾淨的知識文檔，Gold 層則以一個將乾淨文檔執行歸檔任務。歸檔的文檔將會銜接下游 2 支資料管道 [task06](#feature)、[task08](#feature) ，執行向量化任務，供 RAG Agent 檢索。  \
+RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動，並實作前端、後端服務讀寫權限分離，避免資料表誤改、誤刪等污染風險。各 data pipelines 與前端介面的實作引導連結，詳見 [Feature Table](#feature)。
+
+**設計要點**：data pipelines 程式腳本大量使用資料的 hash 演算結果保證管道重試時的冪等性 (idempotency)，資料表設計則強調資料血緣的可追溯性，例如：主要文本的版本號碼、主要文本引用的圖片指向哪個路徑、清理完成的文本來自於哪份原始文本，從而**保護向量檢索庫的 grounding 指向 single truth、故障排查時也會比較精準。這亦是本專案所希望強調的資料治理品質**。最後，因應長文本的資料特性會使得輸入的 tokens 較多，data pipelines 亦謹慎採用**增量載入 (incremental load) 設計模式**，避免無意義的重複請求 APIs 端口。
 
 > [Live Demo](https://dashboard-ui-219985522999.asia-east1.run.app)
 
