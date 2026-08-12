@@ -821,9 +821,9 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內文與圖片來源。
 
 ### ETL 設計重點
-- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；投影出 `raw_md_path`（metadata 主鍵、供 CAS 定位）、`archived_md_path`（內文來源、也是向量表血緣欄 `md_path` 的值）、`archived_md_md5_hash`（CAS 守衛）；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
+- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；投影出 `raw_md_path`（唯一鍵、供 CAS 定位）、`archived_md_path`（內文來源、也是向量表血緣欄 `md_path` 的值）、`archived_md_md5_hash`（CAS 守衛）；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
 - **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 的血緣欄為 **`md_path`（值＝人工核可後的 `archived_md_path`）**。
-- **Load**：`load_vectors_incremental_v2()` 依血緣欄 `md_path` 分組，對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`；再以 **`archived_md_md5_hash` 守衛的 CAS（以 metadata 主鍵 `raw_md_path` 定位筆記）** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。embedding 期間若 task01_v2 又重歸檔改了 md5，CAS 不命中、留待下輪重做。
+- **Load**：`load_vectors_incremental_v2()` 依血緣欄 `md_path` 分組，對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`；再以 **`archived_md_md5_hash` 守衛的 CAS（以 metadata 唯一鍵 `raw_md_path` 定位筆記）** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。embedding 期間若 task01_v2 又重歸檔改了 md5，CAS 不命中、留待下輪重做。
 - **清除軟刪除的向量**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，以 `delete_many({md_path})`（`md_path`＝該筆的 `archived_md_path`）清 `note_vectors_multimodal` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
 
 ### MongoDB Collections

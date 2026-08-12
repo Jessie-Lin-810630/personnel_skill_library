@@ -2,7 +2,7 @@
 
 task06_v2（`task06_obsidian_embed_etl_v2`）對 Obsidian：gate 讀 `obsidian_note_metadata`（`status=archived AND embedded_status=false`）、依 `archived_md_path` 從 `personal-vaults/archived-notes/` 取 md、圖片走 wiki-link `![[x.png]]`＋`_attachment/`、以 `raw_md_path` 為 `note_vectors_multimodal` 血緣鍵、`archived_md_md5_hash` 守衛 CAS 翻 `embedded_status`，並有 `status=deleted` 的軟刪除 purge。
 
-task07 對 OneNote：C3 `onenote_note_metadata`（主鍵 `page_id`+`dt`）、bucket `onenote-vaults`、歸檔 md 在 `archived_md_path`、圖片在 `attached_images[].archived_image_path`（markdown `![](_images/<檔名>)` 語法、`_images/` 目錄）、archived md 指紋 `md_md5_hash`、無軟刪除。
+task07 對 OneNote：C3 `onenote_note_metadata`（複合唯一鍵 `page_id`+`dt`）、bucket `onenote-vaults`、歸檔 md 在 `archived_md_path`、圖片在 `attached_images[].archived_image_path`（markdown `![](_images/<檔名>)` 語法、`_images/` 目錄）、archived md 指紋 `md_md5_hash`、無軟刪除。
 
 兩來源最終要寫入**同一張** `note_vectors_multimodal`（同一 Atlas Vector Search index），供同一 RAG 檢索。
 
@@ -40,9 +40,9 @@ task07 對 OneNote：C3 `onenote_note_metadata`（主鍵 `page_id`+`dt`）、buc
 task06_v2 的 `_resolve_chunk_images` 抓 `![[x.png]]` 並拼 `_attachment/`。task08 改抓標準 markdown `![alt](_images/<檔名>)`（task07 silver `convert_img_tag_to_md_str` 產出的語法），圖片在該 md 同層 `_images/` 目錄。
 - 圖片來源優先用 gate 帶出的 `attached_images[].archived_image_path`（已知精確路徑、已存在），以 basename 對上 chunk 內連結；避免重推路徑。無對應 basename 者略過並記 warning。
 
-### D4：gate 與 CAS 對齊 OneNote 主鍵與欄位
+### D4：gate 與 CAS 對齊 OneNote 複合唯一鍵與欄位
 - gate 投影：`page_id`、`dt`、`archived_md_path`、`md_md5_hash`、`md_frontmatter`、`page_title`、`attached_images`。
-- CAS：`onenote_note_metadata.update_one({archived_md_path: <本次 archived 路徑>, embedded_status: false, md_md5_hash: <本次版本>}, {$set: {embedded_status: true, embedded_at: now}})`。`archived_md_path` 全域唯一、可唯一定位一個 (page_id, dt) 版本，故用它當 CAS 過濾鍵，等同以 (page_id, dt) 定位，且 load 層天然持有此值不需另湊主鍵。未命中代表 embedding 期間又重歸檔（`md_md5_hash` 變），留待下輪。
+- CAS：`onenote_note_metadata.update_one({archived_md_path: <本次 archived 路徑>, embedded_status: false, md_md5_hash: <本次版本>}, {$set: {embedded_status: true, embedded_at: now}})`。`archived_md_path` 全域唯一、可唯一定位一個 (page_id, dt) 版本，故用它當 CAS 過濾鍵，等同以 (page_id, dt) 定位，且 load 層天然持有此值不需另湊複合唯一鍵。未命中代表 embedding 期間又重歸檔（`md_md5_hash` 變），留待下輪。
 - `md_md5_hash` 為 archived md 指紋；archived md 由 silver md server-side byte copy 而來，md5 相同，作為守衛穩定。
 
 ### D5：先刪後插以 md_path 為鍵

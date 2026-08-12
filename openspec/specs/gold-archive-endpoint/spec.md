@@ -9,7 +9,7 @@ TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose
 `action=approved` 時，端點 MUST 呼叫 Gold Load 把該版本的 silver md 與其引用 png 從
 `processed-notes/`（md）與 `raw-notes/`（png，路徑取自 C3 `img_path`）複製到
 `archived-notes/<user>/<notebook>/<section>/dt=<dt>/`，取得各自新 md5，並 upsert
-`onenote_note_metadata`（主鍵 `page_id`+`dt`）：`status=archived`、`review_result=approved`、
+`onenote_note_metadata`（複合唯一鍵 `page_id`+`dt`）：`status=archived`、`review_result=approved`、
 `reviewed_by_role`、`reviewed_at`、`archived_at`、`md_archive_path`、`img_archive_path`。
 本端點 MUST NOT 執行向量化（解耦至另一條 pipeline）。
 
@@ -24,7 +24,7 @@ TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose
 ### Requirement: 歸檔連帶退役同頁其他候選版本
 
 當 `action=approved` 歸檔成功後，Gold Load MUST 退役同頁（同 `page_id`）其他仍在審閱
-（`status=pending_review`）的版本：以同主鍵 upsert C3 翻為 `status=review_closed`，並依
+（`status=pending_review`）的版本：以同一組複合唯一鍵 upsert C3 翻為 `status=review_closed`，並依
 `html_hash` 判定 `review_result`——與歸檔版 `html_hash` 相同者標 `overwritten`（內容等同已被採納）、
 不同者標 `rejected`。退役版本 MUST 記 `reviewed_at`，MUST NOT 寫 `reviewed_by_role`
 （非逐一人工審閱，僅因同頁擇一歸檔而連帶結束審閱期）。`status != pending_review` 的版本
@@ -45,7 +45,7 @@ TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose
 ### Requirement: 歸檔後萃取 frontmatter metadata
 
 Gold Load 在歸檔完成後 MUST 讀回 `archived-notes/` 那份剛歸檔的 md，組出一個內嵌 Object
-`md_frontmatter`，並以同主鍵（`page_id`+`dt`）upsert `onenote_note_metadata`。該 Object
+`md_frontmatter`，並以同一組複合唯一鍵（`page_id`+`dt`）upsert `onenote_note_metadata`。該 Object
 MUST 含 5 個欄位：`tags`、`date`、`type`、`alias`（取自 frontmatter），以及 `valid_img`（整數）。
 當 frontmatter 未被正確寫入 metadata 區時，MUST 以正文頂端 `key: value` 區塊做補救解析。
 `date` 寫入 C3 前 MUST 正規化為 BSON 可編碼的日期時間型別。

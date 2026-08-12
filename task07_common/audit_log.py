@@ -2,7 +2,8 @@
 
 1. onenote_graph_api_logs 為每次 OneNote Graph API 請求各記一筆。
 2. multimodal_llm_enrichment_logs 為每次 LLM enrichment 呼叫各記一筆，含 cache_hit 標記。
-3. onenote_note_metadata 為每個 (page_id, dt) 版本各記一筆、全程 upsert，主鍵改為 (page_id, dt) 以支援同頁多版本。
+3. onenote_note_metadata 為每個 (page_id, dt) 版本各記一筆、全程 upsert，
+   複合唯一鍵 (Upsert key) 改為 (page_id, dt) 以支援同頁多版本。
 
 三張 collection 寫入的 html sha256 欄位一律命名 html_sha_hash，讓跨 collection join 時欄名一致。
 """
@@ -128,7 +129,7 @@ def log_enrichment_call(
 
     Args:
         page_id (str | None): 該次 enrichment 所屬 page id。
-        html_hash (str): 對應版本的 html sha256，作為快取與配額鍵。
+        html_hash (str): 對應版本的 html sha256，作為快取機制的判斷依據。
         model (str): 使用的 LLM 模型名稱。
         cache_hit (bool): 是否命中相同 html_hash 的既有 md（命中則未實際打 LLM）。
         trigger (Literal["on_demand", "regenerate"]): 觸發來源。
@@ -180,7 +181,7 @@ def count_regenerate(html_hash: str) -> int:
         return 0
 
 
-# ── onenote_note_metadata（主鍵 = page_id + dt）───────────────────────────────
+# ── onenote_note_metadata（複合唯一鍵 = page_id + dt）─────────────────────────
 
 
 def get_latest_version_meta(page_id: str) -> dict:
@@ -260,7 +261,7 @@ def upsert_version_meta(
     set_fields: dict,
     set_on_insert_fields: dict | None = None,
 ) -> None:
-    """Upsert Collection onenote_note_metadata，主鍵為 (page_id, dt)，支援同頁多版本。
+    """Upsert Collection onenote_note_metadata，複合唯一鍵 (Upsert key) 為 (page_id, dt)，支援同頁多版本。
 
     每次寫入一律在 $set 蓋 updated_at、在 $setOnInsert 補 created_at（當下 UTC），
     呼叫端不需逐處手動帶這兩個稽核時間戳。

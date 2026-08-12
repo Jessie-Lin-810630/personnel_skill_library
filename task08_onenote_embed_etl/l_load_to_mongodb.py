@@ -46,7 +46,7 @@ def load_vectors_incremental_onenote(
     3. 只有這份筆記在 DB 仍是 embedded_status=false、且 md_md5_hash 等於本次 embedding 的版本時，
        才把 embedded_status 翻成 true 並蓋上 embedded_at（同時蓋 updated_at，兩者同一時戳）。
        若 embedding 期間該筆記又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版
-       向量誤標成最新版本。archived_md_path 唯一定位該版本，故以它作 CAS 過濾鍵，等同以 (page_id, dt) 定位。
+       向量誤標成最新版本。archived_md_path 唯一定位該版本，故以它作 CAS 判斷，等同以 (page_id, dt) 定位。
 
     Args:
         db: pymongo Database 物件。

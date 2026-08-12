@@ -195,7 +195,7 @@ def get_problem_kpi_donut(db: Database, collection: str = "ccClub&leetcode_summa
 def get_onenote_versioned_pages(db: Database) -> list[dict]:
     """查詢 Collection onenote_note_metadata，回傳一篇筆記「目前哪些版本可審閱」。
 
-    同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為主鍵鎖定筆記版本。
+    同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為複合唯一鍵鎖定筆記版本。
     以 aggregation 做兩層篩選，讓前端只看到需要審閱的版本：
     - 濾掉 status=review_closed 的版本（已退役，含 rejected 與 overwritten，不論 dt 皆不再出現）。
     - 每個 page_id 算出 lastArchivedAt = max(dateTrunc(archived_at, day))，只保留 dt≥最後歸檔日

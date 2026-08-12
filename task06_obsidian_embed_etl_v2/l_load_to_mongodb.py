@@ -46,13 +46,13 @@ def load_vectors_incremental_v2(
     3. 只有這份筆記在 DB 仍是 embedded_status=false、且 archived_md_md5_hash 等於本次 embedding 的版本時，
        才把 embedded_status 翻成 true 並以同一時戳蓋上 embedded_at 與 updated_at。若 embedding 期間 task01_v2
        又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。
-       CAS 仍以 metadata 主鍵 raw_md_path 定位筆記（向量表血緣欄用 md_path 不影響 metadata 主鍵與 CAS 規則）。
+       CAS 仍以 metadata 唯一鍵 raw_md_path 定位筆記（向量表血緣欄用 md_path 不影響 metadata 唯一鍵與 CAS 規則）。
 
     Args:
         db: pymongo Database 物件。
         vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單（血緣欄 md_path）。
         embedded_by_raw_md_path: 本次成功處理的 {raw_md_path: {"md_path": archived_md_path,
-            "archived_md5": archived_md_md5_hash}}；key 為 metadata 主鍵、md_path 供向量先刪後插、md5 作 CAS 守衛。
+            "archived_md5": archived_md_md5_hash}}。
     """
     vectors = db[VECTORS_V2]
     notes = db[NOTE_METADATA]
@@ -73,7 +73,7 @@ def load_vectors_incremental_v2(
             n_chunks += len(chunks_of_file)
         n_files += 1
 
-        # CAS 仍以 metadata 主鍵 raw_md_path 定位；同一時戳一併蓋 embedded_at 與 updated_at，避免時序矛盾
+        # CAS 仍以 metadata 唯一鍵 raw_md_path 定位；同一時戳一併蓋 embedded_at 與 updated_at，避免時序矛盾
         now = datetime.now(timezone.utc)
         cas = notes.update_one(
             {"raw_md_path": raw_md_path, "embedded_status": False, "archived_md_md5_hash": archived_md5},
@@ -118,7 +118,7 @@ def purge_deleted_vectors(db: Database) -> int:
         vectors.delete_many({"md_path": doc.get("archived_md_path")})
         notes.update_one(
             {
-                "raw_md_path": raw_md_path,  # metadata 主鍵；是從 raw-notes/ 被刪掉的筆記
+                "raw_md_path": raw_md_path,  # metadata 唯一鍵；是從 raw-notes/ 被刪掉的筆記
                 "status": "deleted",
                 "embedded_status": True,
             },

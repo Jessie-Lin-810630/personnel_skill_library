@@ -346,7 +346,7 @@ def t_chunk_and_embed_v2(
       - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆血緣欄為 md_path（＝人工核可後的
         archived_md_path 值），作為向量表與 collection obsidian_note_metadata 的 join 鍵。
       - embedded_by_raw_md_path：本次成功處理（含切塊為空）的 {raw_md_path: {"md_path": archived_md_path,
-        "archived_md5": archived_md_md5_hash}}。key 為 metadata 主鍵 raw_md_path（CAS 仍以它定位筆記），
+        "archived_md5": archived_md_md5_hash}}。key 為 metadata 唯一鍵 raw_md_path（CAS 仍以它定位筆記），
         value 帶 md_path 供 load 層以向量欄位先刪後插、archived_md5 作 CAS 守衛值。失敗（拋例外）的檔不列入。
 
     all_vector_docs 每筆輸出的結構：

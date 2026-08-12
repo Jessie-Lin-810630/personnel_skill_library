@@ -163,7 +163,7 @@ def _build_md_quality_meta(md_str: str, img_paths: list[str] | None, page_title:
 
     Returns:
         dict: {md_frontmatter, md_body, dismatched_img_count, md_has_dismatched_img, topic}，
-        供以同主鍵 upsert Collection onenote_note_metadata。
+        供以同一組複合唯一鍵 upsert Collection onenote_note_metadata。
     """
     post = frontmatter.loads(md_str)
     fm = post.metadata

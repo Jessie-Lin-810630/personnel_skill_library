@@ -128,7 +128,7 @@ class ChunkEmbedV2Tests(unittest.TestCase):
         # 圖片來源指向 archived-notes 的 _attachment（非 raw-notes）
         all_imgs = [p for d in docs for p in d["image_paths"]]
         self.assertIn("gs://personal-vaults/archived-notes/u/nb/01-d/_attachment/a.png", all_imgs)
-        # map 以 metadata 主鍵 raw_md_path 為 key，value 帶 md_path 與 CAS 守衛 md5
+        # map 以 metadata 唯一鍵 raw_md_path 為 key，value 帶 md_path 與 CAS 守衛 md5
         self.assertEqual(embedded_map, {raw: {"md_path": archived, "archived_md5": "M1"}})
 
 

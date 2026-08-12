@@ -109,13 +109,13 @@ task07_common/
 ## Collection 2 — `onenote_note_metadata`（Bronze 寫入的欄位）
 
 - 每筆 = 一頁 OneNote 的**某一版本**
-- 複合主鍵 (page_id, dt)。
+- 複合唯一鍵 (Upsert key)：`page_id + dt`。
 - Bronze 階段寫入以下欄，其餘欄位由 Silver & Gold 任務 upsert：
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `page_id` | OneNote 頁面 ID（主鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
-| `dt` | 下載日（主鍵之一，版本鍵） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
+| `page_id` | OneNote 頁面 ID（複合鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `dt` | 下載日（複合鍵之一，意為業務語意上的版本控制鍵） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
 | `onenote_user_id` | 筆記使用者 id | String | `e_onenote_download.py` 的 `_extract_user_account()` |
 | `notebook` / `section` / `page_title` | 筆記本 / 章節 / 頁面標題 | String | `e_onenote_download.py` 的 `download_notebooks()` |
 | `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 冪等鍵） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
