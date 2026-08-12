@@ -8,7 +8,7 @@
 ## 2. Bronze ETL：attached_images、topic、hash 欄位名
 
 - [x] 2.1 `e_onenote_download.py` `download_notebooks`：成功路徑把 `img_md5`/`img_path` `zip` 成 `attached_images=[{raw_image_path, raw_image_md5}, ...]` 寫入；移除 `img_md5`/`img_path`/`img_archive_path` 平行陣列
-- [x] 2.2 `download_notebooks`：`html_hash`→`html_sha_hash`、`html_md5`→`html_md5_hash` 寫入鍵改名；失敗路徑 set_on_insert 的 `attached_images=[]`、md md5 欄位改 `md_md5_hash`、補 md_body/dismatched 占位
+- [x] 2.2 `download_notebooks`：`html_hash`→`html_sha_hash`、`html_md5`→`html_md5_hash` 寫入的 document 欄位名改名；失敗路徑 set_on_insert 的 `attached_images=[]`、md md5 欄位改 `md_md5_hash`、補 md_body/dismatched 占位
 - [x] 2.3 `download_notebooks`：以 `infer_topic([], page_title)` 算 `topic` 寫入（bronze 無 tags）
 - [x] 2.4 unittest：Bronze 成功／失敗路徑 upsert 的 document 含 `html_sha_hash`/`html_md5_hash`/`attached_images`(raw 端)/`topic`，不含舊欄位名
 

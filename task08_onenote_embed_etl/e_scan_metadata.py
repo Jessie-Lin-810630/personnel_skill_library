@@ -41,7 +41,7 @@ def get_embedding_gate_list(db: Database) -> list[dict]:
     """從 onenote_note_metadata 挑出 status=archived 且 embedded_status=false 的版本，作為 embedding gate。
 
     1. 以 status 與 embedded_status 過濾，只留下已歸檔但尚未向量化的版本。
-    2. 每筆只投影 embedding 需要的欄位：archived_md_path 是內文來源與向量血緣鍵、
+    2. 每筆只投影 embedding 需要的欄位：archived_md_path 是內文來源與向量表 join 鍵、
        md_md5_hash 供 CAS 守衛、page_id 與 dt 為 metadata 複合唯一鍵、
        另外帶上 md_frontmatter、page_title 與 attached_images（archived 圖片血緣）。
 

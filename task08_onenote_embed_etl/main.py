@@ -1,7 +1,8 @@
 """task08 入口：對 task07 歸檔的 OneNote 筆記做增量多模態 embedding，寫入共用 note_vectors_multimodal。
 
 gate 讀 onenote_note_metadata（status=archived AND embedded_status=false）→ 從 archived 層 chunk+embed →
-先刪後插 note_vectors_multimodal（血緣欄 md_path=md_archive_path）、以 md_md5_hash 守衛 CAS 翻 embedded_status。
+先刪後插 note_vectors_multimodal（md_path=md_archive_path，作為 data lineage 依據）、
+以 md_md5_hash 守衛 CAS 翻 embedded_status。
 OneNote 無軟刪除，故不含 purge。
 
 Usage:

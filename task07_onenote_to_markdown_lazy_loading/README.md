@@ -100,7 +100,7 @@ task07_common/
 | `attempt_id` | 第幾次嘗試（首次為 1） | Integer | `e_onenote_download.py` 的 `api_get()` |
 | `status` / `status_code` | 該次 attempt 結果與 HTTP 碼（傳輸層錯誤記 0） | String / Integer | `e_onenote_download.py` 的 `api_get()`／`download_notebooks()` |
 | `latency_ms` | 該次請求耗時（毫秒） | Integer | `e_onenote_download.py` 的 `api_get()` |
-| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 冪等鍵） | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
+| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 內容指紋） | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
 | `html_path` | HTML 寫入 GCS 的完整路徑 | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
 | `downloaded` | 本次是否實際寫入新版本到 GCS（雜湊相同則 false） | Bool | `e_onenote_download.py` 的 `download_notebooks()` |
 | `environment` | 執行環境（local / dev / prod） | String | `task07_common/audit_log.py` 的 `log_api_call()` |
@@ -115,10 +115,10 @@ task07_common/
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
 | `page_id` | OneNote 頁面 ID（複合鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
-| `dt` | 下載日（複合鍵之一，意為業務語意上的版本控制鍵） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
+| `dt` | 下載日（複合鍵之一，同時是資料湖的 partition key） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
 | `onenote_user_id` | 筆記使用者 id | String | `e_onenote_download.py` 的 `_extract_user_account()` |
 | `notebook` / `section` / `page_title` | 筆記本 / 章節 / 頁面標題 | String | `e_onenote_download.py` 的 `download_notebooks()` |
-| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 冪等鍵） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
+| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 內容指紋） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
 | `html_md5_hash` | GCS html 物件 md5 | String | `task07_common/gcs.py` 的 `upload_text()` |
 | `html_path` | html 在 GCS 的路徑 | String | `e_onenote_download.py` 的 `download_notebooks()` |
 | `html_downloaded_at` | HTML 下載時間 | Date (ISO 8601) | `task07_common/audit_log.py` |

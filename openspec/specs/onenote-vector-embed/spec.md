@@ -31,11 +31,11 @@ TBD - created by archiving change task08-onenote-embed. Update Purpose after arc
 - **WHEN** chunk 內 `![](_images/typo.png)` 的 basename 不落在任何 `archived_image_path`
 - **THEN** 該圖不送入模型、記 warning，chunk 文字仍照常 embedding
 
-### Requirement: 向量寫入共用 note_vectors_multimodal，血緣欄為 archived 路徑
+### Requirement: 向量寫入共用 note_vectors_multimodal，以 archived 路徑作為 data lineage 依據
 
-系統 SHALL 將 chunk 向量寫入既有 collection `note_vectors_multimodal`（與 task01/task06 共用），每筆 = 一個 chunk。向量 doc 的來源血緣欄 SHALL 命名 `md_path`，其值 SHALL 為該版本的 `archived_md_path`（archived md 的完整 gs:// URI）；圖片欄 `image_paths` SHALL 為該 chunk 對應的 `archived_image_path` 清單。系統 MUST NOT 以 raw-notes/processed-notes/html 路徑作為血緣欄值，且 MUST NOT 另設 source 判別欄（`archived_md_path` 跨 bucket 全域唯一）。對本次處理的每份筆記，系統 SHALL **先 `delete_many({md_path})` 再 `insert_many`**。
+系統 SHALL 將 chunk 向量寫入既有 collection `note_vectors_multimodal`（與 task01/task06 共用），每筆 = 一個 chunk。向量 doc 中作為 data lineage 依據的欄位 SHALL 命名 `md_path`，其值 SHALL 為該版本的 `archived_md_path`（archived md 的完整 gs:// URI）；圖片欄 `image_paths` SHALL 為該 chunk 對應的 `archived_image_path` 清單。系統 MUST NOT 以 raw-notes/processed-notes/html 路徑作為該欄的值，且 MUST NOT 另設 source 判別欄（`archived_md_path` 跨 bucket 全域唯一）。對本次處理的每份筆記，系統 SHALL **先 `delete_many({md_path})` 再 `insert_many`**。
 
-#### Scenario: 血緣欄存 archived md 路徑
+#### Scenario: md_path 存 archived md 路徑
 
 - **WHEN** 一版本 `archived_md_path="gs://onenote-vaults/archived-notes/.../n.md"` 完成 embedding
 - **THEN** 其每個 chunk doc 的 `md_path` 為該 archived md 路徑，`image_paths` 為 archived 圖片路徑

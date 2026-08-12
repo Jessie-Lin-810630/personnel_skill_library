@@ -1,4 +1,4 @@
-"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_path（archived md 路徑）為血緣鍵的 vector docs。
+"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_path（archived md 路徑）為 join 鍵的 vector docs。
 
 清理 Obsidian 特有語法 → 兩段式 chunking → 每 chunk 都送 text 與 圖片 uri 給多模態模型 gemini-embedding-2
 → L2 normalize → 組 vector doc。
@@ -343,7 +343,7 @@ def t_chunk_and_embed_v2(
     """串接 fetch → preprocess → chunk → embed，產出 vector docs 與 {raw_md_path: {md_path, archived_md5}}。
 
     回傳 (all_vector_docs, embedded_by_raw_md_path)：
-      - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆血緣欄為 md_path（＝人工核可後的
+      - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆帶 md_path（＝人工核可後的
         archived_md_path 值），作為向量表與 collection obsidian_note_metadata 的 join 鍵。
       - embedded_by_raw_md_path：本次成功處理（含切塊為空）的 {raw_md_path: {"md_path": archived_md_path,
         "archived_md5": archived_md_md5_hash}}。key 為 metadata 唯一鍵 raw_md_path（CAS 仍以它定位筆記），
@@ -354,7 +354,7 @@ def t_chunk_and_embed_v2(
         ```
         {
             # 來源追蹤
-            "md_path":      "gs://personal-vaults/archived-notes/.../xxx.md",  # 血緣鍵（archived md 路徑）
+            "md_path":      "gs://personal-vaults/archived-notes/.../xxx.md",  # join 鍵（archived md 路徑）
             "file_name":    "xxx.md",
             "chunk_index":  0,          # 從 0 開始
             "chunk_total":  6,          # 這份筆記共幾個 chunk
@@ -425,7 +425,7 @@ def t_chunk_and_embed_v2(
             for idx, ec in enumerate(embedded):
                 all_vector_docs.append(
                     {
-                        "md_path": archived_md_path,  # 向量血緣鍵＝人工核可後的 archived md 路徑
+                        "md_path": archived_md_path,  # 向量表 join 鍵＝人工核可後的 archived md 路徑
                         "file_name": note.get("file_name", ""),
                         "chunk_index": idx,
                         "chunk_total": chunk_total,

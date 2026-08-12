@@ -81,7 +81,7 @@ GCS bucket `personal-vaults`（本地 Obsidian vault 已同步上雲），以 `s
 
 - **Transform**：優先以 frontmatter `type` 欄位判斷 `note_type`，fallback 用資料夾前綴；以 `TOPIC_KEYWORDS` 字典比對 tags 與檔名，推斷所屬 topic（`build_note_documents()` 目前為 passthrough，保留為清洗掛載點）
 
-- **Load**：`sync_notes()` 為 CDC 狀態機，以 GCS 現況對比 DB 逐筆決定 **insert / update / skip / delete**，並維護 `embedding_done`／`created_at`／`updated_at`（詳見下方〈增量 Embedding（CDC）成果〉）；`upsert_note_summary()` 以 `snapshot_date` 為鍵每日覆蓋一筆統計快照
+- **Load**：`sync_notes()` 為 CDC 狀態機，以 GCS 現況對比 DB 逐筆決定 **insert / update / skip / delete**，並維護 `embedding_done`／`created_at`／`updated_at`（詳見下方〈增量 Embedding（CDC）成果〉）；`upsert_note_summary()` 以 `snapshot_date` 為唯一鍵每日覆蓋一筆統計快照
 
 ### Topic 分類對照表
 
@@ -279,7 +279,7 @@ GitHub REST API（`https://api.github.com`），抓取範圍：
 - **Extract**：`GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 獲取 branch names；逐 branch 呼叫 `/commits`、逐 repo 呼叫 `/readme`；分頁器 `_paginate()` 每頁 100 筆
 - **Rate Limit 控制**：每次 response 後讀取 `x-ratelimit-remaining` 與 `x-ratelimit-reset`；剩餘配額低於緩衝值（100）時，精準 sleep 至 reset 時間點；優先處理 `retry-after` header（secondary rate limit）
 - **Transform**：以 `owner.login == username` 判斷 role（owner / collaborator）；以 `if c["commit"]["committer"]["email"] == github_mail:` 過濾出committer是自己帳號的commit；README 取 base64 解碼後前 300 字；`readme_url` 直接從 `/readme` endpoint 回傳的 `html_url` 取得
-- **Load**：存兩份文檔集，`文檔集 github_repos`以 `repo_id` 為唯一鍵 upsert；`文檔集 github_summary` 以 `snapshot_date` 為鍵每日更新
+- **Load**：存兩份文檔集，`文檔集 github_repos`以 `repo_id` 為唯一鍵 upsert；`文檔集 github_summary` 以 `snapshot_date` 為唯一鍵每日更新
 
 ### MongoDB Collections
 
@@ -821,14 +821,14 @@ MONGO_DB_NAME=                     # 應為 skill_dashboard
 MongoDB `obsidian_note_metadata` 作為 gate，GCS `archived-notes/` 作為內文與圖片來源。
 
 ### ETL 設計重點
-- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；投影出 `raw_md_path`（唯一鍵、供 CAS 定位）、`archived_md_path`（內文來源、也是向量表血緣欄 `md_path` 的值）、`archived_md_md5_hash`（CAS 守衛）；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
-- **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 的血緣欄為 **`md_path`（值＝人工核可後的 `archived_md_path`）**。
-- **Load**：`load_vectors_incremental_v2()` 依血緣欄 `md_path` 分組，對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`；再以 **`archived_md_md5_hash` 守衛的 CAS（以 metadata 唯一鍵 `raw_md_path` 定位筆記）** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。embedding 期間若 task01_v2 又重歸檔改了 md5，CAS 不命中、留待下輪重做。
+- **Extract（gate）**：`get_embedding_gate_list()` 挑 `status="archived"` 且 `embedded_status=false` 的筆記；投影出 `raw_md_path`（唯一鍵、供 CAS 定位）、`archived_md_path`（內文來源、也是向量表 `md_path` 的值，作為 data lineage 依據）、`archived_md_md5_hash`（CAS 守衛）；`fetch_archived_content()` 依 `archived_md_path` 從 archived 層下載 md body。取代 v1 讀 `obsidian_notes` 加 raw `.md` 的做法。
+- **Transform**：沿用 v1 chunking（`MarkdownHeaderTextSplitter` ＋ `RecursiveCharacterTextSplitter`）與多模態 `gemini-embedding-2`，輸出 1536 維並 L2 normalize，document 端 prompt 用 `title: {title} | text: {content}`；**圖片來源改走 archived 層** `archived-notes/.../_attachment/`，每筆 vector doc 以 **`md_path`（值＝人工核可後的 `archived_md_path`）** 作為 data lineage 依據。
+- **Load**：`load_vectors_incremental_v2()` 依 `md_path` 分組，對每份筆記先 `delete_many({md_path})` 再 `insert_many` 寫 `note_vectors_multimodal`；再以 **`archived_md_md5_hash` 守衛的 CAS（以 metadata 唯一鍵 `raw_md_path` 定位筆記）** 翻 `obsidian_note_metadata.embedded_status=true` 並蓋 `embedded_at`。embedding 期間若 task01_v2 又重歸檔改了 md5，CAS 不命中、留待下輪重做。
 - **清除軟刪除的向量**：`purge_deleted_vectors()` 查 `status="deleted"` 且 `embedded_status=true` 的筆記，以 `delete_many({md_path})`（`md_path`＝該筆的 `archived_md_path`）清 `note_vectors_multimodal` 對應向量後翻 `embedded_status=false`；不動 metadata 文件與 archived 副本，可冪等重跑。
 
 ### MongoDB Collections
 
-**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，join 鍵 `md_path`＝人工核可後的 archived md 路徑）
 ```json
 {
     "_id" : ObjectId("6a6304..."),

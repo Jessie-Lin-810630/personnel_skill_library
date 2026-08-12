@@ -2,7 +2,7 @@
 
 > **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown 的 data pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：
 > (1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）。
-> (2) **省 multimodal LLM enrichment 的 token**：轉成 markdown 的過程並非自動呼叫 LLM 來執行，而是改為 UI **on-demand** 觸發才呼叫 LLM 做文檔語意增強擴寫 (enrichment) 同時存為 markdown，並以 `html_sha_hash` 為冪等鍵來「為 生成的 enriched markdown 」建立快取機制，當使用者重複點擊同一版本時，就沿用已經生成過的 enriched markdown 、不再產生額外 token。
+> (2) **省 multimodal LLM enrichment 的 token**：轉成 markdown 的過程並非自動呼叫 LLM 來執行，而是改為 UI **on-demand** 觸發才呼叫 LLM 做文檔語意增強擴寫 (enrichment) 同時存為 markdown，並以 `html_sha_hash` 這個內容指紋來「為 生成的 enriched markdown 」建立快取機制，當使用者重複點擊同一版本時，就沿用已經生成過的 enriched markdown 、不再產生額外 token。
 > (3) **向量化視文件的生命週期狀態而選擇性呼叫 embedding model**：當 task07 v02 開發完成後進行 task08 開發，task08 需讀取 task07 v02 執行完成後更新的 onenote note metadata 表，以 SQL query 結果決定要批次處理哪些筆記的向量化工作，並非全數文檔都做向量化。此外，向量化開始後，其程式執行步驟，幾乎參照 task06 v02 設計，然後存放在同一個向量資料庫中。
 
 > **開發起始日期**：2026-07-01（於 `feature/html-to-markdown` 分支內另建 v02 變體資料夾）
@@ -32,7 +32,7 @@ feature/html-to-markdown/
 │   ├── audit_log.py                                  # 三個 MongoDB collections（C1/C2/C3）讀寫工具
 │   │                                                 # upsert_version_meta 集中補 created_at/updated_at
 │   ├── gcs.py                                        # GCS 資料湖讀寫、三層 blob 路徑組裝
-│   ├── hashing.py                                    # html sha256（變動判定 / enrichment 冪等鍵）
+│   ├── hashing.py                                    # html sha256（變動判定 / enrichment 內容指紋）
 │   └── topic.py                                      # topic 主題分類（copy 自 task01 TOPIC_KEYWORDS）
 │
 ├── task07_onenote_to_markdown_lazy_loading/          # Bronze ETL（只 Extract，不含 LLM）
@@ -95,7 +95,7 @@ archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.md       Gol
 archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/_images/<x>.ext Gold 歸檔圖片
 ```
 
-`dt=` 分區為版本鍵：同一份筆記每次偵測到 `html_sha_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。Gold 的 `dt` 對齊 Bronze 執行日。
+`dt=` 為 partition key，同時區分版本：同一份筆記每次偵測到 `html_sha_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。Gold 的 `dt` 對齊 Bronze 執行日。
 
 ### 資料表 Collections
 
@@ -232,7 +232,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
   "page_title": "MongoDB 索引設計",
 
   // Bronze（html + 圖片血緣 + topic 初判）
-  "html_sha_hash": "sha256...",             // 變動判定 / enrichment 冪等鍵
+  "html_sha_hash": "sha256...",             // 變動判定 / enrichment 內容指紋
   "html_md5_hash": "base64...",             // GCS html 物件 md5
   "html_path": "gs://onenote-vaults/raw-notes/.../dt=2026-07-01/MongoDB 索引設計.html",
   "html_downloaded_at": ISODate("2026-07-08T08:20:50.848+0000"),
@@ -340,13 +340,13 @@ ENVIRONMENT=                      # local | dev | prod
 | 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
 | 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)` (*此處就是跟 task06 v2 不同點*)，以 basename 對上 `attached_images[].archived_image_path` |
 | embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize |
-| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
+| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；`md_path` 存 `archived_md_path` 值作為 data lineage 依據、`image_paths` 存 archived 圖片 |
 | CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
 | purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
 
 ### MongoDB Collections
 
-**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，join 鍵 `md_path`＝人工核可後的 archived md 路徑）
 ```json
 {
     "_id" : ObjectId("6a6304..."),

@@ -124,13 +124,13 @@ def vector_search(
         query:            使用者輸入的自然語言問題或主題描述
         top_k:            回傳幾筆最相關的 chunk ，預設 5 筆，也可傳入 RagAgent.TOP_K | PlanningAgent.TOP_K | 自訂整數。
         filter_tags:      可選，限定搜尋範圍，例如 ["MySQL"] (對應 Atlas pre-filter: tags)
-        filter_file_path: 可選，限定筆記路徑（比對向量 doc 的 md_path 血緣欄），例如 "MySQL Window Function.md"
+        filter_file_path: 可選，限定筆記路徑（比對向量 doc 的 md_path），例如 "MySQL Window Function.md"
         filter_note_type: 可選，限定筆記種類，例如 "Knowledge_summary"
 
     Returns:
         list[dict]，每筆包含:
             - file_name:  筆記檔名
-            - md_path:    血緣鍵（人工核可後 archived md 的 gs:// 路徑）
+            - md_path:    join 鍵（人工核可後 archived md 的 gs:// 路徑）
             - chunk_index: 筆記檔中的第幾個資料塊
             - section:    標題路徑，例如 "SQL > DQL > SELECT"
             - content:    chunk 純文字
@@ -164,7 +164,7 @@ def vector_search(
     # 對應 task06 建立 index 時定義的 filter: tags、filter: note_type
     vector_search_filter = {}
     if filter_file_path:
-        # 血緣欄在 v2/task08 向量 doc 已由 file_path 收斂為 md_path（值＝archived md 路徑）
+        # 作為 data lineage 依據的欄位在 v2/task08 向量 doc 已由 file_path 收斂為 md_path（值＝archived md 路徑）
         vector_search_filter["md_path"] = {"$in": filter_file_path}
     elif filter_tags:
         vector_search_filter["tags"] = {"$in": filter_tags}

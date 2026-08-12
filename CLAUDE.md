@@ -143,7 +143,7 @@ Optional .env keys:
 ### 向量搜尋（task06 / task08 共用）
 
 - Embedding model：`gemini-embedding-2`（Agent Platform，多模態，維度 1536、L2 normalize）
-- Vector collection：`note_vectors_multimodal`（task06 與 task08 共寫，血緣欄統一 `md_path`）
+- Vector collection：`note_vectors_multimodal`（task06 與 task08 共寫，統一以 `md_path` 作為 data lineage 依據）
 - Vector index name：`obsidian_vectors_index2`，在 MongoDB Atlas Console 手動建立
 - 查詢方式：`$vectorSearch` stage，similarity = cosine
 

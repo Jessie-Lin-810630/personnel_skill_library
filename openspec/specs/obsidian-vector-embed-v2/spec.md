@@ -29,7 +29,7 @@ TBD - created by archiving change task06-v2-embed-purge. Update Purpose after ar
 
 ### Requirement: 向量寫入 v2 專用 collection 並 per-note 先刪後插
 
-系統 SHALL 將 chunk 向量寫入 MongoDB collection `note_vectors_multimodal`（與 v1 `obsidian_vectors_multimodal` 隔離），每筆 = 一個 chunk，且帶 `raw_md_path` 作為 note 血緣鍵。對本次處理的每份筆記，系統 SHALL **先 `delete_many({raw_md_path})` 再 `insert_many`**，確保重切後 chunk 數變動不留孤兒、且重跑冪等。
+系統 SHALL 將 chunk 向量寫入 MongoDB collection `note_vectors_multimodal`（與 v1 `obsidian_vectors_multimodal` 隔離），每筆 = 一個 chunk，且帶 `raw_md_path` 作為 note 的 join 鍵。對本次處理的每份筆記，系統 SHALL **先 `delete_many({raw_md_path})` 再 `insert_many`**，確保重切後 chunk 數變動不留孤兒、且重跑冪等。
 
 #### Scenario: 先刪後插避免孤兒 chunk
 

@@ -40,24 +40,24 @@ def load_vectors_incremental_v2(
 ) -> None:
     """把本次成功處理的每份筆記寫進 note_vectors_multimodal，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
-    1. 依 md_path（＝archived md 路徑）把 vector_docs 分組——向量表血緣欄為 md_path。
+    1. 依 md_path（＝archived md 路徑）把 vector_docs 分組——向量表以 md_path 作為 data lineage 依據。
     2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重切後 chunk 數變少也不會殘留孤兒，
        全新的筆記因為沒有舊向量，delete 這步等於沒事。
     3. 只有這份筆記在 DB 仍是 embedded_status=false、且 archived_md_md5_hash 等於本次 embedding 的版本時，
        才把 embedded_status 翻成 true 並以同一時戳蓋上 embedded_at 與 updated_at。若 embedding 期間 task01_v2
        又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。
-       CAS 仍以 metadata 唯一鍵 raw_md_path 定位筆記（向量表血緣欄用 md_path 不影響 metadata 唯一鍵與 CAS 規則）。
+       CAS 仍以 metadata 唯一鍵 raw_md_path 定位筆記（向量表改用 md_path 不影響 metadata 唯一鍵與 CAS 規則）。
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單（血緣欄 md_path）。
+        vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單（帶 md_path）。
         embedded_by_raw_md_path: 本次成功處理的 {raw_md_path: {"md_path": archived_md_path,
             "archived_md5": archived_md_md5_hash}}。
     """
     vectors = db[VECTORS_V2]
     notes = db[NOTE_METADATA]
 
-    # 依向量血緣欄 md_path 分組
+    # 依 md_path 分組（向量表的 data lineage 依據）
     chunks_by_md_path: dict[str, list[dict]] = {}
     for doc in vector_docs:
         chunks_by_md_path.setdefault(doc["md_path"], []).append(doc)
@@ -67,7 +67,7 @@ def load_vectors_incremental_v2(
         md_path = info["md_path"]
         archived_md5 = info["archived_md5"]
         chunks_of_file = chunks_by_md_path.get(md_path, [])
-        vectors.delete_many({"md_path": md_path})  # 先刪舊（以向量血緣欄 md_path）
+        vectors.delete_many({"md_path": md_path})  # 先刪舊（以 md_path 過濾）
         if chunks_of_file:
             vectors.insert_many(chunks_of_file)
             n_chunks += len(chunks_of_file)
@@ -114,7 +114,7 @@ def purge_deleted_vectors(db: Database) -> int:
     n_purged = 0
     for doc in notes.find({"status": "deleted", "embedded_status": True}, {"raw_md_path": 1, "archived_md_path": 1}):
         raw_md_path = doc["raw_md_path"]
-        # 向量表血緣欄為 md_path（＝archived_md_path 值），故以它清除該筆記的向量
+        # 向量表以 md_path（＝archived_md_path 值）作為 data lineage 依據，故以它清除該筆記的向量
         vectors.delete_many({"md_path": doc.get("archived_md_path")})
         notes.update_one(
             {

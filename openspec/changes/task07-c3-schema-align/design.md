@@ -16,7 +16,7 @@
 - 不改 Bronze/Silver/Gold 的行為邏輯（下載、hash 冪等、on-demand、斷路器、審查佇列篩選）。
 - 不改 GCS 目錄結構與 blob 命名。
 - 不做資料遷移腳本（既有 local 測試資料重建即可）。
-- 不實作 task08 向量化（另案），本 change 只確保 C3 留下 task08 可用的血緣欄位。
+- 不實作 task08 向量化（另案），本 change 只確保 C3 留下 task08 可用的 data lineage 欄位。
 
 ## Decisions
 

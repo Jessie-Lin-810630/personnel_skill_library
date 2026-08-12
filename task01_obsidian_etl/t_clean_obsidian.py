@@ -25,7 +25,7 @@ def build_note_documents(raw_notes: list[dict]) -> list[dict]:
 def build_summary_document(raw_notes: list[dict]) -> dict:
     """統計所有筆記，產出給 Streamlit 用的快照 document。
 
-    寫入 obsidian_summary collection，以 snapshot_date 為識別鍵。
+    寫入 obsidian_summary collection，以 snapshot_date 為唯一鍵 (Upsert key)。
     """
     logger.info("Building summary documents for all notes...")
     by_type = defaultdict(int)

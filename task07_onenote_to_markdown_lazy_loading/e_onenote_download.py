@@ -516,7 +516,7 @@ def download_notebooks(
         limiter (RateLimiter): 滑動窗口 rate limiter，遵守 OneNote API 上限。
         app (msal.PublicClientApplication): MSAL 應用程式物件，供 401 時刷新 token。
         cache (msal.SerializableTokenCache): MSAL token 快取。
-        dt (str): 執行日期分區字串（`YYYY-MM-DD`），作為 GCS `dt=` 分區與 metadata 版本鍵。
+        dt (str): 執行日期分區字串（`YYYY-MM-DD`），作為 GCS `dt=` partition key 與 metadata 的版本欄。
 
     Returns:
         int: 本次實際偵測到 hash 變動並寫入 GCS 的新版本數。

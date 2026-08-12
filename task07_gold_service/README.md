@@ -48,7 +48,7 @@ flowchart LR
     - **approve**：
         - 先把關是否早有別的版本被歸檔，若有回 409 拒絕 approve。
         - 若無，從 GCS 複製 Markdown、圖片到 `archived-notes/`。
-        - 以 `(page_id, dt)` 複合 upsert key，upsert metadata，更新文件的生命週期狀態與資料血緣欄位。
+        - 以 `(page_id, dt)` 複合 upsert key，upsert metadata，更新文件的生命週期狀態與 data lineage 欄位。
         - 退役同名筆記頁面的其他待審版本：將文件生命週期狀態標示為 `overwritten`或 `rejected`。
         > 在此設計下，您只能允許同名筆記一次僅歸檔一個版本，保證文件在向量資料庫中指向唯一真實。除非您於歸檔後，線下使用 OneNote APP 更新了該筆記內文，此時程式會在下一次執行時，將該筆記視為必須啟動下一輪生命週期，您就可再次做第二次歸檔。
     - **reject**：不對 GCS 做任何動作，只 upsert metadata。

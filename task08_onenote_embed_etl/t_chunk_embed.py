@@ -1,10 +1,11 @@
-"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為血緣鍵的 vector docs。
+"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為 join 鍵的 vector docs。
 
 兩段式 chunking → 每 chunk 解析 markdown ![](_images/x.png) 圖片、以 basename 對上 attached_images
 的 archived_image_path、打 GCS 確認圖片仍存在 → 送 text 與圖片 uri 給多模態模型 gemini-embedding-2
 → L2 normalize → 組 vector doc。
 chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy 而非 import，兩來源各自演化）；
-與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、血緣欄命名 md_path（存 archived md 路徑）。
+與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、
+data lineage 依據的欄位命名 md_path（存 archived md 路徑）。
 
 Required .env keys:
     AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
@@ -297,7 +298,7 @@ def t_chunk_and_embed_onenote(
 
         ```
         {
-            "md_path":      "gs://onenote-vaults/archived-notes/.../n.md",  # 血緣鍵（archived md 路徑）
+            "md_path":      "gs://onenote-vaults/archived-notes/.../n.md",  # join 鍵（archived md 路徑）
             "file_name":    "n",          # page_title
             "chunk_index":  0,            # 從 0 開始
             "chunk_total":  6,            # 這份筆記共幾個 chunk
