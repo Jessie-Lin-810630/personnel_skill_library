@@ -41,7 +41,7 @@ def upsert_note(db: Database, note_doc: dict) -> None:
 
 
 def mark_note_error(db: Database, raw_md_path: str, error_msg: str) -> None:
-    """清洗或歸檔失敗時，以 raw_md_path 為鍵記一筆 status=error 與 error_msg，供稽核。
+    """清洗或歸檔失敗時，以 raw_md_path 定位該筆記，記一筆 status=error 與 error_msg，供稽核。
 
     只覆寫 status、error_msg 與 updated_at，上一次成功歸檔留下的 archived_* 欄位不動，
     因此就算某版本歸檔失敗，仍保留上一版可用的向量化來源。這支函式可冪等重跑。

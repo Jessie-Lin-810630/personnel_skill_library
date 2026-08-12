@@ -56,7 +56,7 @@ def upsert_ccclub_problems(db: Database, problem_docs: list[dict]) -> None:
 
 
 def upsert_ccclub_summary_partial(db: Database, summary_partial: dict) -> None:
-    """以 snapshot_date 為鍵，用 $set partial update 只更新 ccClub&leetcode_summary 的 ccClub 側欄位。
+    """以 snapshot_date 為唯一鍵 (Upsert key)，用 $set partial update 只更新 ccClub&leetcode_summary 的 ccClub 側欄位。
 
     不覆蓋 LeetCode 側已寫入的欄位。
 

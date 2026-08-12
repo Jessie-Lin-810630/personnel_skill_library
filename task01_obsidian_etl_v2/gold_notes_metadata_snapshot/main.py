@@ -1,7 +1,7 @@
 """task01_v2 Gold 層入口：對 note metadata 兩表現況盤出當日快照並寫入 notes_summary。
 
 1. 對 obsidian_note_metadata 與 onenote_note_metadata 各跑一次 build_summary
-2. 合併後 upsert_summary 以 snapshot_date 為鍵寫入 notes_summary（過渡期同時雙寫舊表）。
+2. 合併後 upsert_summary 以 snapshot_date 為唯一鍵 (Upsert key) 寫入 notes_summary（過渡期同時雙寫舊表）。
 
 db 由頂層 main 傳入。
 

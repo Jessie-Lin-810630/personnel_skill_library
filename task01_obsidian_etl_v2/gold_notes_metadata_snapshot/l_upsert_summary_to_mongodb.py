@@ -1,4 +1,4 @@
-"""把 obsidian 與 onenote 兩份當日快照原料合併，以 snapshot_date 為鍵 upsert 進 notes_summary。
+"""把 obsidian 與 onenote 兩份當日快照原料合併，以 snapshot_date 為唯一鍵 (Upsert key) 寫進 notes_summary。
 
 1. 合併 build_summary 兩份回傳的 tag/topic/type 分佈與計數
 2. 組出 final_summary
@@ -25,7 +25,7 @@ def upsert_summary(db: Database, summary: list[dict[str, str | dict[str, int | d
 
     1. 逐份快照把 tag/topic/type 分佈與各項計數累加進 all_summary。
     2. 由 archived 與 rejected 兩桶合出全域的 by_topic、by_type。
-    3. 以截到日的 snapshot_date 為鍵 upsert，同一天重跑會覆蓋成最新值。
+    3. 以截到日的 snapshot_date 為唯一鍵 (Upsert key) upsert，同一天重跑會覆蓋成最新值。
 
     **NOTE:**
         關於快照資料表，有兩種，因為目前尚在執行新舊表雙寫，舊表名稱 obsidian_summary，

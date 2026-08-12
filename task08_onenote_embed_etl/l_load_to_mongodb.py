@@ -1,6 +1,6 @@
 """把向量本體載入目的地 note_vectors_multimodal（與 task01/task06 共用），並以 CAS 翻 embedded_status。
 
-load_vectors_incremental_onenote 對每份筆記先刪後插 note_vectors_multimodal（以 md_path 為鍵）、
+load_vectors_incremental_onenote 對每份筆記先以 md_path 過濾刪掉舊 chunk、再插入本次新 chunk，並
 以 md_md5_hash 守衛的 CAS 翻 onenote_note_metadata.embedded_status=true。
 OneNote 無軟刪除（版本以 review_closed 退役），故不含 purge 端。
 
