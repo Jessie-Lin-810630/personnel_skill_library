@@ -2,7 +2,7 @@
 
 1. 函式 get_headers 以登入取得的 csrf_token 與 session 組出 headers，這兩個 cookie 是讓 status 欄位有值的關鍵。
 2. 函式 _post_graphql 依傳入的 JSON 查詢語句與 headers 送出請求並捕捉例外。
-3. 函式 fetch_solved_problems_features 以 problemsetQuestionList 查詢分頁抓取題型特徵，
+3. 函式 fetch_solved_problems_features 以 problemsetQuestionList 查詢單次抓取至多 100 題的題型特徵，
    只保留 status 為 AC 的題目，回傳題號、題名、題型與難易度。
 4. 函式 fetch_solved_problem_stats 以 userProblemsSolved 查詢抓取解題進度統計，包含解題題數百分比與各難度百分比。
 
@@ -166,13 +166,15 @@ def fetch_solved_problem_stats(headers: dict, username: str) -> list[dict]:
 
 
 def fetch_solved_problems_features(headers: dict) -> list[dict]:
-    """以 problemsetQuestionList 查詢抓出 status 為 AC 的題目特徵。
+    """以 problemsetQuestionList 查詢單次抓出至多 100 題 status 為 AC 的題目特徵。
 
-    以 status 為 AC 作為篩選條件送出查詢，取回每題的題號、題名、題型標籤與難易度。
+    以 status 為 AC 作為篩選條件送出一次查詢，從第一題起取回至多 100 題的題號、題名、
+    題型標籤與難易度。
 
     Note:
-        - 這支函式只送一次請求、上限 100 題，沒有分頁，因此已解題數超過 100 時只會拿到前 100 題，
-          統計會少算。
+        - 這支函式只送一次請求、上限 100 題，沒有分頁迴圈，因此已解題數超過 100 時只會拿到前 100 題，
+          下游的題目文檔與各標籤佔比都會少算，且不會有任何錯誤或警告提示。
+          解題數接近 100 時要優先處理這件事，補法是把 skip 遞增並反覆查詢直到取滿題目總數。
         - 題目總數為 null 時代表查詢語句或 cookie 有問題，此時回空清單而不是往外拋，
           讓呼叫端的 build_leetcode_summary_partial 以「特徵清單為空但統計顯示有解題」判定上游不一致。
         - 總數為 0 且清單也為空時只記 warning 提示檢查 cookie，因為真的一題都沒解也是同樣的結果，
@@ -182,8 +184,8 @@ def fetch_solved_problems_features(headers: dict) -> list[dict]:
         headers: 請求 headers。
 
     Returns:
-        已 AC 題目的特徵字典清單，每筆含 frontendQuestionId、title、topicTags 與 difficulty；
-        查無題目總數時為空清單。
+        已 AC 題目的特徵字典清單，每筆含 frontendQuestionId、title、topicTags 與 difficulty 等欄位，
+        筆數至多 100；查無題目總數時為空清單。
 
     Raises:
         KeyError: 回應缺少 data 或 problemsetQuestionList 欄位時拋出。
