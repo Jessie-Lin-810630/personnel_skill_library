@@ -49,8 +49,8 @@ def run_task02() -> None:
         None: 資料寫進 MongoDB 的 github_repos 與 github_summary，執行狀況只記進 log，不回傳值。
 
     Raises:
-        EnvironmentError: GITHUB_TOKEN、GITHUB_USERNAME、MONGO_ALTAS_URI 或 MONGO_DB_NAME
-            任一未設定時拋出。
+        EnvironmentError: GITHUB_TOKEN、GITHUB_USERNAME、GITHUB_MAIL、MONGO_ALTAS_URI
+            或 MONGO_DB_NAME 任一未設定時拋出。
         Exception: 抓取、轉換或寫入失敗時，記錄 traceback 後原樣往外拋。
     """
     git_token = os.getenv("GITHUB_TOKEN")
@@ -60,7 +60,7 @@ def run_task02() -> None:
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")
 
-    if not all([git_token, git_username, mongo_uri, db_name]):
+    if not all([git_token, git_username, git_mail, mongo_uri, db_name]):
         logger.error(
             "請確認 secret managers 已設定 "
             "GITHUB_TOKEN / GITHUB_USERNAME / GITHUB_MAIL / MONGO_ALTAS_URI / MONGO_DB_NAME"
