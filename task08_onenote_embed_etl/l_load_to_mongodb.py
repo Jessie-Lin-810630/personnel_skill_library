@@ -40,18 +40,29 @@ def load_vectors_incremental_onenote(
 ) -> None:
     """把本次成功處理的每份 onenote 筆記寫進 note_vectors_multimodal，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
-    1. 依 md_path（= md_archive_path）把 vector_docs 分組。
-    2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重歸檔重切後 chunk 數變少也不會殘留孤兒，
-       全新的筆記因為沒有舊向量，delete 這步等於沒事。
-    3. 只有這份筆記在 DB 仍是 embedded_status=false、且 md_md5_hash 等於本次 embedding 的版本時，
-       才把 embedded_status 翻成 true 並蓋上 embedded_at（同時蓋 updated_at，兩者同一時戳）。
-       若 embedding 期間該筆記又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版
-       向量誤標成最新版本。archived_md_path 唯一定位該版本，故以它作 CAS 判斷，等同以 (page_id, dt) 定位。
+    1. 依 md_path 把向量文件分組，該欄位的值就是歸檔後的 .md 路徑。
+    2. 對每份筆記先刪掉舊向量再寫入新的。
+    3. 以 CAS 更新 embedded_status，條件是該版本目前仍為 false、且 md_md5_hash
+       等於本次向量化所依據的版本；命中才翻成 true，並以同一個時戳蓋上 embedded_at 與 updated_at。
+
+    Note:
+        - 先刪後插是為了讓重新切塊後 chunk 數變少時不殘留孤兒向量；全新的筆記沒有舊向量，那步等於空跑。
+        - CAS 若沒命中，代表向量化期間 task07 又重新歸檔改了 md5，此時不翻狀態、留待下一輪重做，
+          以免把舊版內容產生的向量標記成最新版本。這種情況只記 warning，不視為失敗。
+        - CAS 以 archived_md_path 定位，該路徑本身就唯一對應一個版本，效果等同以 page_id 與 dt 定位。
+        - embedded_at 與 updated_at 一起蓋，是因為 task08 直接以 pymongo 翻旗標、不經過 task07 的
+          upsert_version_meta，若只蓋前者會出現 embedded_at 晚於 updated_at 的矛盾時序。
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_onenote 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單。
-        embedded_md5_by_md_path: 本次成功處理的 md_archive_path 對到其 md_md5_hash，作 CAS 守衛值。
+        vector_docs: t_chunk_and_embed_onenote 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單，
+            每筆都帶有 md_path。
+        embedded_md5_by_md_path: 本次成功處理的版本對照表，鍵為 archived_md_path，值為其 md_md5_hash，
+            前者供先刪後插定位向量，後者作為 CAS 的守衛值。
+
+    Returns:
+        None: 向量寫進 MongoDB 的 note_vectors_multimodal，狀態欄位寫回 onenote_note_metadata，
+        各項筆數只記進 log，不回傳值。
     """
     vectors = db[VECTORS_V2]
     notes = db[NOTE_METADATA]

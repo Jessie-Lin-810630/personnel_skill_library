@@ -33,10 +33,25 @@ from .t_transform_github import build_repo_document, build_summary_document
 def run_task02() -> None:
     """task02 總入口，依序執行 GitHub REST API 的 Extract、Transform、Load。
 
-    1. 檢查 GitHub 與 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
-    2. Extract 抓取所有 repo，並逐 repo 抓 branches、commits 與 README。
-    3. Transform 把每個 repo 組成 document，再統計成一份摘要。
-    4. Load 以 upsert 把 document 寫入 github_repos、把摘要寫入 github_summary。
+    1. 檢查 GitHub 與 MongoDB 連線用的環境變數，缺任一就中止。
+    2. 抓取所有 repo，並逐 repo 抓 branches、commits 與 README。
+    3. 把每個 repo 組成 document，再統計成一份摘要。
+    4. 以 upsert 把 document 寫入 github_repos、把摘要寫入 github_summary。
+
+    Note:
+        - 任一 repo 抓取失敗都會中斷整批，這一輪不會有任何資料寫入 MongoDB，與 task06、task08
+          逐份略過失敗者的做法不同；GitHub API 的失敗多半是配額或權限問題，會一路影響後續每個 repo，
+          略過單一個並無意義。
+        - 最外層只在此印一次完整 traceback 後往外拋，避免同一個例外在各層重複記錄。
+        - 每個 repo 至少要打三次 API，repo 數量多時整輪耗時主要花在等待配額重置。
+
+    Returns:
+        None: 資料寫進 MongoDB 的 github_repos 與 github_summary，執行狀況只記進 log，不回傳值。
+
+    Raises:
+        EnvironmentError: GITHUB_TOKEN、GITHUB_USERNAME、MONGO_ALTAS_URI 或 MONGO_DB_NAME
+            任一未設定時拋出。
+        Exception: 抓取、轉換或寫入失敗時，記錄 traceback 後原樣往外拋。
     """
     git_token = os.getenv("GITHUB_TOKEN")
     git_username = os.getenv("GITHUB_USERNAME")

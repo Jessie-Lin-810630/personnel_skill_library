@@ -33,9 +33,24 @@ BUCKET_NAME = "onenote-vaults"
 def run_task08():
     """task08 入口，對 task07 的 archived OneNote 筆記做增量 embedding，寫入共用 note_vectors_multimodal。
 
-    1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
-    2. 從 onenote_note_metadata 挑出待向量化的版本，若沒有就直接結束。
-    3. 對待做版本從 archived 層 chunk 與 embed，先刪後插進 note_vectors_multimodal，並以 CAS 翻 embedded_status。
+    1. 檢查 MongoDB 連線用的環境變數，缺任一就中止。
+    2. 從 onenote_note_metadata 挑出已歸檔但尚未向量化的版本，沒有的話就直接結束。
+    3. 讀取 archived-notes/ 下的內容做切塊與向量化，先刪後插進 note_vectors_multimodal，
+       再以 CAS 把 embedded_status 翻成 true。
+
+    Note:
+        - 單份筆記處理失敗已在 t_chunk_and_embed_onenote 內就地略過，這裡最外層攔的是 client 初始化
+          與資料庫讀寫這類全域錯誤，只在此印一次完整 traceback 後往外拋，避免同一個例外在各層重複記錄。
+        - 這支函式正常結束不代表每份筆記都成功，未成功者的 embedded_status 維持 false，下一輪會再被挑出來。
+        - OneNote 的版本退役時由 task07 標成 status=review_closed，沒有 status=deleted 這種軟刪除，
+          所以這裡不像 task06 還要另跑一步清除已刪除筆記的向量。
+
+    Returns:
+        None: 向量寫進 MongoDB 的 note_vectors_multimodal，各項筆數只記進 log，不回傳值。
+
+    Raises:
+        EnvironmentError: 環境變數 MONGO_ALTAS_URI 或 MONGO_DB_NAME 未設定時拋出。
+        Exception: client 初始化或資料庫讀寫失敗時，記錄 traceback 後原樣往外拋。
     """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")

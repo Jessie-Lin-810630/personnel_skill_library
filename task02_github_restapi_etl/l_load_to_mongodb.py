@@ -27,9 +27,22 @@ def get_db(mongo_uri: str, db_name: str) -> Database:
 def upsert_repos(db: Database, all_repo_docs: list[dict]) -> None:
     """以 repo_id 為唯一鍵把所有 repo document 批次 upsert 到 github_repos。
 
+    把每份 document 各組成一個 upsert 操作，最後以一次批次寫入送出。
+
+    Note:
+        - 以 repo_id 為唯一鍵，repo 改名後仍會更新到同一筆而不是多出一份；
+          重跑同一天的抓取只會覆蓋既有內容，因此這支函式可以重複執行。
+        - 寫入採覆蓋既有欄位的方式，document 這次沒帶到的欄位會留著上一次的值，不會被清掉。
+
     Args:
         db: 目標 pymongo Database。
         all_repo_docs: 要寫入的 repo document 清單。
+
+    Returns:
+        None: document 寫進 MongoDB 的 github_repos，新增與更新筆數只記進 log，不回傳值。
+
+    Raises:
+        pymongo.errors.InvalidOperation: 傳入空清單導致批次寫入沒有任何操作時拋出。
     """
     collection = db["github_repos"]
     operations = []
@@ -44,9 +57,16 @@ def upsert_repos(db: Database, all_repo_docs: list[dict]) -> None:
 def upsert_repo_summary(db: Database, summary: dict) -> None:
     """以 snapshot_date 為唯一鍵把摘要 upsert 到 github_summary，每天只保留最新一筆快照。
 
+    Note:
+        - snapshot_date 只到日，所以同一天多次執行會覆蓋當天那筆，歷史天數的快照不受影響，
+          github_summary 因此是一天一列的時間序列。
+
     Args:
         db: 目標 pymongo Database。
-        summary: build_summary_document 產出的摘要 dict。
+        summary: build_summary_document 產出的摘要字典。
+
+    Returns:
+        None: 摘要寫進 MongoDB 的 github_summary，快照日期只記進 log，不回傳值。
     """
     collection = db["github_summary"]
     collection.update_one({"snapshot_date": summary["snapshot_date"]}, {"$set": summary}, upsert=True)

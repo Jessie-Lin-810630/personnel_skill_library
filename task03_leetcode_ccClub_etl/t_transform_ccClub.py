@@ -12,15 +12,23 @@ from loguru import logger
 
 
 def build_ccclub_problem_documents(raw_solved_problems: list[dict]) -> list[dict]:
-    """把 raw problem list 對應成 solved_problems_on_ccClub 的 document。
+    """把已解題清單對應成 solved_problems_on_ccClub 的 document。
 
-    每筆 document 的 schema 為 problem_id、problem_type、score、topic 與 difficulty。
+    逐題取出題號、題型、分數、標籤與難度五個欄位。
+
+    Note:
+        - 分數、標籤與難度缺值時分別填 0 與 Unknown，讓下游統計不必再處理缺值。
+        - 題號與題型缺值則直接拋錯，因為這兩者缺了就無法辨識是哪一題。
 
     Args:
-        raw_solved_problems: Extract 抓來的 ccClub raw problem list。
+        raw_solved_problems: fetch_all_solved_problems 回傳的已解題清單。
 
     Returns:
-        符合 solved_problems_on_ccClub schema 的 document 清單。
+        可寫入 solved_problems_on_ccClub 的 document 清單，每筆含 problem_id、problem_type、
+        score、topic 與 difficulty；傳入空清單時為空清單。
+
+    Raises:
+        KeyError: 某題缺少 problem_id 或 problem_type 時拋出。
     """
     logger.info("Building documents listing the features of problems on ccClub.")
     docs = []
@@ -39,17 +47,26 @@ def build_ccclub_problem_documents(raw_solved_problems: list[dict]) -> list[dict
 
 
 def build_ccclub_summary_partial(problem_docs: list[dict]) -> dict:
-    """統計 ccClub 題目文檔，產出 ccClub&leetcode_summary 中 ccClub 側的欄位。
+    """統計題目文檔，產出 ccClub&leetcode_summary 裡屬於 ccClub 的那幾個欄位。
 
-    LeetCode 側的欄位由 task03 另一支腳本補入，這裡只產 ccClub 側，計算三項統計：
-    totalSolvedProblemsOnCCclub 為總題數、problemDifficultyOnCCclub 為各難度題數佔比、
-    topicsPercentOnCCclub 為各 topic 佔比。
+    1. 累計各難度的題數，依難度名稱排序後換算成百分比。
+    2. 累計各標籤出現的次數，依次數由多到少換算成百分比。
+    3. 連同當日日期與總題數組成一份摘要。
+
+    Note:
+        - 難度百分比的分母是題數，各難度加總為 100；標籤百分比的分母則是所有標籤出現次數的總和，
+          一題掛多個標籤時會各計一次，因此不能解讀成「解過的題目有幾成屬於某標籤」。
+        - 題數為 0 時所有百分比都是 0，不會除以零。
+        - LeetCode 的欄位由 build_leetcode_summary_partial 另外產出，兩者寫進同一份文件、互不覆蓋。
+        - 與 LeetCode 那支不同，這裡沒有上游不一致的檢查，
+          因此帳號真的一題未解與抓取異常都會產生總題數為 0 的摘要。
 
     Args:
         problem_docs: build_ccclub_problem_documents 產出的題目文檔清單。
 
     Returns:
-        含 snapshot_date 與上述三項統計欄位的 ccClub 側摘要 dict。
+        含 snapshot_date、totalSolvedProblemsOnCCclub、problemDifficultyOnCCclub 與
+        topicsPercentOnCCclub 四個鍵的摘要字典。
     """
     logger.info("Building partial summary documents for ccClub problems...")
     total_problems = len(problem_docs)

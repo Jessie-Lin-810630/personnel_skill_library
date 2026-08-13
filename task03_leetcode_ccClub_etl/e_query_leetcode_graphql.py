@@ -23,6 +23,11 @@ LEETCODE_GRAPHQL_URL = "https://leetcode.com/graphql/"
 def get_headers(csrf_token: str, session: str, username: str) -> dict:
     """以登入後取得的 csrf_token 與 leetcode_session 組出 GraphQL 請求用的 headers。
 
+    Note:
+        - 這兩個 cookie 是讓查詢結果的 status 欄位有值的關鍵，少了它們 LeetCode 仍會回 200，
+          但每題的 status 都是 null，篩不出已 AC 的題目。
+        - 兩者都會過期，過期時得重新登入取得。
+
     Args:
         csrf_token: 瀏覽器登入後取得的 csrf token。
         session: 瀏覽器登入後取得的 LEETCODE_SESSION cookie。
@@ -41,20 +46,30 @@ def get_headers(csrf_token: str, session: str, username: str) -> dict:
 
 
 def _post_graphql(headers: dict, json_payload: dict, attempts: int = 3) -> dict:
-    """通用 GraphQL POST，內建最多 attempts 次重試。
+    """對 LeetCode 的 GraphQL endpoint 送出一次查詢，收到 429 時重試。
 
-    依傳入的 json_payload 送出查詢，遇 429 就等 300 秒重試，回應 body 帶 errors 時拋例外。
+    依傳入的 payload 送出查詢，收到 429 就等 300 秒再試，取得 200 後解析回應內容。
+
+    Note:
+        - 重試只針對 429，連線層錯誤、其他非 2xx 與 JSON 解析失敗都是第一次就往外拋，不再重試。
+        - GraphQL 的查詢語句寫錯時 HTTP 狀態仍是 200，錯誤訊息放在回應內容的 errors 欄位裡，
+          因此取得 200 後還要再檢查一次，否則會把錯誤回應當成正常結果往下傳。
+        - 重試期間以阻塞方式等待，三次都遇到 429 時這支函式會佔住將近 10 分鐘。
 
     Args:
         headers: 請求 headers。
-        json_payload: 含 query 與 variables 的 GraphQL 請求 body。
-        attempts: 最多重試次數，預設 3。
+        json_payload: 含 query 與 variables 的 GraphQL 請求內容。
+        attempts: 最多嘗試次數，預設 3。
 
     Returns:
-        decode 後的 GraphQL 回應 dict。
+        解析後的 GraphQL 回應字典，結構依查詢語句而定。
 
     Raises:
-        Exception: 所有嘗試皆失敗、或回應帶 GraphQL errors 時拋出。
+        Exception: 用盡嘗試次數仍未取得 200，或回應內容帶有 GraphQL errors 時拋出。
+        requests.HTTPError: 回應為 429 以外的非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
     """
     for i in range(attempts):
         logger.info(f"Requesting graphQL API at attempt No. {i + 1}/{attempts}....")
@@ -101,14 +116,26 @@ def _post_graphql(headers: dict, json_payload: dict, attempts: int = 3) -> dict:
 
 
 def fetch_solved_problem_stats(headers: dict, username: str) -> list[dict]:
-    """以 userProblemsSolved 查詢抓取解題進度統計 problemsSolvedBeatsStats。
+    """以 userProblemsSolved 查詢抓取各難度的解題數統計。
+
+    送出查詢後，只取回應中的 acSubmissionNum 一段。
+
+    Note:
+        - 查詢語句同時要了題庫總題數與擊敗百分比，但這裡只取各難度的 AC 題數，
+          其餘欄位取回後不使用；日後若要用到，改動的是取值那一行而不是查詢語句。
 
     Args:
         headers: 請求 headers。
         username: LeetCode 帳號名稱。
 
     Returns:
-        各難度的 AC submission 統計清單。
+        各難度的 AC 題數統計清單，每筆含 difficulty 與 count；
+        清單第一筆是不分難度的合計，其餘依難度分列。
+
+    Raises:
+        KeyError: 回應缺少 data 或其下的統計欄位時拋出。
+        TypeError: 帳號名稱查無此人導致 matchedUser 為 null 時拋出。
+        Exception: 查詢失敗時，由 _post_graphql 拋出的例外一律原樣往外拋。
     """
     query = """
             query userProblemsSolved($username: String!) {
@@ -139,16 +166,28 @@ def fetch_solved_problem_stats(headers: dict, username: str) -> list[dict]:
 
 
 def fetch_solved_problems_features(headers: dict) -> list[dict]:
-    """以 problemsetQuestionList 查詢抓出所有 status 為 AC 的題目特徵。
+    """以 problemsetQuestionList 查詢抓出 status 為 AC 的題目特徵。
 
-    以 filters status=AC 分頁抓取，回傳每題的題號、題名、題型與難易度；
-    查無資料時回傳空清單並提示檢查 cookies。
+    以 status 為 AC 作為篩選條件送出查詢，取回每題的題號、題名、題型標籤與難易度。
+
+    Note:
+        - 這支函式只送一次請求、上限 100 題，沒有分頁，因此已解題數超過 100 時只會拿到前 100 題，
+          統計會少算。
+        - 題目總數為 null 時代表查詢語句或 cookie 有問題，此時回空清單而不是往外拋，
+          讓呼叫端的 build_leetcode_summary_partial 以「特徵清單為空但統計顯示有解題」判定上游不一致。
+        - 總數為 0 且清單也為空時只記 warning 提示檢查 cookie，因為真的一題都沒解也是同樣的結果，
+          兩者從回應上無法區分。
 
     Args:
         headers: 請求 headers。
 
     Returns:
-        已 AC 題目的特徵 dict 清單。
+        已 AC 題目的特徵字典清單，每筆含 frontendQuestionId、title、topicTags 與 difficulty；
+        查無題目總數時為空清單。
+
+    Raises:
+        KeyError: 回應缺少 data 或 problemsetQuestionList 欄位時拋出。
+        Exception: 查詢失敗時，由 _post_graphql 拋出的例外一律原樣往外拋。
     """
     query = """
         query problemsetQuestionList(
@@ -211,7 +250,23 @@ def fetch_solved_problems_features(headers: dict) -> list[dict]:
 
 
 def _login_and_get_csrf(account, password):
-    """登入 LeetCode 取得 csrf token（尚未完成，保留供未來刷新 csrf 用）。"""
+    """以帳號密碼登入 LeetCode，取得登入前後的 csrf token 與 session cookie。
+
+    先拜訪首頁取得初始 csrf token，帶著它送出登入請求，登入成功後 session 會自動更新所有 cookie。
+
+    Note:
+        - 這支函式尚未完成也還沒被任何流程呼叫，保留是為了日後自動刷新 cookie，
+          免去每次過期都要手動從瀏覽器複製貼進環境變數。
+        - 目前登入結果只用 print 輸出、未接 logger，也沒有檢查登入是否真的成功，
+          接進正式流程前這兩點都要補。
+
+    Args:
+        account: LeetCode 登入帳號。
+        password: LeetCode 登入密碼。
+
+    Returns:
+        三個值組成的 tuple，依序是登入前的 csrf token、登入後的 csrf token 與 LEETCODE_SESSION cookie。
+    """
     session = requests.Session()
 
     # Step 1：取得初始 csrftoken

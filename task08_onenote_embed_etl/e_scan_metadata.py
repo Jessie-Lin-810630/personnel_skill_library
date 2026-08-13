@@ -41,17 +41,22 @@ def get_embedding_gate_list(db: Database) -> list[dict]:
     """從 onenote_note_metadata 挑出 status=archived 且 embedded_status=false 的版本，作為 embedding gate。
 
     1. 以 status 與 embedded_status 過濾，只留下已歸檔但尚未向量化的版本。
-    2. 每筆只投影 embedding 需要的欄位：archived_md_path 是內文來源與向量表 join 鍵、
-       md_md5_hash 供 CAS 守衛、page_id 與 dt 為 metadata 複合唯一鍵、
-       另外帶上 md_frontmatter、page_title 與 attached_images（archived 圖片血緣）。
+    2. 每筆只取後續會用到的七個欄位，其餘不投影。
 
-    只依 database 狀態判斷，不重掃 GCS。
+    Note:
+        - 這支函式只依 MongoDB 的狀態判斷，不重新掃描 GCS，因此歸檔檔案若被繞過 task07 直接改動，
+          這裡不會察覺。
+        - 七個投影欄位各有用途：archived_md_path 既是內容來源，也會成為向量文件 md_path 的值，
+          用於 data lineage，並在 CAS 時定位該版本；md_md5_hash 是 CAS 的守衛值；
+          page_id 與 dt 是 metadata 的複合唯一鍵；md_frontmatter 與 page_title 寫進向量文件供篩選與組
+          prompt 標題；attached_images 記錄該版本每張圖片歸檔後的位址，供 chunk 內的圖片語法對上實際檔案。
 
     Args:
         db: pymongo Database 物件。
 
     Returns:
-        待向量化的版本清單，每筆是含上述欄位的字典。
+        待向量化的版本清單，每筆含 page_id、dt、archived_md_path、md_md5_hash、md_frontmatter、
+        page_title 與 attached_images；沒有待做版本時為空清單。
     """
     collection = db[NOTE_METADATA]
     projection = {
@@ -71,17 +76,23 @@ def get_embedding_gate_list(db: Database) -> list[dict]:
 def fetch_archived_content(md_archive_path: str, bucket_name: str = "onenote-vaults") -> str:
     """從 GCS 拉取單一歸檔 .md 檔的 body 內文，不取 frontmatter。
 
-    1. 接收 get_embedding_gate_list() 回傳的 list[dict] 對 dict 的 md_archive_path key 取值。
-    2. 根據傳入的 md_archive_path 從 GCS 重新拉取該檔案的原始 markdown 內文。
-    3. 拿掉 frontmatter 後，以 UTF-8 decode 後回傳 body 的字串。
+    1. 依傳入的路徑從 GCS 下載這份檔案的完整內容。
+    2. 以 UTF-8 解碼後拆掉 frontmatter。
+    3. 只回傳正文字串。
+
+    Note:
+        - 向量化只需要正文，frontmatter 的標籤與類型等欄位已由 get_embedding_gate_list 另行帶入，
+          在這裡重複解析沒有意義。
 
     Args:
-        md_archive_path: 已歸檔且尚未向量化的 .md file path，
-        可包含或不包含 `gs://<bucket>` 前綴字串。
-        bucket_name: GCS bucket 名稱，預設 "onenote-vaults"。
+        md_archive_path: 已歸檔且尚未向量化的 .md 路徑，可含或不含 gs 協定與 bucket 前綴。
+        bucket_name: GCS bucket 名稱，預設 onenote-vaults。
 
     Returns:
-        該 .md 去除 frontmatter 後的 body 文字。
+        該 .md 去除 frontmatter 後的正文字串。
+
+    Raises:
+        Exception: 檔案不存在或下載失敗時的例外一律原樣往外拋，這裡不做攔截。
     """
     # 此處的例外將外拋由 t_chunk_and_embed_onenote() 函式攔截
     client = storage.Client()
