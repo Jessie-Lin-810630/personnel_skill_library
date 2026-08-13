@@ -37,18 +37,18 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 
 每個子資料夾都是一塊可獨立執行的功能，並附專屬 README 說明資料來源、schema 與啟動方式：
 
-| 功能 | 說明 | README |
-| ---- | ---- | ------ |
-| Obsidian Medallion ETL | Obsidian 筆記 CDC 增量清洗、歸檔、軟刪除、快照 | [task01_obsidian_etl_v2](./task01_obsidian_etl_v2/README.md) |
-| GitHub ETL | 抓取 owner／collaborator repo 與本人 commit、README 摘要 | [task02_github_restapi_etl](./task02_github_restapi_etl/README.md) |
-| LeetCode + ccClub ETL | 兩平台刷題紀錄與難度／主題統計 | [task03_leetcode_ccClub_etl](./task03_leetcode_ccClub_etl/README.md) |
-| Skill Radar ETL | Google Sheet 技能盤點加權計分為雷達軸層級 | [task05_googlesheet_skill_etl](./task05_googlesheet_skill_etl/README.md) |
-| Obsidian 向量化 | 歸檔筆記多模態切塊向量化 | [task06_obsidian_embed_etl_v2](./task06_obsidian_embed_etl_v2/README.md) |
-| OneNote Bronze ETL | Graph API 下載 HTML、`dt=` 分區多版本存 GCS | [task07_onenote_to_markdown_lazy_loading](./task07_onenote_to_markdown_lazy_loading/README.md) |
-| OneNote Silver 服務 | on-demand 多模態 LLM enrich 與快取機制 | [task07_silver_service](./task07_silver_service/README.md) |
-| OneNote Gold 服務 | 人工核可後歸檔 / 退件、回寫品質欄位 | [task07_gold_service](./task07_gold_service/README.md) |
-| OneNote 向量化 | 歸檔筆記多模態切塊向量化 | [task08_onenote_embed_etl](./task08_onenote_embed_etl/README.md) |
-| Dashboard UI | 六頁 Streamlit 看板 (含 RAG 檢索問答服務入口) | [dashboard_ui](./dashboard_ui/README.md) |
+| 功能 | README | 說明 |
+| ---- | ------ | ---- |
+| Obsidian Medallion ETL | [task01_obsidian_etl_v2](./task01_obsidian_etl_v2/README.md) | 從 GCS 資料湖掃出新增或變更的 Obsidian 筆記，清洗成帶 frontmatter、分類、標籤與圖片引用的乾淨 markdown 歸檔回 GCS，中繼資料與軟刪除狀態寫入 MongoDB Atlas，供下游 task06 挑出待向量化筆記。<br>另對筆記現況做每日快照，供看板首頁讀取。 |
+| GitHub ETL | [task02_github_restapi_etl](./task02_github_restapi_etl/README.md) | 從 GitHub REST API 抓本人持有與協作的 repo、本人 commit 與 README，清洗成每個 repo 一筆的文檔與一份彙整摘要。<br>寫入 MongoDB Atlas，供看板首頁呈現最近專案與語言／角色分佈。 |
+| LeetCode + ccClub ETL | [task03_leetcode_ccClub_etl](./task03_leetcode_ccClub_etl/README.md) | 從 LeetCode GraphQL 與 ccClub REST API 抓已解題目，清洗成每題一筆的文檔並統計難度／主題分佈。<br>寫入 MongoDB Atlas，供看板首頁的刷題 donut chart 讀取。 |
+| Skill Radar ETL | [task05_googlesheet_skill_etl](./task05_googlesheet_skill_etl/README.md) | 從 Google Sheet 讀「生技」「資料工程」兩張技能盤點表，把能力勾選依複雜性／獨立性／影響力加權算成分數與雷達軸層級。<br>寫入 MongoDB Atlas，供看板首頁繪製技能雷達圖。 |
+| Obsidian 向量化 | [task06_obsidian_embed_etl_v2](./task06_obsidian_embed_etl_v2/README.md) | 挑出 task01 已歸檔但尚未向量化的筆記，從 GCS 下載歸檔內文與圖片後切塊、多模態向量化。<br>向量寫入 MongoDB Atlas 並清除軟刪除筆記的過期向量，供 AI 知識 Agent 做 RAG 檢索。 |
+| OneNote Bronze ETL | [task07_onenote_to_markdown_lazy_loading](./task07_onenote_to_markdown_lazy_loading/README.md) | 從 Microsoft Graph API 下載 OneNote 每頁筆記的 HTML 原文與內嵌圖片，以日期分區保留多版本存進 GCS 資料湖。<br>版本中繼資料、資料血緣與 API 稽核紀錄寫入 MongoDB Atlas，交給下游 Silver 服務做語意擴寫。 |
+| OneNote Silver 服務 | [task07_silver_service](./task07_silver_service/README.md) | 由看板審查頁 on-demand 呼叫的 Flask 端點，把指定版本的 HTML 原文連同內嵌圖片送多模態 LLM，產出冠上 frontmatter 的 enriched markdown 存回 GCS。<br>更新 Bronze 寫入 MongoDB Atlas 的中繼資料，LLM 呼叫紀錄一併寫入，交給下游 Gold 服務做人工審查與歸檔。 |
+| OneNote Gold 服務 | [task07_gold_service](./task07_gold_service/README.md) | 接收審查頁的核可／退件決定：核可時把 Silver 產出的 markdown 與引用圖片複製到 GCS 歸檔層，退件時只更新 MongoDB Atlas 的中繼資料。<br>最終，歸檔層存下的文件交給下游 task08 向量化。 |
+| OneNote 向量化 | [task08_onenote_embed_etl](./task08_onenote_embed_etl/README.md) | 挑出 task07 已歸檔但尚未向量化的 OneNote 筆記，從 GCS 下載歸檔內文與圖片後切塊、多模態向量化。<br>與 task06 共寫 MongoDB Atlas 的同一張向量表，供 AI 知識 Agent 做 RAG 檢索。 |
+| Dashboard UI | [dashboard_ui](./dashboard_ui/README.md) | 六頁 Streamlit 看板：讀取各 task 寫入 MongoDB／GCS 的成果，呈現技能雷達、專案架構、攝取與檢索品質等圖表。<br>另提供 OneNote 人工審查頁，從這裡請求 Silver／Gold 服務做語意擴寫與歸檔，以及 AI 知識 Agent 的向量檢索問答入口。 |
 
 
 ## Tech Stack
@@ -77,31 +77,33 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 ## Project Structure
 
 ```plaintext
-personnel_skill_library/            # 專案根目錄
-├── task01_obsidian_etl_v2/            # Obsidian medallion ETL
-│   ├── silver_transform_markdown/     #   CDC gate → 清洗 → 歸檔 → upsert → 軟刪除
-│   └── gold_notes_metadata_snapshot/  #   notes_summary 快照
-├── task02_github_restapi_etl/         # GitHub ETL
-├── task03_leetcode_ccClub_etl/        # LeetCode + ccClub ETL
-├── task05_googlesheet_skill_etl/      # Skill Radar ETL
-├── task06_obsidian_embed_etl_v2/      # Obsidian 向量化
+personnel_skill_library/                      # 專案根目錄
+├── task01_obsidian_etl_v2/                   # Obsidian Medallion ETL
+│   ├── silver_transform_markdown/              # 清洗 → 歸檔 → 軟刪除
+│   └── gold_notes_metadata_snapshot/           # 每日快照
+├── task02_github_restapi_etl/                # GitHub ETL
+├── task03_leetcode_ccClub_etl/               # LeetCode + ccClub ETL
+├── task05_googlesheet_skill_etl/             # Skill Radar ETL
+├── task06_obsidian_embed_etl_v2/             # Obsidian 向量化
 ├── task07_onenote_to_markdown_lazy_loading/  # OneNote Bronze ETL（地端）
-├── task07_silver_service/             # OneNote Silver enrich 服務（:8002）
-├── task07_gold_service/               # OneNote Gold 歸檔/退件服務（:8003）
-├── task07_common/                     # 三服務共用工具（gcs/audit_log/hashing/topic）
-├── task08_onenote_embed_etl/          # OneNote 向量化
-├── dashboard_ui/                      # Streamlit 看板 + AI Agent
-│   ├── pages/                         #   五個子頁（HOME 為 app.py）
-│   ├── agents/                        #   intent_router / rag / planning
-│   ├── agent_tools/                   #   query rewriter / 向量搜尋 / reranker / chat_history
-│   └── utils/                         #   MongoDB 查詢 / 繪圖 / GCS 讀取
-├── docker/                            # 各 task 與 dashboard 的 Dockerfile
-├── doc/                               # 分支摘要、schema 定義、README 模板
-├── openspec/                          # OpenSpec 變更流程
-├── tests/                            # unittest（全 mock，不連外部服務）
-├── env/                              # service account JSON keys（不進 git）
-├── pyproject.toml / poetry.lock       # Poetry 依賴
-└── CLAUDE.md                          # Claude Code 專案指引
+├── task07_silver_service/                    # OneNote Silver 服務（:8002）
+├── task07_gold_service/                      # OneNote Gold 服務（:8003）
+├── task07_common/                            # Bronze／Silver／Gold 共用工具
+├── task08_onenote_embed_etl/                 # OneNote 向量化
+├── dashboard_ui/                             # Dashboard UI
+│   ├── pages/                                  # 六頁看板（HOME 為 app.py）
+│   ├── agents/                                 # AI 知識 Agent
+│   ├── agent_tools/                            # 向量檢索與重排序
+│   └── utils/                                  # MongoDB／GCS 讀取、繪圖
+├── .github/workflows/                        # 各 task 與 dashboard 的部署 workflow
+├── docker/                                   # 各 task 與 dashboard 的 Dockerfile
+├── doc/                                      # 分支摘要、schema 定義、README 模板
+├── openspec/                                 # OpenSpec 變更流程
+├── tests/                                    # unittest（全 mock，不連外部服務）
+├── .env.example                              # 環境變數示範檔 (填值後改名為 .env)
+├── pyproject.toml                            # Poetry 依賴
+├── poetry.lock                               # Poetry 依賴
+└── CLAUDE.md                                 # Claude Code 專案指引
 ```
 
 ## Get Started
