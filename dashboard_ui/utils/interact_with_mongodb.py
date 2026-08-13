@@ -23,18 +23,17 @@ _atlas_db: Database | None = None
 
 
 def get_db_atlas() -> Database:
-    """連線 MongoDB Atlas，回傳指定資料庫物件（module-level 單例，跨頁共用一份 client）。
+    """連線 MongoDB Atlas 並回傳目標資料庫物件，全站共用同一份 client。
 
-    從環境變數讀取 MONGO_ALTAS_URI 與 MONGO_DB_NAME 建立連線，
-    為 agent / chat_history / vector_search 等線上查詢的資料來源。
-    MongoClient 自帶連線池且 thread-safe，故只在首次呼叫時建立、之後重用，
-    避免各頁反覆 new client 撐爆 Atlas 連線上限。
+    連線字串與資料庫名稱都從環境變數讀取，是 agent、chat_history、vector_search 等線上查詢的共同入口。
+    MongoClient 本身自帶連線池且為 thread-safe，因此只在首次呼叫時建立、之後重複使用，
+    避免各頁反覆建立 client 而耗盡 Atlas 的連線數上限。
 
     Returns:
-        pymongo Database 物件（對應 MONGO_DB_NAME 指定的資料庫）。
+        對應 MONGO_DB_NAME 的 pymongo Database 物件。
 
     Raises:
-        EnvironmentError: 缺少 MONGO_ALTAS_URI 或 MONGO_DB_NAME 時拋出。
+        EnvironmentError: 環境變數 MONGO_ALTAS_URI 或 MONGO_DB_NAME 未設定時拋出。
     """
     global _atlas_db
     if _atlas_db is not None:
@@ -52,7 +51,18 @@ def get_db_atlas() -> Database:
 
 
 def get_radar_summary_df(db: Database, collection: str) -> pd.DataFrame:
-    """取得每張雷達圖最新的軸向標籤、軸向刻度的資料，並轉成 pandas dataframe。"""
+    """取得每張雷達圖最新一次快照的軸向標籤與軸向刻度。
+
+    先依 snapshot_date 分組並取最新的一組，再攤平回單筆文件，
+    只保留繪製雷達圖需要的雷達圖名稱、快照日期、雷達軸與 level 四個欄位。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱。
+
+    Returns:
+        含雷達圖名稱、snapshot_date、雷達軸、level 四欄的 DataFrame；無資料時為空 DataFrame。
+    """
     coll = db[collection]
     curr_summary = list(
         coll.aggregate(
@@ -72,6 +82,17 @@ def get_radar_summary_df(db: Database, collection: str) -> pd.DataFrame:
 
 
 def get_a_radar_detail(db: Database, collection: str) -> pd.DataFrame:
+    """取得單一張雷達圖各軸向底下的經手任務明細。
+
+    不限定快照日期，讀出全部文件的雷達軸與經手任務兩欄，供圖表 hover 與任務表格展開使用。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱。
+
+    Returns:
+        含雷達軸與經手任務兩欄的 DataFrame；無資料時為空 DataFrame。
+    """
     coll = db[collection]
     data = coll.find({}, {"_id": 0, "雷達軸": 1, "經手任務": 1})
 
@@ -80,6 +101,19 @@ def get_a_radar_detail(db: Database, collection: str) -> pd.DataFrame:
 
 
 def get_obsidian_kpi(db: Database, collection: str = "obsidian_summary") -> tuple:
+    """取得 Obsidian 筆記總數 KPI 與環比變化量，供首頁 KPI 卡片使用。
+
+    依 snapshot_date 由新到舊取兩筆快照，以最新一筆為現值、前一筆為基準算出環比變化量；
+    只有一筆快照時，把現值本身視為變化量。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱，預設 obsidian_summary。
+
+    Returns:
+        四元組，依序為筆記總數、環比變化量、各主題筆記數的分佈 dict、最新快照日期；
+        無資料時回傳 0、0、空 dict 與 None。
+    """
     #     # —— KPI ——
     # obsidian_total = 36
     # obsidian_delta = "+6"
@@ -101,6 +135,18 @@ def get_obsidian_kpi(db: Database, collection: str = "obsidian_summary") -> tupl
 
 
 def get_github_kpi(db: Database, collection: str = "github_summary") -> tuple:
+    """取得 GitHub repo 總數 KPI 與環比變化量，供首頁 KPI 卡片使用。
+
+    依 snapshot_date 由新到舊取兩筆快照，以最新一筆為現值、前一筆為基準算出環比變化量；
+    只有一筆快照時，把現值本身視為變化量。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱，預設 github_summary。
+
+    Returns:
+        三元組，依序為 repo 總數、環比變化量、最新快照日期；無資料時回傳 0、0 與 None。
+    """
     # github_total = 15
     # github_delta = "+3 repos"
     coll = db[collection]
@@ -118,6 +164,18 @@ def get_github_kpi(db: Database, collection: str = "github_summary") -> tuple:
 
 
 def get_github_detail(db: Database, collection: str = "github_repos") -> list[dict]:
+    """取得 GitHub 各 repo 的活動明細，依最後推送時間由新到舊排序。
+
+    只取專案卡片需要的欄位，供首頁的最近專案區塊渲染。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱，預設 github_repos。
+
+    Returns:
+        每筆含 repo_name、commit_counts、description、language、pushed_at、readme_url、
+        fetched_at 的 dict 清單；無資料時為空 list。
+    """
     coll = db[collection]
     data = coll.find(
         {},
@@ -136,14 +194,19 @@ def get_github_detail(db: Database, collection: str = "github_repos") -> list[di
 
 
 def get_problem_kpi_donut(db: Database, collection: str = "ccClub&leetcode_summary") -> dict:
-    """取得刷題三相 donut 所需的 KPI 與環比變化量。
+    """取得刷題三相 donut chart 所需的題數 KPI 與環比變化量。
 
-    範例回傳值：
-        leetcode_sql = 156
-        leetcode_python = 203
-        ccclub_total = 204
-        leetcode_sql_delta = "+12"
-        leetcode_python_delta = "+24"
+    依 snapshot_date 由新到舊取兩筆快照。LeetCode 未直接記錄 SQL 題數，
+    而是以 Database 主題的百分比乘上總題數推算，其餘題數一律歸為 Python 題。
+    只有一筆快照時，把現值本身視為變化量。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱，預設 ccClub&leetcode_summary。
+
+    Returns:
+        含 leetcode_sql、leetcode_python、leetcode_sql_delta、leetcode_python_delta、
+        ccclub_total、snapshot_date 六個鍵的 dict；無資料時各值皆為 0。
     """
     coll = db[collection]
     data = list(coll.find({}, {"_id": 0}).sort({"snapshot_date": -1}).limit(2))
@@ -193,19 +256,20 @@ def get_problem_kpi_donut(db: Database, collection: str = "ccClub&leetcode_summa
 
 
 def get_onenote_versioned_pages(db: Database) -> list[dict]:
-    """查詢 Collection onenote_note_metadata，回傳一篇筆記「目前哪些版本可審閱」。
+    """查詢 onenote_note_metadata，回傳目前還需要人工審閱的筆記版本。
 
-    同一頁筆記的各版本坐落在不同資料列，dt 欄位代表版本好，以 (page_id, dt) 為複合唯一鍵鎖定筆記版本。
-    以 aggregation 做兩層篩選，讓前端只看到需要審閱的版本：
-    - 濾掉 status=review_closed 的版本（已退役，含 rejected 與 overwritten，不論 dt 皆不再出現）。
-    - 每個 page_id 算出 lastArchivedAt = max(dateTrunc(archived_at, day))，只保留 dt≥最後歸檔日
-      的版本（尚無歸檔時全留）；使歸檔後的新內容（新 dt）能重新進入審閱，舊版自動退場。
+    同一頁筆記的各個版本分別存成獨立資料列，dt 欄位即版本日期，
+    page_id 與 dt 兩欄合起來是鎖定單一版本的複合唯一鍵。
+    aggregation 做兩層篩選，讓審查頁只看到還需要處理的版本：
+    第一層濾掉 status 為 review_closed 的版本，這類版本已退役，含退件與被覆寫兩種情形。
+    第二層以 page_id 分組算出最後一次歸檔日期，只保留 dt 不早於該日期的版本，尚未歸檔過的筆記則全數保留。
+    如此一來，歸檔之後新抓到的內容會帶著更新的 dt 重新進入審閱，舊版本則自動退場。
 
     Args:
         db: pymongo Database 物件。
 
     Returns:
-        list[dict]: 可審閱的 (page_id, dt) 版本，依 html_downloaded_at 由新到舊排序。
+        待審閱的筆記版本文件清單，依 html_downloaded_at 由新到舊排序；無資料時為空 list。
     """
     coll = db["onenote_note_metadata"]
     pipeline = [
@@ -240,19 +304,18 @@ def get_onenote_versioned_pages(db: Database) -> list[dict]:
 
 
 def get_notes_summary_snapshots(db: Database, collection: str = "notes_summary", limit: int = 2) -> list[dict]:
-    """取得 notes_summary 最新的幾筆快照，供攝取品質頁的 KPI 卡與生命週期漏斗使用。
+    """取得 notes_summary 最新的幾筆快照，供攝取品質頁的 KPI 卡片與生命週期漏斗使用。
 
-    依 snapshot_date 由新到舊取前 limit 筆（預設 2 筆）：第 0 筆為最新快照、
-    第 1 筆為前一次快照，用來計算 KPI 的環比 delta。每筆含 total/archived/
-    rejected/embedded 計數與 by_tag_in_archived/rejected_notes 標籤分佈。
+    依 snapshot_date 由新到舊取前幾筆，第一筆是最新快照，第二筆是前一次快照，兩者相減即為 KPI 的環比變化量。
+    每筆快照含 total、archived、rejected、embedded 四個計數，以及歸檔與退件筆記各自的標籤分佈。
 
     Args:
         db: pymongo Database 物件。
         collection: 來源 collection 名稱，預設 notes_summary。
-        limit: 取回的快照筆數，預設 2（最新 + 前一筆）。
+        limit: 取回的快照筆數，預設 2 筆，即最新一筆加上前一筆。
 
     Returns:
-        list[dict]: 依 snapshot_date 由新到舊排序的快照 doc；無資料時為空 list。
+        依 snapshot_date 由新到舊排序的快照文件清單；無資料時為空 list。
     """
     coll = db[collection]
     data = coll.find({}, {"_id": 0}).sort("snapshot_date", -1).limit(limit)
@@ -260,19 +323,18 @@ def get_notes_summary_snapshots(db: Database, collection: str = "notes_summary",
 
 
 def get_onenote_attachment_dismatch(db: Database, collection: str = "onenote_note_metadata") -> list[dict]:
-    """彙總 OneNote 各狀態筆記的附件遺失情形，供攝取品質頁的附件遺失量長條圖。
+    """彙總 OneNote 各狀態筆記的附件遺失情形，供攝取品質頁的附件遺失量長條圖使用。
 
-    只取 status 為 archived / rejected 的筆記，依 (status, embedded_status) 分組，
-    回傳每組有幾篇含遺失附件（md_cnt_has_dismatched_img）與各篇的遺失張數陣列
-    （dismatched_img_count），由頁面端據此堆疊出「失效 N 張的筆記有幾篇」。
+    只取 status 為 archived 或 rejected 的筆記，依 status 與 embedded_status 兩欄分組，
+    每組回傳含遺失附件的筆記篇數，以及各篇的遺失張數陣列，頁面端再據此堆疊出各遺失張數的筆記篇數。
 
     Args:
         db: pymongo Database 物件。
         collection: 來源 collection 名稱，預設 onenote_note_metadata。
 
     Returns:
-        list[dict]: 每組含 status / embedded_status / md_cnt_has_dismatched_img /
-        dismatched_img_count（list）；無資料時為空 list。
+        每組含 status、embedded_status、md_cnt_has_dismatched_img 與
+        dismatched_img_count 四個欄位的 dict 清單；無資料時為空 list。
     """
     coll = db[collection]
     pipeline = [
@@ -298,18 +360,18 @@ def get_onenote_attachment_dismatch(db: Database, collection: str = "onenote_not
 
 
 def get_enrichment_logs(db: Database, collection: str = "multimodal_llm_enrichment_logs") -> pd.DataFrame:
-    """取得 LLM enrichment 的成功與 cache hit 紀錄，供 token 累計與 cache hit rate 圖表。
+    """取得 LLM enrichment 的成功紀錄，供 token 累計量與快取命中率圖表使用。
 
-    只取 status 為 success 的紀錄（濾掉失敗筆避免 token 為 null），
-    依 timestamp 由舊到新排序。cache hit 筆的 token/latency 依 schema 記為 0。
+    只取 status 為 success 的紀錄，藉此濾掉 token 欄位為 null 的失敗筆。
+    命中快取的紀錄依 schema 定義會把 token 數與延遲時間記為 0。
 
     Args:
         db: pymongo Database 物件。
         collection: 來源 collection 名稱，預設 multimodal_llm_enrichment_logs。
 
     Returns:
-        pandas.DataFrame: 含 timestamp / input_tokens / output_tokens /
-        total_tokens / cache_hit / latency_ms；無資料時為空 DataFrame。
+        含 timestamp、input_tokens、output_tokens、total_tokens、cache_hit、latency_ms
+        六欄的 DataFrame，依 timestamp 由新到舊排序；無資料時為空 DataFrame。
     """
     coll = db[collection]
     cursor = coll.find(
@@ -328,18 +390,18 @@ def get_enrichment_logs(db: Database, collection: str = "multimodal_llm_enrichme
 
 
 def get_rag_retrieved_chunks(db: Database, collection: str = "chat_history") -> pd.DataFrame:
-    """展開 RAG 回應的 retrieved_chunks，每個 chunk 一列，供 similarity vs rerank 散佈圖。
+    """把 RAG 回應中檢索到的 chunk 攤平成每列一筆，供向量相似度與重排分數的散佈圖使用。
 
-    只取 agent_type=rag 且 role=model 的紀錄，$unwind metadata.retrieved_chunks
-    後攤平各 chunk 的 similarity（score）與 rerank_score。
+    只取 agent_type 為 rag 且 role 為 model 的紀錄，展開 metadata 裡的 retrieved_chunks 陣列，
+    取出每個 chunk 的向量相似度分數與重排分數。
 
     Args:
         db: pymongo Database 物件。
-        collection: 來源 collection，預設 chat_history。
+        collection: 來源 collection 名稱，預設 chat_history。
 
     Returns:
-        pandas.DataFrame: 欄位 session_id / timestamp / file_path / chunk_index /
-        score / rerank_score；無資料時為空 DataFrame。
+        含 session_id、timestamp、file_path、chunk_index、score、rerank_score
+        六欄的 DataFrame；無資料時為空 DataFrame。
     """
     coll = db[collection]
     pipeline = [
@@ -362,14 +424,16 @@ def get_rag_retrieved_chunks(db: Database, collection: str = "chat_history") -> 
 
 
 def get_rag_session_rounds(db: Database, collection: str = "chat_history") -> pd.DataFrame:
-    """統計每個 session 的檢索輪數（同 session 中 role=user 的訊息數），供輪數分佈圖。
+    """統計每個 session 的檢索輪數，供輪數分佈圖使用。
+
+    一輪即一則使用者提問，因此以同一個 session 中 role 為 user 的訊息筆數作為輪數。
 
     Args:
         db: pymongo Database 物件。
-        collection: 來源 collection，預設 chat_history。
+        collection: 來源 collection 名稱，預設 chat_history。
 
     Returns:
-        pandas.DataFrame: 欄位 session_id / rounds；無資料時為空 DataFrame。
+        含 session_id 與 rounds 兩欄的 DataFrame；無資料時為空 DataFrame。
     """
     coll = db[collection]
     pipeline = [
@@ -381,19 +445,22 @@ def get_rag_session_rounds(db: Database, collection: str = "chat_history") -> pd
 
 
 def get_rag_file_retrieval_counts(db: Database, collection: str = "chat_history") -> pd.DataFrame:
-    """統計各文件被 RAG 檢索到的次數與最後檢索時間，供冷熱資料 treemap。
+    """統計各筆記檔被 RAG 檢索到的次數與最後檢索時間，供冷熱資料 treemap 使用。
 
-    以 note_files（去重後的參考檔案）$unwind 後 group by 檔名計數。days_since
-    由最後檢索時間換算距今天數。只涵蓋「至少被檢索過一次」的檔案；從未被檢索的
-    檔案不會出現在 chat_history，故此查詢無法列出零檢索檔（需與語料庫 join）。
+    展開 metadata 裡已去重的 note_files 陣列後，依檔名分組計數，
+    並把最後檢索時間換算成距今天數。
+
+    Note:
+        統計範圍只涵蓋至少被檢索過一次的檔案。從未被檢索的檔案不會出現在 chat_history，
+        因此要列出零檢索的檔案需另行與語料庫做 join。
 
     Args:
         db: pymongo Database 物件。
-        collection: 來源 collection，預設 chat_history。
+        collection: 來源 collection 名稱，預設 chat_history。
 
     Returns:
-        pandas.DataFrame: 欄位 file_name / count / last_retrieved / days_since，
-        依 count 由多到少排序；無資料時為空 DataFrame。
+        含 file_name、count、last_retrieved、days_since 四欄的 DataFrame，
+        依檢索次數由多到少排序；無資料時為空 DataFrame。
     """
     coll = db[collection]
     pipeline = [
@@ -419,19 +486,20 @@ def get_rag_file_retrieval_counts(db: Database, collection: str = "chat_history"
 
 
 def get_rag_satisfaction_proxy(db: Database, collection: str = "chat_history", truncate_limit: int = 2000) -> dict:
-    """彙總 RAG 檢索品質的滿意度代理指標（rerank top-1 中位數、多文件發散度、回應截斷率）。
+    """彙總三項用來代理檢索滿意度的指標：重排首名分數中位數、來源檔案發散度與回應截斷率。
 
-    以一次 aggregation 掃過 agent_type=rag 且 role=model 的紀錄，計算：
-    top-1 rerank 分數的中位數（p50）、note_files 數量平均、content 長度達
-    truncate_limit 上限的比例。avg_rounds 不在此計算（由呼叫端以輪數資料補上）。
+    以一次 aggregation 掃過 agent_type 為 rag 且 role 為 model 的紀錄，計算三件事：
+    每次回應中重排分數最高那筆的中位數、每次回應引用的筆記檔數平均值，
+    以及回應長度達到截斷上限的比例。平均輪數不在此計算，由呼叫端以輪數資料另行補上。
 
     Args:
         db: pymongo Database 物件。
-        collection: 來源 collection，預設 chat_history。
-        truncate_limit: content 視為被截斷的字元上限，預設 2000。
+        collection: 來源 collection 名稱，預設 chat_history。
+        truncate_limit: 回應長度達到多少字元即視為被截斷，預設 2000。
 
     Returns:
-        dict: rerank_top1_p50 / avg_note_files / truncation_rate；無資料時全為 0。
+        含 rerank_top1_p50、avg_note_files、truncation_rate、last_date 四個鍵的 dict；
+        無資料時三項指標皆為 0，日期顯示為無資料。
     """
     coll = db[collection]
     pipeline = [
@@ -481,6 +549,16 @@ def get_rag_satisfaction_proxy(db: Database, collection: str = "chat_history", t
 
 
 def get_problem_features(db: Database, collection: str = "ccClub&leetcode_summary") -> dict:
+    """取得最新一次快照中，LeetCode 與 ccClub 兩個來源的題目主題佔比。
+
+    Args:
+        db: pymongo Database 物件。
+        collection: 來源 collection 名稱，預設 ccClub&leetcode_summary。
+
+    Returns:
+        含 LeetCode、ccClub-Python 兩份主題佔比 dict 與 snapshot_date 的 dict；
+        無資料時兩份佔比為空 dict、快照日期為 None。
+    """
     coll = db[collection]
     data = list(coll.find({}, {"_id": 0}).sort({"snapshot_date": -1}).limit(1))
     if not data:

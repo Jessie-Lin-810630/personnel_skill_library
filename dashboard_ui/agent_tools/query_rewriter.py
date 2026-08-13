@@ -21,16 +21,16 @@ from pymongo.database import Database
 
 # ── 參考資料載入（rewriter 的 tag 字典來源）──────────────────────
 def load_known_tags(db: Database, collection: NoteCollections = NoteCollections.VECTOR) -> set[str]:
-    """從向量庫撈出所有出現過的 tag，做為合法 tag 字典。
+    """從向量庫撈出所有出現過的標籤，作為合法標籤字典。
 
-    用於校驗 LLM 推薦的 tags，避免 LLM 自發創意產出不存在的 tags。
+    這份字典用來校驗 LLM 推薦的標籤，避免模型自行捏造出資料庫裡不存在的標籤。
 
     Args:
-        db:         pymongo Database 物件。
-        collection: 向量集合名稱，預設 NoteCollections.VECTOR，即 "note_vectors_multimodal"。
+        db: pymongo Database 物件。
+        collection: 向量 collection 名稱，預設為 NoteCollections.VECTOR。
 
     Returns:
-        該集合 tags 欄位所有出現過的 tag 字串集合。
+        該 collection 的 tags 欄位所有出現過的標籤字串集合。
     """
     coll = db[collection]
     return set(coll.distinct("tags"))
@@ -39,25 +39,21 @@ def load_known_tags(db: Database, collection: NoteCollections = NoteCollections.
 def load_alias_to_tags_map(
     db: Database, collection: NoteCollectionBeforeEmbedding = NoteCollections.OBSIDIAN
 ) -> list[dict]:
-    """從 obsidian_note_metadata 或 onenote_note_metadata 撈出 {alias: [tags]} 的對照表。
+    """從筆記 metadata 撈出別名與標籤的對照表，供改寫器推薦標籤時參考。
 
-    僅撈 status=archived 且 embedded_status=True（已歸檔且已向量化）的筆記；alias/tags 取自各自的
-    frontmatter（obsidian 為 archived_md_frontmatter、onenote 為 md_frontmatter），file_path 回填 archived_md_path。
-    若一篇筆記有多個 alias，回傳時會攤平成獨立 pair 方便後續比對，例如：
-        [ {alias-1 of note-1: [tagA, B, C]},
-          {alias-2 of note-1: [tagA, B, C]},
-          {alias-1 of note-2: [tagB, C, D, E]},
-        ]
+    只撈 status 為 archived 且 embedded_status 為 True 的筆記，也就是已歸檔且已完成向量化的部分。
+    別名與標籤取自各來源自己的 frontmatter 欄位，Obsidian 取 archived_md_frontmatter，
+    OneNote 取 md_frontmatter，檔案路徑一律回填歸檔後的 Markdown 路徑。
+    一篇筆記的檔名本身也視為別名之一，並排在自訂別名前面；
+    多個別名會攤平成多筆獨立的對照，方便後續逐筆比對。
 
     Args:
-        db:         pymongo Database 物件。
-        collection: NoteCollectionBeforeEmbedding 筆記所在集合名稱，可選傳入
-        NoteCollections.OBSIDIAN ("obsidian_note_metadata") 或
-        NoteCollections.ONENOTE ("onenote_note_metadata")。
+        db: pymongo Database 物件。
+        collection: 筆記 metadata 所在的 collection，可傳入 NoteCollections.OBSIDIAN 或
+            NoteCollections.ONENOTE，預設為前者。
 
     Returns:
-        攤平後的 alias-tag pair list，每筆為
-        {"alias": str, "tags": list[str], "file_path": str}。
+        攤平後的別名對照清單，每筆含 alias、tags、file_path 三個鍵。
     """
     coll = db[collection]
     if collection == "obsidian_note_metadata":
@@ -134,19 +130,19 @@ TAGS: <tag1, tag2, tag3>或<None>
 
 
 def _format_history_for_prompt(history_msgs: list[dict]) -> str:
-    """將 load_chat_history() 回傳的 history 格式化成可讀文字。
+    """把對話歷史攤平成一段可讀文字，嵌進改寫用的 prompt。
 
-    供 rewrite prompt 使用。
+    每則訊息依角色標上使用者或助手前綴，逐行排列。
+    助手的回覆超過 300 字元時會截斷，避免歷史內容把 prompt 撐得過長。
 
-    **Note:**
-        - load_chat_history() 回傳的歷史訊息格式為: {"role": "user"/"model", "parts": [{"text": "..."}]}
-        - 使用的 agent: RAG agent
+    Note:
+        呼叫方為 RAG agent。
 
     Args:
-        history_msgs: load_chat_history() 回傳的歷史訊息 list。
+        history_msgs: load_chat_history 回傳的歷史訊息清單，每筆含 role 與 parts 兩個鍵。
 
     Returns:
-        每行 "使用者: ..." / "助手: ..." 的可讀文字；無歷史時回傳 "(無對話歷史)"。
+        以換行分隔的可讀文字；沒有歷史時回傳表示無對話歷史的提示字串。
     """
     if not history_msgs:
         return "(無對話歷史)"
@@ -173,29 +169,29 @@ def rewrite_query(
     known_tags: set[str],
     client: genai.Client | None = None,
 ) -> dict:
-    """改寫原始 query 並推薦 tags 做 query expansion。
+    """把使用者的追問改寫成獨立問句，並推薦標籤做查詢擴展。
 
-    以加強 vector search 時能偏好這些 tags，找到與原始 query 相近的 data chunks，
-    但不像關鍵字過濾策略硬性要求只能找含有這些 tags 的筆記。
+    LLM 依對話歷史與別名對照表產出改寫後問句與推薦標籤，推薦標籤會再以合法標籤字典校驗一次，
+    不在字典內的一律剔除。改寫後問句串上通過校驗的標籤即為擴展問句。
+    擴展問句只是在向量檢索時加強語意信號，讓模型偏好帶有這些標籤的筆記，
+    並不像前置篩選那樣硬性要求筆記必須帶有這些標籤。
+    呼叫模型失敗時退回使用者原始問句，讓檢索流程照常進行。
 
-    **Note:**
-        使用的 agent: RAG agent
+    Note:
+        呼叫方為 RAG agent。
 
     Args:
-        query:              使用者原始輸入
-        alias_tag_pairs:    筆記 alias-tag 對照表，例如
-            [{"alias": "noteA", "tags": [tag1, tag2, tag3]}, {"alias": "noteB", "tags": [tag1, tag3, tag7]}]
-        chat_history_msgs:  最近 N 輪 history (genai SDK 格式)
-        known_tags:         向量資料庫裡實際存在的 tag set (用來校驗 LLM 推薦的 tag)
-        client:             genai.Client object
+        query: 使用者原始輸入。
+        alias_tag_pairs: 由 load_alias_to_tags_map 產出的別名與標籤對照清單，
+            為控制 prompt 長度只取前 100 筆。
+        chat_history_msgs: 最近幾輪的對話歷史，格式對齊 google-genai SDK。
+        known_tags: 向量庫裡實際存在的標籤集合，用來校驗模型推薦的標籤。
+        client: google-genai Client 物件。
 
     Returns:
-        {
-            "rewritten_query": str,    # 改寫後的獨立問句（給 reranker 用）
-            "expanded_query": str,     # rewritten + tags 串接（給 rag 做 vector_search 增強向量語意信號用）
-            "recommended_tags": list[str],  # LLM 推薦且已校驗的 tags
-        }
-
+        含三個鍵的 dict：rewritten_query 為改寫後的獨立問句，交給 reranker 評分；
+        expanded_query 為改寫後問句串上推薦標籤，交給向量檢索增強語意信號；
+        recommended_tags 為通過校驗的推薦標籤清單。
     """
     # 組裝 system prompt
     pairs_str = "\n".join(

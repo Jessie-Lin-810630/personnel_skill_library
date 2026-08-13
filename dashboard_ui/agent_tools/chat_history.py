@@ -27,28 +27,27 @@ def load_chat_history(
     role: Role | None = None,
     n: int = 3,
 ) -> list[dict]:
-    """讀取某 session、某 agent 最近 N 輪對話。
+    """讀取指定 session 中，某個 agent 最近幾輪的對話紀錄。
+
+    先依時間由新到舊取出所需筆數，再反轉成由舊到新，以符合模型 API 對訊息順序的要求。
+    各個 agent 只讀自己的歷史，避免 RAG 的對話脈絡干擾 Planning 的推理。
+
+    Note:
+        該 session 與 agent 尚無任何紀錄時回傳空 list，例如對話的第一輪，
+        因此呼叫方不需要另外做 None 檢查。資料庫查詢失敗時同樣回傳空 list，
+        讓該輪 agent 在沒有歷史的情況下照常運作。
 
     Args:
-        session_id (str):  目前對話的 uuid4
-        agent_type (AgentType):  "router" | "rag" | "planning"
-            各 Agent 只讀自己的歷史，避免 rag 脈絡污染 planning 推理
-        role (Role | None): 可選，只讀特定 role ("user" | "model") 的紀錄；None 則 user/model 都讀
-        n (int): 輪數 (1 輪 = 1 筆 user + 1 筆 model)，預設 3 輪，實際讀取筆數 = n*2。
-        亦可傳入 RouterAgent.CHAT_HISTORY_N | RagAgent.CHAT_HISTORY_N | PlanningAgent.CHAT_HISTORY_N | 自訂整數。
+        session_id: 目前對話的 uuid4。
+        agent_type: 要讀取哪一個 agent 的歷史，可為 router、rag 或 planning。
+        role: 只讀取特定角色的紀錄，可為 user 或 model；預設為 None，代表兩種角色都讀。
+        n: 要回讀幾輪，一輪指一筆 user 訊息加一筆 model 訊息，預設 3 輪。
+            兩種角色都讀時實際讀取筆數為輪數的兩倍。各 agent 的建議值定義在
+            RouterAgent、RagAgent、PlanningAgent 三個常數類別的 CHAT_HISTORY_N。
 
     Returns:
-        list[dict]，格式對齊 google-genai SDK 的 contents 參數:
-        [
-            {"role": "user",  "parts": [{"text": "..."}]},
-            {"role": "model", "parts": [{"text": "..."}]},
-            ...
-        ]
-        時間順序為舊到新，故可直接 append 新訊息後送入 model API。
-
-    注意:
-        若該 session / agent_type 尚無紀錄（例如對話第一輪），回傳空 list []，
-        呼叫方不需要做 None 檢查。
+        對齊 google-genai SDK contents 參數格式的訊息清單，每筆含 role 與 parts 兩個鍵，
+        時間順序由舊到新，可直接接上本輪新訊息後送進模型 API；查無紀錄或查詢失敗時為空 list。
     """
     db = _get_db()
     collection = db[CHAT_HISTORY_COLLECTION]
@@ -110,27 +109,23 @@ def save_chat_history(
     message_text: str,
     metadata: dict | None = None,
 ) -> None:
-    """寫入一筆對話紀錄，含層 3 安全防護。
+    """寫入一筆對話紀錄到 chat_history，並套用兩道容量防護。
+
+    第一道防護限制單筆訊息長度，超過 2000 字元即截斷並記錄一筆 warning。
+    第二道防護限制單一 session 的紀錄筆數，已達 100 筆時先刪掉最舊的一筆再寫入，維持總量不成長。
+    寫入過程若發生例外只記錄 error，不向上拋出，避免資料庫問題中斷正在進行的對話。
 
     Args:
-        session_id:  目前對話的 uuid4
-        agent_type:  "router" | "rag" | "planning"
-        role:        "user" | "model"，對齊 google-genai SDK 格式
-        message_text:     訊息純文字，超過 2000 字元自動截斷
-        metadata:    可選，dict，結構參考 Schema 設計:
-                     {
-                         "model":            "gemini-2.5-flash-lite",
-                         "intent_score":     0.92,        # router 用
-                         "retrieved_chunks": [{"file_path": "01_dir/xxx.md",
-                                               "chunk_index": 1,
-                                               "score": 0.88013,
-                                            }],   # rag / planning 用
-                         "note_files":       ["xxx.md"],  # rag / planning 用
-                     }
+        session_id: 目前對話的 uuid4。
+        agent_type: 產生這筆紀錄的 agent，可為 router、rag 或 planning。
+        role: 訊息角色，可為 user 或 model，對齊 google-genai SDK 的格式。
+        message_text: 訊息純文字，超過長度上限時自動截斷。
+        metadata: 隨紀錄一起存放的附加資訊，預設為 None。常見的鍵有 model 記錄使用的模型、
+            intent_score 記錄 router 的意圖分數、retrieved_chunks 記錄 RAG 與 Planning 檢索到的
+            chunk 明細、note_files 記錄去重後的來源筆記檔名。
 
-    防護邏輯:
-        1. content(即 message_text 引數) 超過 2000 字元 → 截斷並記 warning log
-        2. 同一 session 已達 100 筆 → 刪除最舊一筆再寫入，維持上限
+    Returns:
+        None: 只寫入資料庫，不回傳值。
     """
     CONTENT_MAX_CHARS = 2000  # 安全防護：單筆 content 上限
     SESSION_MAX_DOCS = 100  # 安全防護：單一 session 上限

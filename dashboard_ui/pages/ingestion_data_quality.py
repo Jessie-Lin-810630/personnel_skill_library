@@ -69,17 +69,33 @@ st.markdown(
 # ─────────────────────────────────────────
 @st.cache_data(ttl=600)
 def _load_notes_snapshots() -> list[dict]:
-    """notes_summary 最新兩筆快照；ttl 10 分鐘（快照為週頻，不必即時）。"""
+    """讀取 notes_summary 最新兩筆快照並快取十分鐘，供 KPI 卡片與生命週期漏斗使用。
+
+    上游快照為週頻更新，十分鐘的快取時間已足夠反映最新狀態。
+
+    Returns:
+        依 snapshot_date 由新到舊排序的快照文件清單，最多兩筆；無資料時為空 list。
+    """
     return get_notes_summary_snapshots(get_db_atlas())
 
 
 @st.cache_data(ttl=600)
 def _load_enrichment_logs() -> pd.DataFrame:
+    """讀取 LLM enrichment 的成功紀錄並快取十分鐘，供 token 累計量與快取命中率圖表使用。
+
+    Returns:
+        含 timestamp、各項 token 數、cache_hit 與 latency_ms 的 DataFrame；無資料時為空 DataFrame。
+    """
     return get_enrichment_logs(get_db_atlas())
 
 
 @st.cache_data(ttl=600)
 def _load_attachment_dismatch() -> list[dict]:
+    """讀取 OneNote 筆記的附件遺失統計並快取十分鐘，供附件遺失量長條圖使用。
+
+    Returns:
+        每組含 status、embedded_status 與遺失附件統計的 dict 清單；無資料時為空 list。
+    """
     return get_onenote_attachment_dismatch(get_db_atlas())
 
 
@@ -93,7 +109,16 @@ previous = snapshots[1] if len(snapshots) > 1 else None
 
 
 def _delta(field: str):
-    """有前一筆快照才回傳環比 delta，否則回傳 None（KPI 不顯示箭頭）。"""
+    """計算指定欄位在最新快照與前一筆快照之間的環比變化量。
+
+    只有一筆快照時無從比較，回傳 None 讓 KPI 卡片不顯示變化箭頭。
+
+    Args:
+        field: 要比較的快照欄位名稱。
+
+    Returns:
+        int | None: 兩筆快照的差值；沒有前一筆快照時為 None。
+    """
     if previous is None:
         return None
     return latest.get(field, 0) - previous.get(field, 0)
@@ -104,7 +129,18 @@ Y_TICKS = 5
 
 
 def _nice_ceiling(value: float, unit: int) -> int:
-    """把 value 向上取到 unit 的倍數，供雙軸設定等距刻度上界（value≤0 時回傳 unit）。"""
+    """把數值換算成刻度上界，供雙 y 軸設定等距刻度時對齊格線。
+
+    以級距為單位取整後再多留 20 個級距，讓資料點不會頂到圖表上緣。
+    數值為零或負值時直接回傳一個級距，避免上界落在零而畫不出刻度。
+
+    Args:
+        value: 該軸資料的最大值。
+        unit: 刻度級距。
+
+    Returns:
+        級距的整數倍，作為該軸的刻度上界。
+    """
     if value <= 0:
         return unit
     return (int(value // unit) + 20) * unit
@@ -304,7 +340,18 @@ union_tags = set(archived_tags) | set(rejected_tags)
 
 
 def _build_tag_diverging_fig(display_tags: list[str]) -> go.Figure:
-    """畫 archived(綠,右) vs rejected(紅,左) 的分歧長條圖，左右刻度對稱。"""
+    """繪製標籤分佈的分歧長條圖，比較同一個標籤在歸檔與退件文件中的出現次數。
+
+    歸檔數以綠色畫在中軸右側，退件數以紅色畫在中軸左側。
+    左右兩側先取共同的最大值再向上進位到級距的倍數，讓兩側刻度對稱，
+    軸標籤則取絕對值顯示，避免左側出現負數。
+
+    Args:
+        display_tags: 要顯示的標籤清單，由上而下依序排列。
+
+    Returns:
+        已套用全站配色與版面設定的分歧長條圖物件，高度依標籤數量調整。
+    """
     # 先算左右兩側的最大值，決定對稱刻度範圍
     step = 4
     max_abs = max(

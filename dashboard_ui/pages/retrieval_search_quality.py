@@ -63,21 +63,43 @@ st.markdown(
 # ─────────────────────────────────────────
 @st.cache_data(ttl=300)
 def _load_retrieved_chunks() -> pd.DataFrame:
+    """讀取檢索到的 chunk 明細並快取五分鐘，供相似度與重排分數的散佈圖使用。
+
+    Returns:
+        每列一個 chunk 的 DataFrame，含 session_id、timestamp、file_path、chunk_index
+        與兩項分數；無資料時為空 DataFrame。
+    """
     return get_rag_retrieved_chunks(get_db_atlas())
 
 
 @st.cache_data(ttl=300)
 def _load_session_rounds() -> pd.DataFrame:
+    """讀取各 session 的檢索輪數並快取五分鐘，供輪數分佈圖與平均輪數指標使用。
+
+    Returns:
+        含 session_id 與 rounds 兩欄的 DataFrame；無資料時為空 DataFrame。
+    """
     return get_rag_session_rounds(get_db_atlas())
 
 
 @st.cache_data(ttl=300)
 def _load_file_counts() -> pd.DataFrame:
+    """讀取各筆記檔被檢索到的次數並快取五分鐘，供冷熱資料 treemap 使用。
+
+    Returns:
+        含 file_name、count、last_retrieved、days_since 四欄的 DataFrame；無資料時為空 DataFrame。
+    """
     return get_rag_file_retrieval_counts(get_db_atlas())
 
 
 @st.cache_data(ttl=300)
 def _load_satisfaction() -> dict:
+    """讀取滿意度代理指標並快取五分鐘，供品質績效卡片與雷達圖使用。
+
+    Returns:
+        含 rerank_top1_p50、avg_note_files、truncation_rate 與 last_date 的 dict；
+        平均輪數不在此計算，由頁面另行補上。
+    """
     return get_rag_satisfaction_proxy(get_db_atlas(), truncate_limit=CONTENT_TRUNCATE_LIMIT)
 
 
@@ -128,6 +150,17 @@ if chunks_df.empty:
 else:
 
     def classify_outlier(row):
+        """判斷單一 chunk 的兩項分數是否落在需要留意的離群區間，供散佈圖上色。
+
+        兩種離群情形各自代表不同問題：相似度高而重排分數低，代表向量檢索召回了字面接近但語意不合的內容；
+        相似度低而重排分數高，代表向量檢索差點漏掉真正相關的內容。
+
+        Args:
+            row: 散佈圖資料表的單一列，需含 score 與 rerank_score 兩欄。
+
+        Returns:
+            str: 該 chunk 所屬的分類名稱，用於決定散佈圖上的顏色與圖例。
+        """
         if row["score"] > 0.80 and row["rerank_score"] < 0.20:
             return "Similarity score 偏高、Rerank score 偏低"
         elif row["score"] < 0.60 and row["rerank_score"] > 0.60:
@@ -259,6 +292,14 @@ with col_right:
     else:
 
         def heat_label(count):
+            """依檢索次數把一份筆記歸到四個冷熱等級之一，供 treemap 分色。
+
+            Args:
+                count: 該筆記被檢索到的累計次數。
+
+            Returns:
+                str: 帶圖示的冷熱等級標籤。
+            """
             if count >= 15:
                 return "🔥 熱門"
             elif count >= 5:
@@ -338,7 +379,20 @@ st.error(
 
 
 def health_icon(val, good_threshold, bad_threshold, higher_is_better=True):
-    """依門檻回傳 🟢🟡🔴；higher_is_better=False 時方向反轉（越低越好）。"""
+    """依門檻把指標值轉成綠黃紅三色的健康度圖示。
+
+    預設數值越高越健康，達到良好門檻顯示綠燈、達到警戒門檻顯示黃燈、其餘顯示紅燈。
+    指標若是數值越低越健康，把方向參數設為 False 即可反轉判定。
+
+    Args:
+        val: 指標當前值。
+        good_threshold: 良好門檻。
+        bad_threshold: 警戒門檻。
+        higher_is_better (bool): 數值是否越高越健康，預設 True。
+
+    Returns:
+        str: 代表健康度的表情符號。
+    """
     if higher_is_better:
         if val >= good_threshold:
             return "🟢"
@@ -388,7 +442,20 @@ categories = ["Rerank top-1\np50", "輪數效率\n(反向)", "發散度控制\n(
 
 
 def normalize(val, min_v, max_v, invert=False):
-    """把 val 壓進 0–1；invert=True 時翻面，讓「越低越好」的軸統一成「越高越好」。"""
+    """把指標值依上下界線性壓縮到 0 到 1 之間，供雷達圖各軸使用同一個尺度。
+
+    超出上下界的數值會被裁切在區間端點。
+    數值越低越健康的指標把反轉參數設為 True，即可讓所有軸統一成越外圈越健康。
+
+    Args:
+        val: 指標當前值。
+        min_v: 壓縮區間的下界。
+        max_v: 壓縮區間的上界。
+        invert (bool): 是否反轉方向，預設 False。
+
+    Returns:
+        float: 0 到 1 之間的數值，作為雷達圖該軸的半徑。
+    """
     normed = (val - min_v) / (max_v - min_v)
     normed = max(0, min(1, normed))
     return 1 - normed if invert else normed

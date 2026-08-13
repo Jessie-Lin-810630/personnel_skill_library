@@ -45,11 +45,14 @@ _CACHE_TTL = 900  # 秒；上游 ETL 為日更，15 分鐘過期已足夠
 
 @st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入技能雷達…")
 def load_radar_data() -> dict:
-    """讀取雙雷達圖的軸標籤、分數、更新日期與任務明細。
+    """讀取兩張技能雷達圖所需的軸標籤、分數、更新日期與任務明細。
 
-    執行流程：
-    1. 讀 skill_radar_summary，依雷達圖名稱切成生技／資料工程兩組，取軸標籤、level 與最近更新日。
-    2. 讀 skill_scores_biotech／skill_scores_data_eng，整理成各軸對應的任務明細 dict。
+    先讀 skill_radar_summary，依雷達圖名稱切成生技與資料工程兩組，各自取出軸標籤、等級分數與最近更新日；
+    軸標籤會先套用斷行處理，避免過長的軸名在圖上被截斷。
+    再分別讀兩張明細表，整理成軸名對應經手任務清單的字典，供圖表 hover 與任務表格使用。
+
+    Returns:
+        含八個鍵的 dict，兩張雷達圖各有更新日期、軸標籤、等級分數與任務明細四項。
     """
     db = mongo_utils.get_db_atlas()
     radar_df = mongo_utils.get_radar_summary_df(db, "skill_radar_summary")
@@ -69,11 +72,14 @@ def load_radar_data() -> dict:
 
 @st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入 KPI…")
 def load_kpi_data() -> dict:
-    """讀取 KPI 卡片所需的知識庫、GitHub 與刷題數字，並先組好 delta 文案。
+    """讀取 KPI 卡片所需的知識庫、GitHub 與刷題數字，並先組好環比變化量的顯示文案。
 
-    執行流程：
-    1. 分別讀 notes_summary、github_summary、ccClub&leetcode_summary 取總數與增減量。
-    2. 以 _format_update_date／_format_delta 把更新日期與增減量轉成卡片要顯示的字串。
+    分別讀三張彙總表取得各自的現值與環比變化量，再把更新日期與變化量組成卡片可直接顯示的字串，
+    讓畫面端不需再做格式化。
+
+    Returns:
+        含各項 KPI 現值與已格式化變化量文案的 dict，涵蓋知識庫筆記、GitHub repo
+        與 LeetCode、ccClub 三個刷題來源。
     """
     db = mongo_utils.get_db_atlas()
     obsidian_total, obsidian_delta_raw, obsidian_topics, obsidian_updated_at = mongo_utils.get_obsidian_kpi(
@@ -103,18 +109,30 @@ def load_kpi_data() -> dict:
 
 @st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入 GitHub 專案…")
 def load_recent_repos() -> list[dict]:
-    """讀取 github_repos 並整理成最近專案卡片要用的欄位。"""
+    """讀取 GitHub repo 明細並整理成最近專案卡片要用的欄位。
+
+    Returns:
+        每筆含專案名稱、主要語言、commit 數、最後推送日期與 README 連結的 dict 清單，
+        依最後推送時間由新到舊排序。
+    """
     db = mongo_utils.get_db_atlas()
     return _github_repos_for_cards(mongo_utils.get_github_detail(db, "github_repos"))
 
 
 @st.cache_data(ttl=_CACHE_TTL, max_entries=1, show_spinner="載入題目特徵…")
 def load_topic_features(leetcode_total: int, ccclub_total: int) -> dict:
-    """讀取刷題題型佔比，換算成三相各自的題目特徵題數。
+    """讀取刷題題型佔比，換算成 donut chart 三個環各自的題數分佈。
 
-    執行流程：
-    1. 讀 ccClub&leetcode_summary 取各平台題型佔比。
-    2. 以 _percent_to_counts 依總題數換算成題數，LeetCode 再用 Database 標籤切成 SQL／Python 兩相。
+    LeetCode 的題目未區分語言，這裡以 Database 主題作為切分依據：屬於該主題的歸為 SQL 題，
+    其餘歸為 Python 題；ccClub 的題目則全數視為 Python 題。
+
+    Args:
+        leetcode_total: LeetCode 的總解題數，作為佔比換算回題數的基數。
+        ccclub_total: ccClub 的總解題數，作為佔比換算回題數的基數。
+
+    Returns:
+        含 LeetCode SQL、LeetCode Python、ccClub Python 三個鍵的 dict，
+        每個值為該環的主題與題數對照。
     """
     db = mongo_utils.get_db_atlas()
     problem_features = mongo_utils.get_problem_features(db, "ccClub&leetcode_summary")

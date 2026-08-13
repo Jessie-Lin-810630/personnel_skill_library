@@ -146,11 +146,29 @@ if "planning_map_generated" not in st.session_state:
 # 每個 session 各存一份完全相同的資料、徒增記憶體。_db 前綴底線讓 cache_data 略過雜湊該連線物件。
 @st.cache_data(ttl="12h")
 def _load_alias_to_tags_map(_db, collection):
+    """讀取別名與標籤對照表並跨 session 快取，供改寫器推薦標籤時參考。
+
+    Args:
+        _db: pymongo Database 物件，參數前綴底線讓快取機制略過雜湊這個連線物件。
+        collection: 筆記 metadata 所在的 collection。
+
+    Returns:
+        每筆含 alias、tags、file_path 三個鍵的別名對照清單。
+    """
     return load_alias_to_tags_map(_db, collection)
 
 
 @st.cache_data(ttl="12h")
 def _load_known_tags(_db, collection):
+    """讀取合法標籤字典並跨 session 快取，用來校驗模型推薦的標籤。
+
+    Args:
+        _db: pymongo Database 物件，參數前綴底線讓快取機制略過雜湊這個連線物件。
+        collection: 向量 collection 名稱。
+
+    Returns:
+        該 collection 的 tags 欄位所有出現過的標籤字串集合。
+    """
     return load_known_tags(_db, collection)
 
 
@@ -207,6 +225,19 @@ with logout_col:
 
 # ── Helper：來源清單渲染 ──────────────────────────────────────────────────────
 def _render_sources(sources: list[dict]) -> None:
+    """在可收合的區塊內渲染這一輪回答引用的來源筆記清單。
+
+    顯示內容依登入角色而異：訪客只看得到有哪些來源，不揭露向量相似度與重排分數，
+    且同一份筆記的同一個章節去重後只列一次；其他角色則額外顯示兩項分數。
+    重排分數為 0 代表這批來源沒有經過 reranker，此時不顯示該欄，避免誤讀成相關度為零。
+    來源清單為空時不渲染任何元件。
+
+    Args:
+        sources: 由 build_source_list 產出的來源筆記清單。
+
+    Returns:
+        None: 直接寫入 Streamlit 畫面，不回傳值。
+    """
     if not sources:
         return
     with st.expander("📎 來源筆記"):

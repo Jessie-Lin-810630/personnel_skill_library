@@ -29,13 +29,13 @@ COHERE_API_KEY = os.getenv("COHERE_API_KEY")
 
 
 def _get_cohere_client() -> cohere.ClientV2:
-    """建立 Cohere ClientV2 (讀取環境變數 COHERE_API_KEY)。
+    """以環境變數提供的 API key 建立 Cohere client。
 
     Returns:
-        已認證的 cohere.ClientV2 物件。
+        已完成認證的 cohere.ClientV2 物件。
 
     Raises:
-        EnvironmentError: 缺少 COHERE_API_KEY 時拋出。
+        EnvironmentError: 環境變數 COHERE_API_KEY 未設定時拋出。
     """
     if not COHERE_API_KEY:
         raise EnvironmentError("找不到 COHERE_API_KEY，請確認已設定在 .env 或 Secret Manager 中。")
@@ -47,35 +47,24 @@ def rerank_chunks(
     chunks: list[dict],
     top_n: int = Reranker.TOP_N,  # rerank 後只保留幾筆
 ) -> list[dict]:
-    """用 Cohere Rerank 對 vector_search 回傳的 chunks 做 cross-encoder 精排。
+    """以 Cohere 的 cross-encoder 模型對向量檢索結果做精排，重新計算查詢與各 chunk 的相關度。
 
-    **Note:**
-        使用的 agent: RAG agent
+    送出前先把章節標題接在內容前組成待評分文件，讓模型也看得到章節脈絡。
+    精排結果會濾掉相關度低於 0.1 的 chunk。候選只有一筆時直接跳過精排，相關度記為 1.0。
+    呼叫 Cohere 失敗時退回原本的向量相似度排序，並把相似度分數同時填入相關度欄位，
+    讓下游不必分辨這批結果有沒有經過精排。
+
+    Note:
+        呼叫方為 RAG agent。
 
     Args:
-        query:   用來做 rerank 的查詢文字，可以是原始 query 或是 rewritten_query
-        chunks:  vector_search() 回傳的 list[dict]
-        top_n:   rerank 後保留幾筆，預設 Reranker.TOP_N = 5
+        query: 用來評分的查詢文字，可以是使用者原始問句，也可以是改寫後的獨立問句。
+        chunks: 向量檢索回傳的候選 chunk 清單。
+        top_n: 精排後最多保留幾筆，預設取自 Reranker.TOP_N。
 
     Returns:
-        list[dict]，格式同 vector_search() 回傳值，但：
-        - 重新排序（依 rerank score 由高到低）
-        - 每筆多一個 "rerank_score" 欄位
-        - 原本的 "score" (vectorSearchScore) 保留做參考
-        - 只保留 top_n 筆
-
-    **Example of returns:**
-    >>> [{
-         file_name:  "20260507 MySQL Query.md"
-         md_path:    "...01-daily-logs/20260507 MySQL Query.md"
-         chunk_index: 2
-         section:    "SQL > DQL > SELECT"
-         content:    "SELECT * FROM ... means ...."
-         tags:       [DDL, MySQL, SQL]
-         note_type:  daily_logs
-         score:      0.5  向量相似度分數
-         rerank_score: 0.9  語意相關度分數
-        }, {}]
+        欄位與向量檢索結果相同的 chunk 清單，但依相關度由高到低重新排序、
+        每筆多出 rerank_score 欄位、原本的向量相似度分數保留供對照，且筆數不超過 top_n。
     """
     if not chunks:
         return []

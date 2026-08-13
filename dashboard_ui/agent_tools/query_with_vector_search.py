@@ -43,15 +43,18 @@ VECTOR_COLLECTION = NoteCollections.VECTOR
 
 
 def _get_embed_client() -> genai.Client:
-    """初始化指向 Agent Platform 的 google-genai client (限定給 location=us 供 embedding 模型用)。
+    """初始化指向 Agent Platform 的 google-genai client，供 embedding 模型呼叫。
 
-    與 connect_to_google_genai.get_genai_client 分開，因為該函式只調用在 us-central1 的模型。
+    這個 client 綁定 us，與 connect_to_google_genai 內建立 chat client 的函式分開，
+    因為 chat 模型部署在 us-central1，兩者所在 region 不同。
+    雲端執行時憑證由 Cloud Run 的 runtime service account 以應用程式預設憑證供給，
+    地端則需解除函式內的註解區塊，改以 service account 金鑰檔初始化。
 
     Returns:
-        指向 Agent Platform (location=us) 的 google-genai Client 物件。
+        綁定 us 的 google-genai Client 物件。
 
     Raises:
-        EnvironmentError: 缺少 GCP_PROJECT_ID 或 AGENT_PLATFORM_USER_CREDENTIALS 時拋出。
+        EnvironmentError: 環境變數 GCP_PROJECT_ID 未設定時拋出。
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
@@ -74,33 +77,37 @@ def _get_embed_client() -> genai.Client:
 
 
 def _normalize(vec: list[float]) -> list[float]:
-    """L2 normalize 成單位向量。
+    """對向量做 L2 normalize，轉成長度為 1 的單位向量。
 
-    gemini-embedding 只有預設維度 3072 會自動正規化；MRL 截斷到 1536 時不會，
-    cosine 相似度前需自行正規化，否則分數失真。零向量原樣回傳。
+    gemini-embedding 只有在使用預設的 3072 維時才會自動正規化，
+    以 MRL 截斷到 1536 維時不會，因此計算 cosine 相似度前必須自行正規化，否則分數失真。
 
     Args:
-        vec: 待正規化的向量 (embedding 原始輸出)。
+        vec: embedding 模型輸出的原始向量。
 
     Returns:
-        L2 正規化後的單位向量；若為零向量則原樣回傳。
+        L2 正規化後的單位向量；傳入零向量時原樣回傳，避免除以零。
     """
     norm = math.sqrt(sum(v * v for v in vec))
     return [v / norm for v in vec] if norm else vec
 
 
 def _embed_query(query: str, embed_client: genai.Client) -> list[float]:
-    """將單一 query 字串向量化。
+    """把單一查詢字串轉成向量。
 
-    使用與 ETL task06 相同的 embedding model 與查詢側任務格式，
-    確保 query vector 與 note_vectors_multimodal 的 embedding 在同一向量空間。
+    模型與維度都與 task06、task08 寫入向量時採用的設定相同，套用的則是查詢用的任務格式，
+    確保產出的向量與 note_vectors_multimodal 內既有的向量落在同一個向量空間。
+
+    Note:
+        任務格式必須與寫入時採用的那一組配對，改動其中一邊就要同步改另一邊，
+        否則查詢與內容會落在不同的語意位置，相似度分數失去意義。
 
     Args:
-        query:        使用者輸入的自然語言查詢字串。
-        embed_client: _get_embed_client() 建立的 google-genai Client。
+        query: 使用者輸入的自然語言查詢字串。
+        embed_client: 由 _get_embed_client 建立的 google-genai Client 物件。
 
     Returns:
-        長度 1536、已 L2 normalize 的 query embedding (list[float])。
+        長度 1536 且已完成 L2 正規化的查詢向量。
     """
     prompt_text = QUERY_PROMPT_TEMPLATE.format(query=query)
     response = embed_client.models.embed_content(
@@ -118,25 +125,25 @@ def vector_search(
     filter_file_path: str | None = None,
     filter_note_type: str | None = None,
 ) -> list[dict]:
-    """對 MongoDB Atlas note_vectors_multimodal 執行語意搜尋。
+    """對 MongoDB Atlas 的 note_vectors_multimodal 執行語意搜尋，取回最相關的 chunk。
+
+    先把查詢字串向量化，再送進 $vectorSearch 比對。候選數依 Atlas 官方建議設為回傳筆數的十倍，
+    上限為一萬筆。三個篩選條件都會轉成 Atlas 的前置篩選，其中限定筆記路徑與限定標籤兩者擇一生效，
+    前者優先。
 
     Args:
-        query:            使用者輸入的自然語言問題或主題描述
-        top_k:            回傳幾筆最相關的 chunk ，預設 5 筆，也可傳入 RagAgent.TOP_K | PlanningAgent.TOP_K | 自訂整數。
-        filter_tags:      可選，限定搜尋範圍，例如 ["MySQL"] (對應 Atlas pre-filter: tags)
-        filter_file_path: 可選，限定筆記路徑（比對向量 doc 的 md_path），例如 "MySQL Window Function.md"
-        filter_note_type: 可選，限定筆記種類，例如 "Knowledge_summary"
+        query: 使用者輸入的自然語言問題或主題描述。
+        top_k: 回傳幾筆最相關的 chunk，預設 5 筆。各 agent 的建議值定義在 RagAgent 與
+            PlanningAgent 兩個常數類別的 TOP_K。
+        filter_tags: 限定只搜尋帶有這些標籤的筆記，預設不限制。
+        filter_file_path: 限定只搜尋這些筆記路徑，比對向量文件的 md_path 欄位，預設不限制。
+        filter_note_type: 限定只搜尋這個類型的筆記，例如 Knowledge_summary，預設不限制。
 
     Returns:
-        list[dict]，每筆包含:
-            - file_name:  筆記檔名
-            - md_path:    join 鍵（人工核可後 archived md 的 gs:// 路徑）
-            - chunk_index: 筆記檔中的第幾個資料塊
-            - section:    標題路徑，例如 "SQL > DQL > SELECT"
-            - content:    chunk 純文字
-            - tags:       筆記標籤列表
-            - note_type:  筆記類型
-            - score:      向量相似度分數 (0–1，cosine similarity，越高越相關)
+        每筆含八個欄位的 chunk 清單：file_name 為筆記檔名，md_path 為人工核可後歸檔的 Markdown 路徑
+        並作為資料血緣的關聯鍵，chunk_index 為該 chunk 在筆記中的序號，section 為章節標題路徑，
+        content 為 chunk 純文字，tags 為筆記標籤清單，note_type 為筆記類型，
+        score 為 cosine 相似度分數，範圍 0 到 1，數值越高代表越相關。
     """
     embed_client = _get_embed_client()
     db = _get_db()

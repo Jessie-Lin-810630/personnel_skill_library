@@ -41,20 +41,26 @@ def rag_query(
     alias_tag_pairs: list[dict],
     known_tags: set[str],
 ) -> dict:
-    """筆記語意查詢主函式 (v2: rewrite → search → rerank → generate)。
+    """筆記語意查詢的主流程，依序執行問句改寫、向量檢索、重排與回答生成。
+
+    改寫器產出兩種問句，各有分工：擴展問句帶有標籤關鍵字，用於向量檢索粗篩以提高召回；
+    改寫後的獨立問句不帶標籤，用於重排，避免關鍵字干擾 cross-encoder 對語意的判斷。
+    向量檢索刻意不加前置篩選，改以擴展問句做軟性的語意增強。
+    對話紀錄只存使用者的原始提問，不存改寫或擴展後的版本；
+    改寫結果與推薦標籤則寫進模型回應的 metadata，供事後追查檢索品質。
+    檢索不到任何 chunk 時不呼叫模型，直接回覆請使用者換個關鍵字。
 
     Args:
-        query:            使用者的原始提問文字
-        session_id:       目前對話的 uuid4 (用於讀寫 chat_history)
-        alias_tag_pairs:  筆記 alias-tag 對照表 (從collection obsidian_note_metadata 撈取)
-        known_tags:       向量資料庫裡實際存在的 tag set
+        query: 使用者的原始提問文字。
+        session_id: 目前對話的 uuid4，用於讀寫對話紀錄。
+        alias_tag_pairs: 筆記別名與標籤的對照清單，供改寫器推薦標籤時參考。
+        known_tags: 向量庫裡實際存在的標籤集合，用來校驗模型推薦的標籤。
 
     Returns:
-        {
-            "answer": str,
-            "sources": list[dict],
-            "debug": dict,   # 方便觀察 pipeline 每一步的結果
-        }
+        含 answer、sources、debug 三個鍵的 dict。answer 為模型生成的回答文字，
+        sources 為去重後的來源筆記清單，debug 收錄流程各步驟的中間結果，
+        涵蓋原始問句、改寫後問句、擴展問句、推薦標籤、粗篩與重排後的筆數，以及各筆的重排分數；
+        檢索不到 chunk 時 sources 為空 list、debug 為空 dict。
     """
     client = get_genai_client()
 

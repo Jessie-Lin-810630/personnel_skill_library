@@ -12,15 +12,15 @@ _HISTORY_ACK = "好的，我已了解先前的討論脈絡，請告訴我這一�
 
 
 def build_context(chunks: list[dict]) -> str:
-    """將 vector_search() 回傳的 top-K chunks 組裝成純文字 context block。
+    """把檢索到的 chunk 組裝成一段純文字脈絡，交給 LLM 生成回答時使用。
 
-    每個 chunk 標注來源，讓模型知道每段文字出自哪份筆記。
+    每個 chunk 前面標注來源檔名與章節，讓模型知道每段文字出自哪份筆記。
+    chunk 若帶有重排分數，代表已經過 reranker 精排，此時一併標注相關度。
 
-    **Note:**
-        使用的 agent: RAG agent / Planning agent
-        若 chunk 帶有 rerank_score (經過 reranker 精排) 會一併標注相關度。
+    Note:
+        呼叫方為 RAG agent 與 Planning agent。
 
-    **格式範例:**
+    Example:
         [來源 1] 檔案: SQL筆記.md | 章節: SQL > DQL > SELECT | 相關度: 0.9
         SELECT 用來從資料表中選取欄位...
 
@@ -28,11 +28,11 @@ def build_context(chunks: list[dict]) -> str:
         $match 用來過濾文件...
 
     Args:
-        chunks: vector_search()（或經 reranker 精排後）回傳的 chunk list，
-            每筆至少需含 file_name 與 content，選用 section、rerank_score。
+        chunks: 向量檢索或重排後回傳的 chunk 清單，每筆至少需含 file_name 與 content，
+            section 與 rerank_score 為選填。
 
     Returns:
-        以連續兩個換行分隔各來源區塊的純文字 context block 字串。
+        以連續兩個換行分隔各來源區塊的純文字脈絡字串。
     """
     blocks = []
     for i, chunk in enumerate(chunks, start=1):
@@ -45,24 +45,21 @@ def build_context(chunks: list[dict]) -> str:
 
 
 def build_source_list(chunks: list[dict]) -> list[dict]:
-    """組裝準備回傳給呼叫方 (Streamlit UI) 的來源清單。
+    """把檢索到的 chunk 整理成回傳給 Streamlit 畫面顯示的來源清單。
 
-    包含去重後的 "file_name + section 組合"。
+    以檔名與章節兩欄的組合做去重，同一份筆記的同一個章節只列一次，並保留首次出現時的分數。
 
-    **Note:**
-        使用的 agent: RAG agent / Planning agent
-        planning 的 chunks 未經 reranker，rerank_score 會是 0。
+    Note:
+        呼叫方為 RAG agent 與 Planning agent。Planning agent 的 chunk 未經 reranker，
+        其重排分數一律為 0。
 
     Args:
-        chunks: vector_search()（或經 reranker 精排後）回傳的 chunk list。
+        chunks: 向量檢索或重排後回傳的 chunk 清單。
 
     Returns:
-        [{
-         "file_name":  "某份筆記檔案名稱.md",
-         "section":  "一個筆記資料塊所屬的文章標題",
-         "vector_score":  "提問與筆記資料塊在向量空間上的相似度評分，小數點後四位",
-         "rerank_score":  "提問與筆記資料塊在語意上的相關性評分，小數點後四位"
-         }, {}]
+        每筆含四個欄位的 dict 清單：file_name 為筆記檔名，section 為該 chunk 所屬的章節標題，
+        vector_score 為提問與該 chunk 在向量空間上的相似度，rerank_score 為兩者的語意相關度，
+        兩個分數都取到小數點後四位。
     """
     seen = set()
     sources = []
@@ -82,22 +79,24 @@ def build_source_list(chunks: list[dict]) -> list[dict]:
 
 
 def build_history_context_message(session_id: str, agent_type: str, intro: str, chat_history_n: int = 5) -> list[dict]:
-    """讀取本 session 過去某 agent 的對話歷史。
+    """讀取本次 session 中某個 agent 的對話歷史，包裝成可直接帶入模型的背景訊息。
 
-    以背景資訊的形式包成獨立的 user/model 對組帶入，
-    避免 LLM 把過去的回應誤判為自己當下要接續輸出的內容。
+    歷史內容不直接還原成多輪對話，而是包成一組獨立的 user 與 model 對組：
+    user 那筆放引言與歷史全文，model 那筆放固定的確認回應。
+    這樣做是為了避免 LLM 把過去的回應誤判為自己當下要接續輸出的內容。
 
-    **Note:**
-        使用的 agent: Planning agent
+    Note:
+        呼叫方為 Planning agent。
 
     Args:
-        session_id:     目前對話的 uuid4
-        agent_type:     讀取哪個 agent 的歷史，例如 "rag" | "planning"
-        intro:          引言文字（不含歷史內容本身），用以說明這段背景的用途
-        chat_history_n: 回讀幾輪歷史
+        session_id: 目前對話的 uuid4。
+        agent_type: 要讀取哪一個 agent 的歷史，可為 rag 或 planning。
+        intro: 引言文字，說明這段背景的用途，不含歷史內容本身。
+        chat_history_n: 回讀幾輪歷史，預設 5 輪。
 
     Returns:
-        若無歷史回傳 []，否則回傳 [user 引言+歷史, model 確認] 兩筆。
+        兩筆訊息組成的 list，第一筆為引言加歷史的 user 訊息，第二筆為 model 的確認回應；
+        該 agent 尚無歷史時回傳空 list。
     """
     # [ {"role": "user", "parts": [{"text": "..."}]},
     #   {"role": "model", "parts": [{"text": "..."}]},

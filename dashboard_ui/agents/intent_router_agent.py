@@ -30,16 +30,18 @@ R2_SYSTEM_PROMPT = """你是一個意圖分類器。
 
 
 def _r1_keyword_match(query: str) -> tuple[AgentTarget | None, float]:
-    """R1 關鍵字快篩：以 planning / rag 關鍵字比對 query，命中即回對應 agent 與信心分數。
+    """第一關的關鍵字快篩，以預先定義的關鍵字清單比對使用者輸入，命中即決定要交給哪一個 agent。
 
-    先比 planning 關鍵字、再比 rag 關鍵字；任一命中即回 (agent_target, score)，
-    兩者皆未命中回 (None, 0.0)，交由 R2 LLM 補判。
+    先比對規劃類關鍵字、再比對查詢類關鍵字，任一命中就立刻回傳，不再往下比。
+    比對不分大小寫，且雙向包含都算命中，因此使用者只打關鍵字的一部分也接得住。
+    信心分數以命中的關鍵字長度除以輸入長度計算，關鍵字佔輸入的比重越高分數越高。
 
     Args:
         query: 使用者原始輸入。
 
     Returns:
-        (agent_target, score)：命中回 ("planning_agent" | "rag_agent", 分數)；未命中回 (None, 0.0)。
+        目標 agent 名稱與信心分數組成的 tuple。命中時名稱為 planning_agent 或 rag_agent；
+        兩類關鍵字都未命中時名稱為 None、分數為 0.0，交由第二關的 LLM 補判。
     """
     query_lower = query.lower()
 
@@ -67,17 +69,20 @@ def _r2_llm_classify(
     session_id: str,
     client: genai.Client,
 ) -> tuple[AgentTarget, float]:
-    """R2 LLM 補判：R1 未命中時，帶入跨 agent 對話背景讓 LLM 分類意圖。
+    """第二關的 LLM 補判，在關鍵字快篩失手時帶入跨 agent 的對話背景讓模型分類意圖。
 
-    分別讀 rag 與 planning 歷史包成背景脈絡，連同最新 query 送 LLM，回傳分類結果與固定信心分數。
+    載入歷史的函式以 agent 類型精確比對、不接受空值，因此這裡分別讀取 RAG 與 Planning 兩份歷史，
+    再一起包成背景脈絡，讓 router 也能感知另一個 agent 的對話進展。
+    背景脈絡以 user 角色包裝，避免模型誤以為那些內容是自己說過的話。
 
     Args:
-        query:      使用者原始輸入。
+        query: 使用者原始輸入。
         session_id: 目前對話的 uuid4。
-        client:     google-genai Client 物件。
+        client: google-genai Client 物件。
 
     Returns:
-        (agent_target, score)：("planning_agent" | "rag_agent", 0.95)。
+        目標 agent 名稱與信心分數組成的 tuple。名稱為 planning_agent 或 rag_agent，
+        分數固定為 0.95，代表這是模型判定而非關鍵字命中。
     """
     # load_chat_history 以 agent_type 精確比對，不支援 None，
     # 故分別讀 rag 與 planning 歷史，再包成背景脈絡，讓 router 感知跨 agent 對話。
@@ -135,14 +140,17 @@ def _r2_llm_classify(
 
 
 def route(query: str, session_id: str) -> dict:
-    """判斷使用者輸入應交給哪個 Agent。
+    """判斷使用者這一輪的輸入該交給哪一個 agent 處理。
+
+    先跑關鍵字快篩，命中就直接採用；未命中才呼叫模型補判。
+    兩種路徑都會把分類結果寫進對話紀錄，並在 metadata 標明判定方式與信心分數，方便事後追查分流是否正確。
 
     Args:
-        query:      使用者原始輸入
-        session_id: 目前對話 uuid4
+        query: 使用者原始輸入。
+        session_id: 目前對話的 uuid4。
 
     Returns:
-        {"agent_target": "rag_agent" | "planning_agent"}
+        只含 agent_target 一個鍵的 dict，值為 rag_agent 或 planning_agent。
     """
     # R1 keyword 快篩
     r1_result, intent_score = _r1_keyword_match(query)
