@@ -22,31 +22,21 @@ poetry shell
 
 ## 常用指令
 
+一律從專案根目錄執行。
+
 ```bash
-# 執行 Streamlit dashboard（從專案根目錄）
+# Streamlit dashboard
 poetry run streamlit run dashboard_ui/app.py
 
-# 啟動 Silver enrich 端點（task07 on-demand enrichment 服務，localhost:8002）
-# 供審查頁（pages/onenote_review.py）on-demand 觸發；需與 dashboard 同時啟動
+# task07 的 Silver（8002）與 Gold（8003）端點，審查頁會呼叫，需與 dashboard 同時啟動
 poetry run python -m task07_silver_service.app
-
-# 啟動 Gold 歸檔/退件端點（task07 核可後歸檔服務，localhost:8003）
-# 審查頁 approve/reject 呼叫；與 dashboard、task07_silver_service 同時啟動
 poetry run python -m task07_gold_service.app
 
-# 執行個別 ETL task（從專案根目錄；task01/06/07 為扶正後的 v2 / lazy_loading 版本，v1 已除役）
+# 個別 ETL task 一律是 `poetry run python -m <task 資料夾>.main`，資料夾名見下方 ETL Tasks 索引
 poetry run python -m task01_obsidian_etl_v2.main
-poetry run python -m task02_github_restapi_etl.main
-poetry run python -m task03_leetcode_ccClub_etl.main
-poetry run python -m task05_googlesheet_skill_etl.main
-poetry run python -m task06_obsidian_embed_etl_v2.main               # Obsidian archived → note_vectors_multimodal
-poetry run python -m task07_onenote_to_markdown_lazy_loading.main    # task07 Bronze ETL（只到 raw-notes，不呼叫 LLM；Silver/Gold 見上方 8002/8003 端點）
-poetry run python -m task08_onenote_embed_etl.main                   # OneNote archived → note_vectors_multimodal（多模態向量化）
 
-# 執行所有測試
+# 測試：全部／單檔
 poetry run python -m unittest discover -s tests
-
-# 執行單一測試檔
 poetry run python -m unittest tests.test_task03_leetcode_ccClub_etl -v
 ```
 
@@ -93,6 +83,26 @@ Optional .env keys:
 - 中文摘要以「。」結尾即可（`D415` 已在 `pyproject.toml` 停用，因其誤判全形句號）；英文說明以「.」結尾。
 - `Usage` / `Required .env keys` / `Optional .env keys` 三個區塊**視情況取捨**：無 env 依賴或非執行入口的檔案可省略對應區塊。
 
+### Function Docstring 規範
+
+函式層級（含 `_` 開頭的私有函式）一律 Google style、中文書寫，章節順序固定為
+摘要 → 正文 → `Note:` → `Args:` → `Returns:` → `Raises:`。
+
+1. **正文只講主流程**。取捨、風險、過渡期狀態、非顯而易見的前提一律進 `Note:`，且 `Note:` 放在 `Args:` 之前，
+   讓「敘述 → 警示 → 結構化參考」形成三個閱讀區塊。
+2. **機制與後果分開寫**。例外「怎麼拋」寫在 `Raises:`，「拋了之後呼叫端會處在什麼狀態」寫在 `Note:`，同一句話不出現兩次。
+3. **就地修改一定在 `Returns:` 講明**，例如「這是就地修改，回傳的與傳入的是同一個物件」。
+   本專案多處呼叫端根本沒接回傳值（如 `archive_note`），不寫明會讓讀者以為回傳的是另一份資料。
+4. **不造集合名詞**。禁用 `archived 端`／`raw 端`／`落地`／`側` 這類中文讀不順的行話，該講欄位就直接列欄位名。
+5. **不自創術語**。領域通用語照用（`data lineage`、`upsert`、`CDC`、`cross-encoder`），
+   但**不可自行拼接成中文複合詞**——`血緣鍵`、`冪等鍵` 都是造出來的，不是通用語。
+   通用語在中文語境確實難讀時才改寫成白話，改寫前不得先造詞。
+6. **有該行為就不可漏 section**。有參數就要有 `Args:`；有回傳值就要有 `Returns:`，
+   回傳 `None` 也要寫，並交代結果寫到哪裡去了（MongoDB／GCS／就地修改的參數）；會拋例外就要有 `Raises:`。
+   函式本身沒有該行為才可省略，不硬補。
+
+> 完整範例見 [`task01_obsidian_etl_v2/silver_transform_markdown/l_archive_markdown.py`](/task01_obsidian_etl_v2/silver_transform_markdown/l_archive_markdown.py) 的 `archive_note()`。
+
 ### ETL Tasks 索引與漸進式揭露
 
 下表只做**路由**：認得資料夾、一句話職責與所屬分支即可。**資料來源、輸出的 collection／bucket、schema 欄位、ETL 邏輯、冪等策略等細節一律不寫在此**，改依下方閱讀順序去讀。
@@ -119,7 +129,7 @@ Optional .env keys:
 跨 task 的常駐約束（不必翻文件就該記得的）：
 
 - 所有 task 的 Load 一律以唯一欄位 `upsert`，支援冪等重跑。
-- task06 與 task08 共寫**同一張**向量表（見下方「向量搜尋」一節）。task07 歸檔完才輪到 task08 向量化，兩者前後依存，**改一邊時要一起更新記憶**。
+- task06 與 task08 共寫**同一張**向量表 `note_vectors_multimodal`，並共用同一個 Atlas index。task07 歸檔完才輪到 task08 向量化，兩者前後依存，**改一邊時要一起更新記憶**。embedding 模型、維度、index 名稱與建立方式見 [`branch_etl_pipeline_summary.md`](doc/branch_etl_pipeline_summary.md)。
 - Streamlit（`dashboard_ui/`）僅讀 MongoDB＋POST Silver／Gold 端點，**不 import 任何 `task07_*` 套件**。
 - 動 task07 前先確認要改的是 Bronze ETL、Silver 服務、Gold 服務還是共用的 `task07_common`——四者各自獨立部署。
 
@@ -140,56 +150,28 @@ Optional .env keys:
 - `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）、Tech Stack 技術堆疊圖（`tech_stack_diagram.py`，純 inline style + base64 SVG，供 `st.html`）、GCS 讀取（`gcs_reader.py`，`read_text` / `read_bytes_as_base64`）
 - `agents/` / `agent_tools/` — Phase III AI Agent（使用 Google Agent Platform Gemini + MongoDB Atlas Vector Search）
 
-### 向量搜尋（task06 / task08 共用）
-
-- Embedding model：`gemini-embedding-2`（Agent Platform，多模態，維度 1536、L2 normalize）
-- Vector collection：`note_vectors_multimodal`（task06 與 task08 共寫，統一以 `md_path` 作為 data lineage 依據）
-- Vector index name：`obsidian_vectors_index2`，在 MongoDB Atlas Console 手動建立
-- 查詢方式：`$vectorSearch` stage，similarity = cosine
-
-### GCS 整合
-
-task01 / task06 的 Extract 步驟在 Phase II 之後改為從 GCS bucket `personal-vaults` 讀取 `.md` 檔；憑證由 `GCS_USER_CREDENTIALS` 指定 service account JSON（地端解除 `main.py` 內註解後轉寫成 `GOOGLE_APPLICATION_CREDENTIALS`，雲端走 ADC）。
-
 ## 環境變數
 
-變數定義於 `.env`（本地開發，詳見 `.env.example`）或 GCP Secret Manager（部署）。**每個變數的必填／選填、預設值與取得方式，寫在該 task 資料夾 README 的 `Configuration` 章節**；此處只列全貌與跨 task 的共用約束。
+變數定義於 `.env`（本地開發，詳見 `.env.example`）或 GCP Secret Manager（部署）。**每個變數的必填／選填、預設值與取得方式，寫在該 task 資料夾 README 的 `Configuration` 章節**；此處只列跨 task 的共用約束。
 
-**MongoDB（所有 task 與 dashboard 都要）**
-- `MONGO_ALTAS_URI`、`MONGO_DB_NAME`
+- `MONGO_ALTAS_URI`、`MONGO_DB_NAME` — 所有 task 與 dashboard 都要。
+- `GCS_USER_CREDENTIALS`、`AGENT_PLATFORM_USER_CREDENTIALS` — service account JSON key 的路徑，**只有地端需要，且需先解除腳本內的註解**才生效；雲端一律改由 Cloud Run runtime SA 的 ADC 供給。task01／06／08 在 `main.py` 把前者轉寫成 `GOOGLE_APPLICATION_CREDENTIALS`，task07 三服務則由 `task07_common/gcs.py` 直接讀。
+- `GOOGLE_APPLICATION_CREDENTIALS` — 不需手動填寫，它是上述轉寫的產物，或地端走 ADC 時的憑證來源。
+- `GCP_PROJECT_ID` — 呼叫 Agent Platform 用，雲端與地端都要。
+- `ENVIRONMENT` — task07 Bronze／Silver 必填，只能是 `local`／`dev`／`prod`，未知值會 raise；task07 Gold 不讀。Silver 在雲端由 workflow 依分支寫入，地端才需自己填。
+- 資料湖 bucket：task07／08 可用 `ONENOTE_GCS_BUCKET` 覆寫，未宣告則預設 `onenote-vaults`；task01／06 的 `personal-vaults` 寫死在程式常數裡，**沒有對應變數**。
 
-**GCP 憑證**
-- `GCS_USER_CREDENTIALS` — GCS service account JSON key 的路徑。task01／task06／task08 在 `main.py` 的 `if __name__ == "__main__"` 區塊把它轉寫成 `GOOGLE_APPLICATION_CREDENTIALS`；task07 三服務由 `task07_common/gcs.py` 的 `get_client_on_premise()` 直接讀。兩條路徑都**只有地端需要、且需先解除腳本內的註解**，雲端改由 Cloud Run runtime SA 的 ADC 供給。
-- `AGENT_PLATFORM_USER_CREDENTIALS` — Agent Platform（前身是 Vertex AI）service account JSON key 的路徑，同樣是地端解除註解才生效（task06、task07 Silver、task08、`dashboard_ui/agent_tools/`）。
-- `GCP_PROJECT_ID` — 呼叫 Agent Platform 的 GCP 專案 ID（雲端與地端都要）。
-- `GOOGLE_APPLICATION_CREDENTIALS` — 不需為 ETL 手動填寫：它是上述轉寫的產物，或 dashboard／task07 服務在地端走 ADC 時的憑證來源。
-
-**各來源系統的憑證**
-- `GITHUB_TOKEN`、`GITHUB_USERNAME`、`GITHUB_MAIL`（task02）
-- `LEETCODE_USERNAME`、`LEETCODE_SESSION`、`CSRF_TOKEN`（task03 的 LeetCode 端）
-- `CCCLUB_USERNAME`、`CCCLUB_PASSWORD`（task03 的 ccClub 端）
-- `GOOGLE_SHEET_KEY`（task05）— 可填 service account JSON key 的路徑（地端），或直接存 decode 後的 JSON 字串（雲端）；程式以 `os.path.isfile()` 判斷走哪一條
-- `ONENOTE_CLIENT_ID`（task07 Bronze）— Azure App Registration Client ID（公用用戶端、`Notes.Read`）
-
-**資料湖與稽核**
-- `ONENOTE_GCS_BUCKET`（task07／task08，選填）— 資料湖 bucket 名稱，未宣告則預設 `onenote-vaults`。task01／task06 的 `personal-vaults` 是寫死在程式常數裡的，沒有對應變數。
-- `ENVIRONMENT`（task07 Bronze／Silver 必填）— 只能是 `local`／`dev`／`prod`，會寫進 audit log；未知值會 raise。task07 Gold 不讀此變數。Silver 在雲端由 workflow 依分支寫入（`--set-env-vars ENVIRONMENT=<env>`），地端才需自己填進 `.env`。
-
-**Dashboard（`dashboard_ui/`）**
-- `SILVER_ENDPOINT_URL`、`GOLD_ENDPOINT_URL` — 審查頁 POST 的端點（本機預設 `http://localhost:8002/enrich`、`http://localhost:8003/archive`）
-- `COHERE_API_KEY` — RAG reranker
-- `ERD_LINK` — 第二頁「Chasing Data Engineering」的 ERD 外部連結
-- `ROLE_ML_USERNAME`／`ROLE_ML_PASSWORD`、`ROLE_OWNER_*`、`ROLE_SENIOR_*`、`ROLE_GUEST_*` — 四種角色的登入帳密（共 8 個），AI Agent 頁與審查頁共用
-- `AI_AGENT_RATE_LIMIT` — 單次對話的 LLM 呼叫上限，選填、預設 20
+各來源系統的憑證（`GITHUB_*`、`LEETCODE_*`、`CCCLUB_*`、`GOOGLE_SHEET_KEY`、`ONENOTE_CLIENT_ID`）與 dashboard 專用變數（兩個端點 URL、`COHERE_API_KEY`、`ERD_LINK`、四種角色帳密、`AI_AGENT_RATE_LIMIT`）見各自 README 的 `Configuration`。
 
 ## 部署架構（Phase II+）
 
-每個 task 與服務各自打包 Docker image，由 `.github/workflows/deploy_*.yml`（九支，一支對一個資源）推送到 Artifact Registry repo `personal-skill-dashboard`，機密由 GCP Secret Manager 管理。
+每個 task 與服務各自打包 image、各有一支 `.github/workflows/deploy_*.yml`，機密走 GCP Secret Manager。
+image tag 規則、Artifact Registry 位置、Secret 對應、workflow 觸發條件與手動重跑方式，見
+[`branch_developd_gcp_deploy_hand_over.md`](doc/branch_developd_gcp_deploy_hand_over.md)；各資源的部署步驟見該 task README 的 Get Started。
 
-**環境由分支決定**：push 到 `main` → `prod`，其餘分支（`develop`）→ `dev`。Cloud Run 資源以後綴區分（`task01-obsidian-etl-prod`／`-dev`、`dashboard-ui-prod`／`-dev`）。兩環境共用同一組 Secret Manager secrets。
+不翻文件就該記得的約束：
 
-**Image tag 一律不可變**：同一份 image 貼三個 tag——`<sha7>`、`<env>-latest`、`<env>-<sha7>`；部署一律指定 `<env>-<sha7>`，`latest` 已停用，以保留回滾與除錯的可追溯性。
-
-**資源型態**：task01–06、task08 是 Cloud Run **Job**（Cloud Scheduler 觸發）；`dashboard_ui`、task07 Silver／Gold 是 Cloud Run **Service**（8080）。dashboard 對外開放，Silver／Gold 需 ID token 驗證、由 dashboard 的 runtime SA 以 Cloud Run Invoker 呼叫；dashboard 的 `SILVER_ENDPOINT_URL`／`GOLD_ENDPOINT_URL` 由 workflow 在部署前查出同環境 Service URL 動態帶入。**task07 Bronze ETL 不納入部署**（互動式裝置流程授權，僅地端執行）。
-
-**沒有檔案變更就不會觸發**（`paths` 過濾只對 push 生效）；要以同一份程式碼重新部署時，走各 workflow 的 `workflow_dispatch` 手動觸發。
+- **環境由分支決定**：push 到 `main` → `prod`，其餘分支（含 `develop`）→ `dev`；Cloud Run 資源以 `-prod`／`-dev` 後綴區分，兩環境共用同一組 secrets。
+- **資源型態**：task01–06、task08 是 Cloud Run **Job**（Cloud Scheduler 觸發）；`dashboard_ui`、task07 Silver／Gold 是 Cloud Run **Service**（8080）。
+- **Silver／Gold 不對外**：需 ID token 驗證，由 dashboard 的 runtime SA 以 Cloud Run Invoker 呼叫；端點 URL 由 workflow 部署時動態帶入，**不可寫死**。
+- **task07 Bronze ETL 不納入部署**：互動式裝置流程授權，僅地端執行。
