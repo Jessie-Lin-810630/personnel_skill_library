@@ -32,7 +32,13 @@ _CONTENT_TYPES = {
 
 
 def _get_client() -> storage.Client:
-    """取得 (並快取) GCS storage client；首次呼叫才建立。"""
+    """取得 GCS client，首次呼叫才建立，之後重複使用同一個。
+
+    憑證由應用程式預設憑證供給，適用於 Cloud Run 這類有 runtime service account 的環境。
+
+    Returns:
+        已建立的 google-cloud-storage Client 物件。
+    """
     global _client
     if _client is None:
         _client = storage.Client()
@@ -40,7 +46,21 @@ def _get_client() -> storage.Client:
 
 
 def get_client_on_premise() -> storage.Client:
-    """在地端，取得 (並快取) GCS storage client；首次呼叫才建立。"""
+    """在地端取得 GCS client，改以 service account 金鑰檔建立憑證。
+
+    首次呼叫才建立，之後重複使用同一個。
+
+    Note:
+        這支函式與 _get_client 共用同一個模組層變數，因此地端要在所有 GCS 操作之前先呼叫它，
+        否則會先被 _get_client 以應用程式預設憑證建立好，之後再呼叫也不會改用金鑰檔。
+
+    Returns:
+        以 GCS_USER_CREDENTIALS 指定的金鑰檔建立的 Client 物件。
+
+    Raises:
+        TypeError: 環境變數 GCS_USER_CREDENTIALS 未設定時，由讀取金鑰檔的函式拋出。
+        FileNotFoundError: 環境變數指向的金鑰檔不存在時拋出。
+    """
     global _client
     if _client is None:
         # 地端執行才需要有 GCS_USER_CREDENTIALS
@@ -54,82 +74,113 @@ def get_client_on_premise() -> storage.Client:
 
 
 def get_bucket_name() -> str:
-    """回傳資料湖 bucket 名稱 (env ONENOTE_GCS_BUCKET，預設 onenote-vaults)。"""
+    """取得資料湖的 bucket 名稱。
+
+    Returns:
+        環境變數 ONENOTE_GCS_BUCKET 的值，未設定時回預設值 onenote-vaults。
+    """
     return os.getenv("ONENOTE_GCS_BUCKET", "onenote-vaults").strip()
 
 
 def gs_uri(blob_path: str) -> str:
-    """把 bucket 相對 key 包成完整 `'gs://'` 開頭的 URI (metadata 一律存完整 URI)。"""
+    """把 bucket 相對路徑補上協定與 bucket 名稱，組成完整位址。
+
+    Note:
+        metadata 一律存完整位址而非相對路徑，這樣讀取端不需要另外知道 bucket 是哪一個。
+
+    Args:
+        blob_path: 不含協定與 bucket 名稱的相對路徑。
+
+    Returns:
+        gs 協定開頭的完整物件位址。
+    """
     return f"gs://{get_bucket_name()}/{blob_path}"
 
 
 def _split_uri(uri: str) -> tuple[str, str]:
-    """gs://bucket/key... → (bucket, key)。"""
+    """把完整物件位址拆成 bucket 名稱與相對路徑兩段。
+
+    Args:
+        uri: gs 協定開頭的完整物件位址。
+
+    Returns:
+        bucket 名稱與相對路徑組成的 tuple。
+    """
     bucket, _, key = uri[len("gs://") :].partition("/")
     return bucket, key
 
 
 def raw_note_prefix(user_id: str, notebook: str, section: str, dt: str) -> str:
-    """Bronze 層用: html 檔與 _images/xxx.png 檔的 blob 路徑前綴 (不含 `gs://bucket`)。
+    """組出 Bronze 層的路徑前綴，html 與圖片都存放在這個前綴底下。
 
     Args:
-        user_id (str): OneNote User ID
-        notebook (str): OneNote notebook name
-        section (str): OneNote notebook section name
-        dt (str): 筆記的分區字串，dt=代表bronze層任務於何時下載筆記
+        user_id: OneNote 使用者代號。
+        notebook: OneNote 筆記本名稱。
+        section: OneNote 章節名稱。
+        dt: 版本分區字串，值為 Bronze 層下載這份筆記的日期。
 
     Returns:
-        str: 例如 raw-notes/iamuser/生技製劑筆記本/general-technical/dt=2026-07-01
+        不含協定與 bucket 名稱的相對路徑前綴，
+        例如 raw-notes/iamuser/生技製劑筆記本/general-technical/dt=2026-07-01。
     """
     return f"raw-notes/{user_id}/{notebook}/{section}/dt={dt}"
 
 
 def processed_note_prefix(user_id: str, notebook: str, section: str, dt: str) -> str:
-    """Silver 層用: md 的 blob 路徑前綴 (不含 `gs://bucket`)。
+    """組出 Silver 層的路徑前綴，LLM 生成的 md 存放在這個前綴底下。
 
     Args:
-        user_id (str): OneNote User ID
-        notebook (str): OneNote notebook name
-        section (str): OneNote notebook section name
-        dt (str): 筆記的分區字串，dt=代表bronze層任務於何時下載筆記
+        user_id: OneNote 使用者代號。
+        notebook: OneNote 筆記本名稱。
+        section: OneNote 章節名稱。
+        dt: 版本分區字串，值沿用 Bronze 層下載這份筆記的日期。
 
     Returns:
-        str: 例如 processed-notes/iamuser/生技筆記本/general-technical/dt=2026-07-01
+        不含協定與 bucket 名稱的相對路徑前綴，
+        例如 processed-notes/iamuser/生技筆記本/general-technical/dt=2026-07-01。
     """
     return f"processed-notes/{user_id}/{notebook}/{section}/dt={dt}"
 
 
 def archived_note_prefix(user_id: str, notebook: str, section: str, dt: str) -> str:
-    """Gold 層用: 歸檔之 md 與 _images/xxx.png 檔的 blob 路徑前綴 (不含 `gs://bucket`)。
+    """組出 Gold 層的路徑前綴，人工核可後的 md 與圖片存放在這個前綴底下。
 
     Args:
-        user_id (str): OneNote User ID
-        notebook (str): OneNote notebook name
-        section (str): OneNote notebook section name
-        dt (str): 筆記的分區字串，dt=代表bronze層任務於何時下載筆記
+        user_id: OneNote 使用者代號。
+        notebook: OneNote 筆記本名稱。
+        section: OneNote 章節名稱。
+        dt: 版本分區字串，值沿用 Bronze 層下載這份筆記的日期。
 
     Returns:
-        str: 例如 archived-notes/iamuser/生技筆記本/general-technical/dt=2026-07-01
+        不含協定與 bucket 名稱的相對路徑前綴，
+        例如 archived-notes/iamuser/生技筆記本/general-technical/dt=2026-07-01。
     """
     return f"archived-notes/{user_id}/{notebook}/{section}/dt={dt}"
 
 
 def _content_type(blob_path: str) -> str | None:
-    """由 blob 副檔名對出上傳用的 Content-Type；未知副檔名回 None。"""
+    """依副檔名查出上傳時要標註的 Content-Type。
+
+    Args:
+        blob_path: 物件路徑，只取其副檔名參與判斷。
+
+    Returns:
+        對應的 Content-Type 字串；副檔名不在對照表內時回 None，此時上傳會交由 GCS 自行判定。
+    """
     ext = PurePosixPath(blob_path).suffix.lower()
     return _CONTENT_TYPES.get(ext)
 
 
 def upload_text(blob_path: str, text: str, bucket_name: str | None = None) -> str | None:
-    """上傳字串，回傳 GCS 物件之 md5_hash。
+    """把字串上傳成 GCS 物件，適用於 html 與 md。
 
     Args:
-        blob_path (str): blob 路徑 (不含 `gs://bucket`)
-        text (str): 欲上傳的字串
-        bucket_name (str): bucket 名稱，若不傳入則從環境變數 ONENOTE_GCS_BUCKET 讀取
+        blob_path: 不含協定與 bucket 名稱的相對路徑。
+        text: 要上傳的字串內容。
+        bucket_name: 目的 bucket 名稱，省略時改讀環境變數 ONENOTE_GCS_BUCKET。
 
     Returns:
-        str | None: blob 之 md5 hash 雜湊值
+        上傳後該物件的 md5；GCS 未回傳雜湊值時為 None。
     """
     if bucket_name is None:
         bucket_name = get_bucket_name()
@@ -139,15 +190,15 @@ def upload_text(blob_path: str, text: str, bucket_name: str | None = None) -> st
 
 
 def upload_bytes(blob_path: str, data: bytes, bucket_name: str | None = None) -> str | None:
-    """上傳 bytes (圖片)，回傳 GCS 物件 md5_hash。
+    """把二進位內容上傳成 GCS 物件，適用於圖片。
 
     Args:
-        blob_path (str): blob 路徑 (不含 `gs://bucket`)
-        data (bytes): 欲上傳的圖片
-        bucket_name (str): bucket 名稱，若不傳入則從環境變數 ONENOTE_GCS_BUCKET 讀取
+        blob_path: 不含協定與 bucket 名稱的相對路徑。
+        data: 要上傳的二進位內容。
+        bucket_name: 目的 bucket 名稱，省略時改讀環境變數 ONENOTE_GCS_BUCKET。
 
     Returns:
-        str | None: blob 之 md5 hash 雜湊值
+        上傳後該物件的 md5；GCS 未回傳雜湊值時為 None。
     """
     if bucket_name is None:
         bucket_name = get_bucket_name()
@@ -157,15 +208,15 @@ def upload_bytes(blob_path: str, data: bytes, bucket_name: str | None = None) ->
 
 
 def download_text(path: str) -> str:
-    """讀 GCS 文字物件 (path 可為完整 gs:// URI 或 bucket 相對 key)。
+    """讀取一個 GCS 文字物件，適用於 html 與 md。
 
-    傳入完整 gs:// URI 時取其 bucket；傳入相對 key 時 bucket name 從環境變數 ONENOTE_GCS_BUCKET 讀取。
+    傳入完整位址時取其中的 bucket 名稱，傳入相對路徑時改讀環境變數 ONENOTE_GCS_BUCKET。
 
     Args:
-        path (str): 例如 `gs://bucket/path/to/blob.md`, `path/to/blob.md`
+        path: 完整物件位址或不含 bucket 名稱的相對路徑，兩種寫法都接受。
 
     Returns:
-        str: 下載後以 utf-8 decode 的字串
+        以 UTF-8 解碼後的文字內容。
     """
     if path.startswith("gs://"):
         bucket_name, key = _split_uri(path)
@@ -176,15 +227,15 @@ def download_text(path: str) -> str:
 
 
 def download_bytes(path: str) -> bytes:
-    """讀 GCS 二進位物件 (圖片；path 可為完整 gs:// URI 或 bucket 相對 key)。
+    """讀取一個 GCS 二進位物件，適用於圖片。
 
-    傳入完整 gs:// URI 時取其 bucket；傳入相對 key 時 bucket name 從環境變數 ONENOTE_GCS_BUCKET 讀取。
+    傳入完整位址時取其中的 bucket 名稱，傳入相對路徑時改讀環境變數 ONENOTE_GCS_BUCKET。
 
     Args:
-        path (str): 例如 `gs://bucket/path/to/blob.png`, `path/to/blob.png`
+        path: 完整物件位址或不含 bucket 名稱的相對路徑，兩種寫法都接受。
 
     Returns:
-        bytes: bytes 物件。
+        該物件的二進位內容。
     """
     if path.startswith("gs://"):
         bucket_name, key = _split_uri(path)
@@ -195,16 +246,16 @@ def download_bytes(path: str) -> bytes:
 
 
 def copy_blob(src_uri: str, dst_blob: str) -> str | None:
-    """把來源物件 server-side 複製到預設 bucket 的 dst_blob，回傳目的物件 md5_hash。
+    """把來源物件複製到預設 bucket 底下的指定路徑。
 
-    同 bucket 走 GCS server-side copy (不經本機流量) ；跨 bucket 亦由 copy_blob 處理。
+    複製由 GCS 在伺服器端完成，內容不經過本機，因此不產生下載與上傳流量；跨 bucket 的來源同樣支援。
 
     Args:
-        src_uri (str): 來源端之 URI，可為完整 gs:// URI 或 bucket 相對 key
-        dst_blob (str): 目的地之 blob 路徑，bucket name 從環境變數 ONENOTE_GCS_BUCKET 讀取。
+        src_uri: 來源物件的完整位址或不含 bucket 名稱的相對路徑，兩種寫法都接受。
+        dst_blob: 目的物件的相對路徑，bucket 一律取自環境變數 ONENOTE_GCS_BUCKET。
 
     Returns:
-        str | None: 複製完成後目的地物件之 md5 雜湊值。
+        複製完成後目的物件的 md5；GCS 未回傳雜湊值時為 None。
     """
     if src_uri.startswith("gs://"):
         src_bucket_name, src_key = _split_uri(src_uri)

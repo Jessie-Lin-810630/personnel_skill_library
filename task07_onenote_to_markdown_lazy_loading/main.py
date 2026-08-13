@@ -24,7 +24,15 @@ load_dotenv()
 
 
 def run_task07_bronze_etl() -> None:
-    """Bronze 層 ETL 入口：呼叫 e_onenote_download() 下載並記錄新版本數。Silver 由 UI on-demand 觸發。"""
+    """Bronze 層 ETL 入口，建立地端 GCS 連線後執行下載，並記錄本次新增的版本數。
+
+    Note:
+        這支入口只做到 Bronze，全程不呼叫 LLM；把 html 重整成 md 改由審查頁 on-demand 觸發 Silver 服務。
+        因為授權採互動式裝置流程、需要人工在瀏覽器完成，所以這個 ETL 只在地端執行，不納入雲端部署。
+
+    Returns:
+        None: html 與圖片寫進 GCS，版本 metadata 寫進 MongoDB，新版本數只記進 log，不回傳值。
+    """
     logger.info("=== Task07 v02 Bronze layer: ETL ===")
     get_client_on_premise()
     new_versions = e_onenote_download()

@@ -57,19 +57,21 @@ TOPIC_KEYWORDS = {
 def infer_topic(tags: list[str], file_name: str) -> str:
     """從 tags 與檔名/標題比對 TOPIC_KEYWORDS，推斷這份筆記的 topic。
 
-    1. 把 tags 全部轉小寫，並補上檔名（去副檔名）一起當作比對目標。
+    1. 把 tags 全部轉小寫，並補上去掉副檔名的檔名一起當作比對目標。
     2. 依 TOPIC_KEYWORDS 的鍵順序逐一比對，任一關鍵字命中就回該 topic。
-    3. 全部比不到就回 other。
+    3. 全部比不到就歸為 other-in-bioteach。
 
-    鍵的順序代表優先權，越前面的 topic 越優先命中。Bronze 階段尚無 tags 時可傳 `[]`，
-    僅以標題比對；Gold/reject 階段以 LLM 產出的 tags 一起比對取得最佳分類。
+    Note:
+        TOPIC_KEYWORDS 的鍵順序代表優先權，越前面的 topic 越先被命中，因此調整鍵順序會改變分類結果。
+        Bronze 階段還沒有 tags，此時傳空清單、只以標題比對；
+        歸檔與退件階段才拿 LLM 產出的 tags 一起比對，分類會更準確，因此同一份筆記在不同階段可能得到不同 topic。
 
     Args:
-        tags: 這份筆記的標籤清單（bronze 階段可為空 list）。
-        file_name: 筆記檔名或頁面標題，取其 stem 一併參與比對。
+        tags: 這份筆記的標籤清單，Bronze 階段可傳空清單。
+        file_name: 筆記檔名或頁面標題，取其主檔名一併參與比對。
 
     Returns:
-        命中的 topic 字串，全不中時回 other。
+        命中的 topic 字串；所有關鍵字都比不到時回 other-in-bioteach。
     """
     stem = Path(file_name).stem
     search_targets = [t.lower() for t in tags] + [stem.lower()]
