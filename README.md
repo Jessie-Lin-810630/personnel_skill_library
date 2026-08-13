@@ -72,7 +72,11 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 
 ## Architecture
 
+### Request Flow between Tasks
 ![image](./doc/architecture.png)
+
+### Entity-Relationship Diagram
+各 task 寫入 MongoDB Atlas 的 collection 之實體關係圖 (ERD) 可見 [Lucid chart](https://lucid.app/lucidchart/d8a25860-ca13-46fd-9286-672e9530c4f7/edit?viewport_loc=-31462%2C-6017%2C5049%2C2318%2C0_0&invitationId=inv_1f645ec2-306a-43af-a8ef-9650a6e8e9b7)。
 
 ## Project Structure
 

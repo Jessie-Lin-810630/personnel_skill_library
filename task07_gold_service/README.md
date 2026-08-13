@@ -116,7 +116,7 @@ task07_gold_service/
 >(2) [由於一段時期同名筆記，只能擇一種版本歸檔](#dataflow)，故在同一時間被迫退役的版本，若其內容與 approve 版的內容完全相同，被迫退役版將會標上`status=review_closed`、`review_result=overwritten`。
 >(3) 內容不同且需要被迫退役者，將標上 `status=review_closed`、`review_result=rejected`。
 
-> Collection 與其他 tasks 的 collection 實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 與其他 tasks 的 collection 實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 # Data Source
 
