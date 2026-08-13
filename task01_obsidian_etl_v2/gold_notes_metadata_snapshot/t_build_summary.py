@@ -21,24 +21,34 @@ def build_summary(
 ) -> dict:
     """對 obsidian_note_metadata 或 onenote_note_metadata 的現況盤出當日快照的 docs。
 
-    1. 只統計 status 為 archived 的筆記與被退件者，把 deleted 與 error 排除在進度之外。
-    2. 逐筆累加各 note_type 與各 topic 的計數、總筆數，以及已向量化的筆數。
+    1. 只統計 status 為 archived 的筆記，以及已定案退件的筆記。
+    2. 逐筆累加標籤、topic 與 note_type 三種分佈，加上各自的總筆數與已向量化的筆數。
+
+    Note:
+        status 為 deleted 或 error 的筆記一律排除，因此快照反映的是可用內容的規模，不是曾經處理過的總量。
+        兩份 metadata 存放 frontmatter 的欄位名稱不同，obsidian_note_metadata 用 archived_md_frontmatter、
+        onenote_note_metadata 用 md_frontmatter，投影欄位因此依來源分岔，新增第三種來源時要一併補上。
 
     Args:
         db: pymongo Database 物件。
-        snapshot_which_coll: 針對哪個 collection 做快照。
+        snapshot_which_coll: 要對哪一份筆記 metadata 做快照。
 
     Returns:
-        本次寫入的快照字典，含全域的 embedded_notes，以及 archived 桶（archived_notes、
-        by_tag_in_archived_notes、by_topic_in_archived_notes、by_type_in_archived_notes）
-        與 rejected 桶（rejected_notes、by_tag_in_rejected_notes、
-        by_topic_in_rejected_notes、by_type_in_rejected_notes）。
+        含 snapshot_source 與 summary 兩個鍵的字典。snapshot_source 記錄來源 collection 供合併時辨識；
+        summary 底下有 embedded_notes，以及歸檔與退件兩組數字，每組各含筆數與三種分佈。
+        傳入的 collection 名稱不在支援範圍時，記一筆 warning 後回 None，
+        此時呼叫端若直接把它交給 upsert_summary 會取不到鍵而失敗。
     """
     collection = db[snapshot_which_coll]
     embedded_notes = 0
 
     # archived / rejected 兩桶，各自累計 count 與 tag／topic／type 分佈
     def _new_bucket() -> dict:
+        """建立一組空的統計容器，歸檔與退件各用一組。
+
+        Returns:
+            含 count 與 by_tag、by_topic、by_type 三份分佈的字典，三份分佈的計數都從 0 起算。
+        """
         return {"count": 0, "by_tag": defaultdict(int), "by_topic": defaultdict(int), "by_type": defaultdict(int)}
 
     archived = _new_bucket()

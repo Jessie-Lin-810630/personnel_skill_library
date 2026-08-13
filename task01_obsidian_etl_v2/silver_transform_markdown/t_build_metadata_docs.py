@@ -78,6 +78,10 @@ def _parse_note_path(blob_name: str) -> dict[str, str]:
     以 raw-notes/lucky460721/data-engineering/01-daily-logs/x.md 為例，會得到 note_user_id 為
     lucky460721、notebook 為 data-engineering、section 為 01-daily-logs、file_name 為 x.md。
 
+    Note:
+        路徑段數不足時以空字串補上而不拋錯，因此拿到空字串代表來源路徑結構不符預期，
+        而不是該筆記真的沒有筆記本或章節。
+
     Args:
         blob_name: GCS 上該 .md 的 blob 名稱，可含或不含 raw-notes/ 前綴。
 
@@ -99,16 +103,18 @@ def _infer_topic(tags: list[str], md_file_path: str) -> str:
 
     1. 把 tags 全部轉小寫，並補上檔名一起當作比對目標。
     2. 依 TOPIC_KEYWORDS 的鍵順序逐一比對，任一關鍵字命中就回該 topic。
-    3. 全部比不到就回 other。
+    3. 全部比不到就歸為 other-in-de。
 
-    鍵的順序代表優先權，越前面的 topic 越優先命中。
+    Note:
+        TOPIC_KEYWORDS 的鍵順序代表優先權，越前面的 topic 越先被命中，因此調整鍵順序會改變分類結果。
+        比對採子字串包含，關鍵字出現在標籤或檔名的任何位置都算命中，所以關鍵字取得太短容易誤判。
 
     Args:
         tags: 這份筆記的標籤清單。
         md_file_path: 這份 .md 的路徑，取其檔名一併參與比對。
 
     Returns:
-        命中的 topic 字串，全不中時回 other。
+        命中的 topic 字串；所有關鍵字都比不到時回 other-in-de。
     """
     file_name = Path(md_file_path).stem
     search_targets = [t.lower() for t in tags] + [file_name.lower()]
@@ -120,29 +126,28 @@ def _infer_topic(tags: list[str], md_file_path: str) -> str:
 
 
 def build_note_document(blob: Blob, text: str, bucket_name: str, image_md5_index: dict[str, str]) -> dict:
-    """把單份 raw .md 的內文清洗成可插入 obsidian_note_metadata 的 document，不含 archived_* 與狀態欄位。
+    """把單份下載回來的 .md 清洗成可寫進 obsidian_note_metadata 的 document。
 
-    1. 呼叫 function `extract_frontmatter` 解析 frontmatter，
-       組出 archived_md_frontmatter 所需的內嵌欄位。
+    1. 解析 frontmatter，組出 archived_md_frontmatter 的內容。
     2. 從 tags 與檔名推斷 topic。
     3. 從 blob 名稱拆出 note_user_id、notebook、section、file_name。
-    4. 補上 raw_md_path、raw_md_md5_hash、raw_md_updated_at、字數。
-    5. 呼叫 function `extract_attached_images`，解析 md 附件圖片的資料血緣，
-       組出 attached_images 所需的內嵌物件之陣列。
+    4. 補上 raw_md_path、raw_md_md5_hash、raw_md_updated_at 與 word_count。
+    5. 解析正文引用的圖片，組出 attached_images。
 
-    **Notes:**
-        archived_* 欄位、status、embedded_status 與時間戳由 Load 歸檔後補；
+    Note:
+        archived_md_path、archived_md_md5_hash、archived_at、status、embedded_status 與各項時間戳
+        都不在這裡產生，要等 archive_note 與 upsert_note 執行完才有值，因為那些值需歸檔實際完成才成立。
         未來若要插入 LLM enrichment，掛載點見函式內註解。
 
     Args:
-        blob: 這份 raw .md 的 GCS blob，提供名稱、md5 與更新時間。
-        text: 已下載的 .md 內文。
-        bucket_name: gs://<bucket>/raw-notes/ 所在的 GCS bucket 名稱。
-        image_md5_index: GCS 現況的圖片路徑對 md5 字典，由 list_raw_blobs() 回傳值傳入，
-        供寫入 attached_images 欄位時所需要的 md5_hash 值。
+        blob: 這份 .md 的 GCS blob 物件，提供名稱、md5 與更新時間。
+        text: 已下載的 .md 完整內容，含 frontmatter。
+        bucket_name: raw-notes/ 所在的 GCS bucket 名稱，用來組出完整路徑。
+        image_md5_index: GCS 現況的圖片路徑對 md5 字典，由 list_raw_blobs 產出，
+            供 attached_images 查出每張圖的 md5。
 
     Returns:
-        一份 note document 字典，供 Load 歸檔並 upsert。
+        一份 note document 字典，交給 archive_note 補上歸檔欄位後再 upsert 進 obsidian_note_metadata。
     """
     logger.info(f"下載 {Path(blob.name).name} 完成，開始清理...")
     post = frontmatter.loads(text)

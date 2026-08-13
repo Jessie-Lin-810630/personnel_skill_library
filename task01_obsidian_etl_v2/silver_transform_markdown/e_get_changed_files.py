@@ -42,17 +42,20 @@ NOTE_METADATA = "obsidian_note_metadata"
 
 
 def list_raw_blobs(bucket_name: str = "personal-vaults") -> tuple[list, dict[str, str]]:
-    """掃 gs://<bucket>/raw-notes/ 下 FOLDER_TYPE_MAP 鎖定的資料夾，一次收齊待處理的 .md blob 與圖片 md5。
+    """掃描 raw-notes/ 下 FOLDER_TYPE_MAP 鎖定的資料夾，一次收齊待處理的 .md 與圖片 md5。
 
-    1. 列出 gs://<bucket>/raw-notes/ 前綴下的所有 blob，此時 metadata 已帶 md5，不必下載內容。
-    2. 副檔名為 .md 且其上層資料夾前兩碼落在 FOLDER_TYPE_MAP 內者，收進 md_blobs。
-    3. 其餘副檔名屬合法圖檔者，把 blob 名稱對應到它的 md5，收進 image_md5_index 供圖片血緣查用。
+    1. 列出 raw-notes/ 前綴下的所有 blob。
+    2. 副檔名為 .md，且上層資料夾名稱前兩碼落在 FOLDER_TYPE_MAP 內者，收進待處理清單。
+    3. 副檔名屬於合法圖檔者，把 blob 名稱對應到它的 md5，收進圖片索引。
+
+    Note:
+        列出 blob 時回傳的物件已帶有 md5，不需再下載內容即可比對，因此整趟掃描不產生下載流量。
 
     Args:
-        bucket_name: raw-notes/ 所在的 GCS bucket 名稱，預設 "personal-vaults"。
+        bucket_name: raw-notes/ 所在的 GCS bucket 名稱，預設 personal-vaults。
 
     Returns:
-        一個 tuple，前者是所有目標 .md 的 blob 物件清單，後者是圖片 blob 名稱對到其 md5 的字典。
+        待處理 .md 的 blob 物件清單，與圖片 blob 名稱對到其 md5 的字典，兩者組成 tuple。
     """
     client = storage.Client()
 
@@ -77,20 +80,22 @@ def list_raw_blobs(bucket_name: str = "personal-vaults") -> tuple[list, dict[str
 
 
 def get_existing_md5_map(db: Database) -> dict[str, dict]:
-    """從 obsidian_note_metadata 撈回每筆 note 的 CDC 比對狀態，供 select_changed_blobs 判斷。
+    """從 obsidian_note_metadata 撈回每份筆記已記錄的 md5，供 select_changed_blobs 比對。
 
     1. 一次查回每份筆記的 raw_md_path、raw_md_md5_hash 與內嵌的 attached_images。
-    2. 把 attached_images 收斂成「圖片路徑對圖片 md5」的字典。
-    3. 以 raw_md_path 為 dict key，值放這份筆記的 md 本身 md5 與上一步的圖片 md5 字典。
+    2. 把 attached_images 收斂成圖片路徑對圖片 md5 的字典。
+    3. 以 raw_md_path 為鍵，值放這份筆記本身的 md5 與上一步的圖片字典。
 
-    之所以連圖片 md5 一起存，是要偵測一種情境：.md 內文沒變、但它 wiki-link 指到的圖片被換掉或刪掉。
-    此查詢只服務 ingestion 判斷、不寫回任何 collection，故歸 Extract。
+    Note:
+        連圖片 md5 一起撈，是為了偵測 .md 內容沒變、但它引用的圖片被換掉或刪掉這種情況。
+        這支函式只讀 MongoDB 供挑檔判斷、不寫入任何 collection，因此依資料本體的流向歸在 Extract。
 
     Args:
-        db: pymongo 的 Database 物件。
+        db: pymongo Database 物件。
 
     Returns:
-        以 raw_md_path 為 dict key 的字典，值含 md_md5 與 images 兩欄，其中 images 是圖片路徑對其 md5 的字典。
+        以 raw_md_path 為鍵的字典，值含 md_md5 與 images 兩個欄位，
+        後者是該筆記引用的圖片路徑對其 md5 的字典。
     """
     collection = db[NOTE_METADATA]
     existing_map: dict[str, dict] = {}
@@ -111,21 +116,24 @@ def select_changed_blobs(
     image_md5_index: dict[str, str],
     bucket_name: str = "personal-vaults",
 ) -> list[Blob]:
-    """對比 GCS 現況與 DB 既有狀態，挑出需要重新下載清洗的 .md blob，即 CDC gate。
+    """比對 GCS 現況與 MongoDB 已記錄的 md5，挑出需要重新下載清洗的 .md。
 
-    逐一檢查每份 .md，命中以下任一情境就納入待處理清單：
-      1. 新增：DB 找不到這份筆記的 raw_md_path。
-      2. 內文變更：這份 .md 的 md5 與 DB 記錄的不同。
-      3. 圖片變更：.md 內文本身沒變，但它 wiki-link 指到的圖片 md5 被換掉、或圖片已從 GCS 消失。
-         這種情況仍要重跑，才能刷新 attached_images 血緣與 archived 端的圖片副本。
+    逐一檢查每份 .md，命中以下任一情況就納入待處理清單：
+    1. 新增：MongoDB 找不到這份筆記的 raw_md_path。
+    2. 內容變更：這份 .md 的 md5 與 MongoDB 記錄的不同。
+    3. 圖片變更：.md 內容沒變，但它引用的圖片 md5 被換掉，或該圖已從 GCS 消失。
 
-    blob.name 沒有 gs://<bucket>/ 前綴、DB 的 raw_md_path 有，故比對前先補上前綴，對不上就判 GCS 有新增檔案。
+    Note:
+        第三種情況同樣要重跑，才能刷新 attached_images 與 archived-notes/ 下的圖片副本，
+        否則歸檔的內容會停留在舊圖。
+        另外 blob 名稱不帶 gs 協定前綴、raw_md_path 帶，因此比對前先補上前綴；
+        補上後仍對不上就一律視為新增，寧可多跑一次也不漏檔。
 
     Args:
-        md_blobs: gs://<bucket>/raw-notes/ 下所有目標 .md 的 blob 物件清單。
-        existing_md5_map: get_existing_md5_map 的回傳，以 raw_md_path 為 dict key、值含 md_md5 與 images。
+        md_blobs: raw-notes/ 下所有目標 .md 的 blob 物件清單。
+        existing_md5_map: get_existing_md5_map 的回傳值，以 raw_md_path 為鍵、值含 md_md5 與 images。
         image_md5_index: GCS 現況的圖片路徑對 md5 字典，來自 list_raw_blobs。
-        bucket_name: raw-notes/ 所在的 GCS bucket 名稱，預設 "personal-vaults"。
+        bucket_name: raw-notes/ 所在的 GCS bucket 名稱，預設 personal-vaults。
 
     Returns:
         本次需要下載清洗的 .md blob 物件清單。

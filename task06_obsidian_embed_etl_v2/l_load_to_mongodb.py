@@ -40,19 +40,27 @@ def load_vectors_incremental_v2(
 ) -> None:
     """把本次成功處理的每份筆記寫進 note_vectors_multimodal，並以帶 md5 守衛的 CAS 翻 embedded_status。
 
-    1. 依 md_path（＝archived md 路徑）把 vector_docs 分組——向量表以 md_path 作為 data lineage 依據。
-    2. 對每份筆記先 delete_many 清掉舊向量、再 insert_many 寫新的；這樣重切後 chunk 數變少也不會殘留孤兒，
-       全新的筆記因為沒有舊向量，delete 這步等於沒事。
-    3. 只有這份筆記在 DB 仍是 embedded_status=false、且 archived_md_md5_hash 等於本次 embedding 的版本時，
-       才把 embedded_status 翻成 true 並以同一時戳蓋上 embedded_at 與 updated_at。若 embedding 期間 task01_v2
-       又重歸檔改了 md5，CAS 就不會命中，這份留待下輪重做，避免把舊版向量誤標成最新版本。
-       CAS 仍以 metadata 唯一鍵 raw_md_path 定位筆記（向量表改用 md_path 不影響 metadata 唯一鍵與 CAS 規則）。
+    1. 依 md_path 把向量文件分組，該欄位的值就是歸檔後的 .md 路徑。
+    2. 對每份筆記先刪掉舊向量再寫入新的。
+    3. 以 CAS 更新 embedded_status，條件是該筆記目前仍為 false、且 archived_md_md5_hash
+       等於本次向量化所依據的版本；命中才翻成 true，並以同一個時戳蓋上 embedded_at 與 updated_at。
+
+    Note:
+        先刪後插是為了讓重新切塊後 chunk 數變少時不殘留孤兒向量；全新的筆記沒有舊向量，那步等於空跑。
+        CAS 若沒命中，代表向量化期間 task01 又重新歸檔改了 md5，此時不翻狀態、留待下一輪重做，
+        以免把舊版內容產生的向量標記成最新版本。這種情況只記 warning，不視為失敗。
+        向量文件以 md_path 分組，但 CAS 仍以 raw_md_path 定位筆記，兩者用途不同不可混用。
 
     Args:
         db: pymongo Database 物件。
-        vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單（帶 md_path）。
-        embedded_by_raw_md_path: 本次成功處理的 {raw_md_path: {"md_path": archived_md_path,
-            "archived_md5": archived_md_md5_hash}}。
+        vector_docs: t_chunk_and_embed_v2 產出、待寫入 note_vectors_multimodal 的 chunk 向量清單，
+            每筆都帶有 md_path。
+        embedded_by_raw_md_path: 本次成功處理的筆記對照表，鍵為 raw_md_path，
+            值含 md_path 供先刪後插定位向量，以及 archived_md5 作為 CAS 的守衛值。
+
+    Returns:
+        None: 向量寫進 MongoDB 的 note_vectors_multimodal，狀態欄位寫回 obsidian_note_metadata，
+        各項筆數只記進 log，不回傳值。
     """
     vectors = db[VECTORS_V2]
     notes = db[NOTE_METADATA]
@@ -92,21 +100,21 @@ def load_vectors_incremental_v2(
 
 
 def purge_deleted_vectors(db: Database) -> int:
-    """從向量資料庫中移除「事實來源 (GCS 上) 已經被軟刪除」的資料。
+    """清除向量庫中那些來源檔案已在 GCS 上被軟刪除的向量。
 
-    針對 collection obsidian_note_metadata 中顯示 status=deleted
-    且 embedded_status=true 的筆記所對應的、存放於 collection note_vectors_multimodal 中向量，
-    然後再翻過 embedded_status=false。
+    挑出 obsidian_note_metadata 裡 status 為 deleted 且 embedded_status 為 true 的筆記，
+    依其 archived_md_path 刪掉向量庫中對應的所有 chunk，再把 embedded_status 翻回 false。
 
-    此函式不會去改、刪 collection obsidian_note_metadata 文件與 GCS 上物件。
-    翻 false 後不再被挑出來做向量化、也不會誤導檢索結果去撈已在 GCS 上被軟刪除的來源。
-    函式回傳本次 purge 的筆記數。
+    Note:
+        翻回 false 之後，這些筆記既不會再被挑出來重做向量化，檢索結果也不會再撈到已軟刪除的內容。
+        這支函式只動向量文件與 embedded_status 欄位，不會刪改筆記 metadata 本身，也不會動 GCS 上的物件，
+        因此筆記若日後在 GCS 上復原，task01 重新歸檔後仍可正常重做向量化。
 
     Args:
-        db (Database): pymonogo database 物件。
+        db: pymongo Database 物件。
 
     Returns:
-        int: 本次向量化任務最後被 purge 的筆記數。
+        本次清除向量的筆記數；向量刪除與狀態更新都寫進 MongoDB。
     """
     notes = db[NOTE_METADATA]
     vectors = db[VECTORS_V2]

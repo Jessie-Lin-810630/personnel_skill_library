@@ -20,12 +20,19 @@ from .e_get_changed_files import NOTE_METADATA
 def upsert_note(db: Database, note_doc: dict) -> None:
     """以 raw_md_path 為唯一鍵，把 note document 冪等 upsert 進 obsidian_note_metadata。
 
-    1. 一律把 status 設為 archived、更新 updated_at。
-    2. embedded_status 與 created_at 只在第一次 insert 時設定，避免覆蓋 task06 之後翻過的向量化狀態。
+    1. 一律把 status 設為 archived，並更新 updated_at。
+    2. embedded_status 與 created_at 只在第一次寫入時設定。
+
+    Note:
+        embedded_status 之所以只在第一次寫入時設定，是因為 task06 完成向量化後會把它翻成 true，
+        這裡若每次都覆寫，已向量化的筆記會被誤判成尚未處理而反覆重做。
 
     Args:
         db: pymongo Database 物件。
-        note_doc: archive_note 回傳、已補上 archived_* 欄位的 note document。
+        note_doc: archive_note 回傳、已補上歸檔欄位的 note document。
+
+    Returns:
+        None: 結果寫進 MongoDB 的 obsidian_note_metadata，不回傳值。
     """
     collection = db[NOTE_METADATA]
     now = datetime.now(timezone.utc)
@@ -41,15 +48,22 @@ def upsert_note(db: Database, note_doc: dict) -> None:
 
 
 def mark_note_error(db: Database, raw_md_path: str, error_msg: str) -> None:
-    """清洗或歸檔失敗時，以 raw_md_path 定位該筆記，記一筆 status=error 與 error_msg，供稽核。
+    """清洗或歸檔失敗時，以 raw_md_path 定位該筆記並記下 status=error 與失敗原因，供稽核。
 
-    只覆寫 status、error_msg 與 updated_at，上一次成功歸檔留下的 archived_* 欄位不動，
-    因此就算某版本歸檔失敗，仍保留上一版可用的向量化來源。這支函式可冪等重跑。
+    只覆寫 status、error_msg 與 updated_at 三個欄位，
+    archived_md_path、archived_md_md5_hash 等上次成功歸檔留下的值一律不動。同一筆可冪等重跑。
+
+    Note:
+        保留上次的歸檔欄位，是為了讓這個版本歸檔失敗時，task06 仍能沿用上一版可讀的內容做向量化，
+        不會因為一次失敗就讓這份筆記從檢索結果中消失。
 
     Args:
         db: pymongo Database 物件。
         raw_md_path: 這份筆記的唯一鍵。
         error_msg: 要記錄的錯誤訊息。
+
+    Returns:
+        None: 結果寫進 MongoDB 的 obsidian_note_metadata，不回傳值。
     """
     collection = db[NOTE_METADATA]
     now = datetime.now(timezone.utc)
@@ -64,21 +78,22 @@ def mark_note_error(db: Database, raw_md_path: str, error_msg: str) -> None:
 
 
 def soft_delete_missing(db: Database, present_raw_paths: set[str]) -> int:
-    """把 DB 尚存，但這次 gs://<bucket>/raw-notes 下 live listing 已不見的筆記標成 status=deleted。
+    """把 MongoDB 尚存、但這次掃描 raw-notes/ 已不見的筆記標成 status=deleted。
 
-    1. 非常重要：present_raw_paths 為空時，乾脆先視為上游掃描異常，直接 return 0 並記 warning。
-       因為拿空清單去比對會匹配到整個 collection，反而誤把全部筆記標成 deleted，非常危險，
-       因此寧可先中止函式讓這輪漏刪、下輪再判斷是否要補刪。
-    2. 正常情況下，挑出 raw_md_path 不在 present_raw_paths 裡面、且尚未 deleted 的筆記，一次標成 deleted。
+    挑出 raw_md_path 不在本次掃描結果內、且尚未標為 deleted 的筆記，一次更新完畢。
+    只動尚未 deleted 的文件，因此可冪等重跑。
 
-    只動尚未 deleted 的文件，所以重跑冪等。
+    Note:
+        present_raw_paths 為空時一律視為上游掃描異常，直接記一筆 warning 後回 0，不執行任何更新。
+        因為拿空集合去比對會匹配到整個 collection，等於把所有筆記標成 deleted。
+        寧可這輪漏刪、下輪再補，也不能冒這個風險。
 
     Args:
         db: pymongo Database 物件。
-        present_raw_paths: 這次掃描實際存在於 gs://<bucket>/raw-notes/ 的所有 raw_md_path 集合。
+        present_raw_paths: 這次掃描實際存在於 raw-notes/ 的所有 raw_md_path 集合。
 
     Returns:
-        本次新翻成 deleted 的筆記數。
+        本次新標成 deleted 的筆記數；掃描結果為空而跳過更新時回 0。
     """
     if not present_raw_paths:
         logger.warning("present_raw_paths 為空，疑似上游掃描異常，跳過軟刪除以免誤刪全表")

@@ -47,11 +47,21 @@ def get_db(mongo_uri: str, db_name: str) -> Database:
 
 
 def run_task01_v2():
-    """task01_v2 總入口，建立 db 與 bucket 參數後，依序執行 Silver 與 Gold 兩層。
+    """task01_v2 總入口，建立 db 連線後依序執行 Silver 與 Gold 兩層。
 
-    1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
-    2. 建立 db，呼叫 Silver 層做 CDC gate、清洗、歸檔、upsert 與軟刪除。
-    3. 呼叫 Gold 層對現況產出當日快照。
+    先讀環境變數建立 db 連線，再把 db 與 bucket 名稱交給 Silver 層，
+    由它完成 CDC 挑檔、清洗、歸檔、upsert 與軟刪除；
+    最後呼叫 Gold 層，對筆記 metadata 的現況產出當日快照。
+
+    Note:
+        Bronze 層是把本機 vault 同步到 raw-notes/ 的手動步驟，不在這個入口內，
+        執行前需先自行完成，否則 Silver 層掃不到新檔。
+
+    Returns:
+        None: Silver 層的結果寫進 GCS 與 MongoDB，Gold 層的快照寫進 MongoDB，不回傳值。
+
+    Raises:
+        EnvironmentError: 環境變數 MONGO_ALTAS_URI 或 MONGO_DB_NAME 未設定時拋出。
     """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")

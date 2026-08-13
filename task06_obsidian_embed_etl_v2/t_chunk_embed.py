@@ -44,13 +44,19 @@ _IMAGE_EMBED_PATTERN = re.compile(r"!\[\[([^\]]+)\]\]")
 
 
 def _get_genai_client() -> genai.Client:
-    """初始化 google-genai client。
+    """初始化指向 Agent Platform 的 google-genai client，供 embedding 模型呼叫。
+
+    這個 client 綁定 us，因為 embedding 模型只在該 region 提供服務。
+
+    Note:
+        雲端執行時憑證由 Cloud Run 的 runtime service account 以應用程式預設憑證供給，
+        地端則需先解除函式內的註解區塊，改以 service account 金鑰檔初始化，否則會取不到憑證。
 
     Returns:
-        已認證、指向 Agent Platform 的 genai.Client。
+        綁定 us 的 google-genai Client 物件。
 
     Raises:
-        EnvironmentError: 缺少 AGENT_PLATFORM_USER_CREDENTIALS 或 GCP_PROJECT_ID 環境變數時。
+        EnvironmentError: 環境變數 GCP_PROJECT_ID 未設定時拋出。
     """
     # 地端測試跑下面區塊：
     # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
@@ -74,12 +80,15 @@ def _get_genai_client() -> genai.Client:
 
 
 def _clean_wiki_link(match: re.Match) -> str:
-    """接收 re.sub 傳入的 match 物件，回傳清理後的 wiki-link 文字。
+    """把一個 wiki-link 比對結果還原成純文字，供 re.sub 逐一替換。
 
-    優先取 group(1) (別名) ，若無則取 group(2) (原始連結文字)。
+    優先取別名，別名不存在時才取原始連結文字。
+
+    Note:
+        優先取別名是因為別名通常是作者為該連結寫的可讀說明，語意比連結名稱本身清楚。
 
     Args:
-        match: re.sub 傳入的 re.Match 物件，group(1) 為別名、group(2) 為原始連結文字。
+        match: re.sub 傳入的比對結果物件，第一組是別名，第二組是原始連結文字。
 
     Returns:
         去除前後空白後的連結顯示文字。
@@ -91,22 +100,22 @@ def _clean_wiki_link(match: re.Match) -> str:
 def preprocess_obsidian_content(content: str) -> str:
     """在使用 splitter 為 note 做 chunking 之前，清理以下 Obsidian 特有語法。
 
-    移除 block ID、解開 wiki-link，保留 ![[圖片]] 留待 embed 解析：
-    1. Block ID (^8e5a21): 移除，這是 Obsidian 內部引用錨點，對語意無意義
-    2. [[wiki-link|顯示文字]]: 只保留顯示文字
-    3. [[wiki-link]]: 保留連結名稱 (連結名本身帶有語意，例如筆記主題)
-    4. ![[image.png]]: 保留不動，留待 embed 階段解析成 GCS 圖片，與文字一起送入多模態模型
+    共處理四種語法，前三種改寫、第四種原樣保留：
+    1. 區塊錨點：整段移除，這是 Obsidian 的內部引用標記，對語意沒有貢獻。
+    2. 帶顯示文字的 wiki-link：只留下顯示文字。
+    3. 不帶顯示文字的 wiki-link：保留連結名稱，因為連結名本身就帶有語意，例如筆記主題。
+    4. 圖片嵌入語法：原樣保留，留待向量化階段解析。
 
-    **Notes:**
-        改用多模態模型後，情境4 圖片嵌入 ![[xxx.png]] 不再於此步驟移除，而是保留進 chunk，
-        交由 _embed_chunks_a_mardown() 解析成 `gs:// URI` 與文字一起向量化，
-        讓截圖、表格、操作示意圖的語意也能被檢索。
+    Note:
+        改用多模態模型後，圖片嵌入語法不再於此步驟移除，而是保留進 chunk，
+        交由 _embed_chunks_a_markdown 解析成 gs 協定 URI 與文字一起向量化，
+        讓截圖、表格與操作示意圖的語意也能被檢索到。
 
     Args:
-        content: 一份 .md 的原始 body 文字。
+        content: 一份 .md 的原始正文文字。
 
     Returns:
-        清理後的純文字 (保留 ![[圖片]]，僅移除 block ID、解開 wiki-link)。
+        清理後的文字，其中圖片嵌入語法原樣保留，區塊錨點已移除、wiki-link 已還原成純文字。
     """
     # 1. 移除 block ID 標記，例如 ^8e5a21、^7cb2bf
     content = re.sub(r"\s*\^[a-zA-Z0-9]{4,}\s*", " ", content)
@@ -138,9 +147,13 @@ def preprocess_obsidian_content(content: str) -> str:
 def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 100) -> list[dict]:
     """對一份筆記內文做兩段式 chunking，先依標題切、再把過長段落切小。
 
-    1. 用 MarkdownHeaderTextSplitter 依 H1 到 H4 切，並把命中的標題串成 section 路徑。
-    2. 對每個標題段落再用 RecursiveCharacterTextSplitter 切小，分隔符順序對中文較友善。
+    1. 依 H1 到 H4 四層標題切開，並把命中的標題串成章節路徑。
+    2. 對每個標題段落再依字元數切小。
     3. 濾掉純空白的片段。
+
+    Note:
+        第二段切分的分隔符依序是空行、換行、句號、逗號、空格，這個順序對中文較友善，
+        能盡量在語意邊界斷開而不是硬切在字中間。
 
     Args:
         content: 已清理過 Obsidian 語法的筆記內文。
@@ -148,7 +161,7 @@ def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 10
         chunk_overlap: 相鄰 chunk 的重疊字元數，預設 100。
 
     Returns:
-        list，每筆是含 content 純文字片段與 section 標題路徑的字典。
+        每筆含 content 與 section 兩個鍵的字典清單，前者是純文字片段，後者是該片段所屬的標題路徑。
     """
     # 第一段:  設定 MarkdownHeaderTextSplitter 要識別的標題層級
     headers_to_split_on = [
@@ -196,26 +209,26 @@ def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 10
 def _resolve_chunk_images(
     text_in_chunk: str, note_file_path: str, bucket: Bucket, bucket_name: str = "personal-vaults"
 ) -> tuple[str, list[str]]:
-    """從一個 chunk 的文字抽出所有 Obsidian 圖片嵌入 ![[xxx.png]]，解析成 gs:// URI。
+    """從單一 chunk 的文字抽出所有圖片嵌入語法，解析成 GCS 上的完整位址。
 
-    解析規則 (依此專案在 GCS 的儲存結構)：
-      圖片放在「該 .md 所在目錄」底下的 _attachment/ 子資料夾，檔名與 ![[ ]] 內一致。
-      例：note = personal-vaults/archived-notes/.../.../xxx.md
-         圖片  = personal-vaults/archived-notes/.../.../_attachment/<檔名>.png
-      以 note 自己的目錄解析，天然避開不同資料夾 _attachment/ 內同名 .png 的衝突。
+    圖片放在該 .md 所在目錄底下的 _attachment 資料夾，檔名與嵌入語法內寫的一致，
+    因此以筆記自己的目錄為基準即可推算出完整位址。
 
-    .md 內的圖片寫法 (只有檔名) 完全不更動，只在 embed 時據此推算 GCS 絕對路徑。
-    回傳 (送入模型用的純文字, [gs:// URI, ...])；圖片不存在則記 warning 後略過。
+    Note:
+        .md 內只寫檔名的圖片語法完全不更動，只在向量化時據此推算路徑，
+        因此不同資料夾底下的同名圖片不會互相衝突。
+        圖片在 GCS 上不存在時記一筆 warning 後略過該張，這個 chunk 仍會以剩下的內容繼續向量化，
+        所以回傳的圖片數可能少於文字中出現的次數。
 
     Args:
-        text_in_chunk: 單一 chunk 的原始文字 (可能含 ![[圖片]])。
+        text_in_chunk: 單一 chunk 的原始文字，可能含圖片嵌入語法。
         note_file_path: 該 chunk 所屬 .md 的 GCS blob 路徑，用來推算圖片目錄。
         bucket: 已建立的 GCS Bucket 物件，用來檢查圖片是否存在。
-        bucket_name: GCS bucket 名稱，用來組 gs:// URI。
+        bucket_name: GCS bucket 名稱，用來組出完整位址。
 
     Returns:
-        tuple (text_for_model, image_uris)：去除 ![[ ]] 後的純文字，
-        與該 chunk 解析出的 gs:// URI 清單 (無圖為 [])。
+        送進模型的純文字與圖片位址清單組成的 tuple。純文字已拿掉圖片嵌入語法並整理過空行，
+        因為圖片改以獨立的 Part 傳入模型；該 chunk 沒有圖片時位址清單為空。
     """
     note_dir = Path(note_file_path).parent
     image_uris = []
@@ -240,16 +253,17 @@ def _resolve_chunk_images(
 
 
 def _normalize(vec: list[float]) -> list[float]:
-    """L2 normalize 成單位向量。
+    """對向量做 L2 normalize，轉成長度為 1 的單位向量。
 
-    gemini-embedding 只有預設維度 3072 會自動正規化；MRL 截斷到 1536 時不會，
-    cosine 相似度前需自行正規化，否則分數失真。
+    Note:
+        gemini-embedding 只有在使用預設的 3072 維時才會自動正規化，以 MRL 截斷到 1536 維時不會，
+        因此計算 cosine 相似度前必須自行正規化，否則分數失真。
 
     Args:
-        vec: 待正規化的向量。
+        vec: embedding 模型輸出的原始向量。
 
     Returns:
-        L2 正規化後的單位向量；零向量 (norm 為 0) 則原樣回傳。
+        L2 正規化後的單位向量；傳入零向量時原樣回傳，避免除以零。
     """
     norm = math.sqrt(sum(v * v for v in vec))
     return [v / norm for v in vec] if norm else vec
@@ -263,36 +277,31 @@ def _embed_chunks_a_markdown(
     bucket: Bucket,
     bucket_name: str = "personal-vaults",
 ) -> list[dict]:
-    """對一份 markdown 筆記的每個 chunk 做多模態向量化 (gemini-embedding-2)。
+    """對一份筆記的每個 chunk 做多模態向量化。
 
-    多模態無法像純文字那樣把多個 chunk batch 在一次呼叫，故每個 chunk 各呼叫一次：
-    1. 圖片類型：由 chunk 內的 ![[圖片]] 推算 GCS gs:// URI (note 目錄下 _attachment/)。
-    2. 文字類型：依官方 document 任務格式組 prompt "title: {title} | text: {content}"，
-       title = 筆記標題 + 該 chunk 的 section；文字 part 與圖片 part 組成單一 multimodal Content。
-    3. 將輸出做 L2 normalize 後存回。
+    每個 chunk 各呼叫模型一次，逐一完成三件事：
+    1. 從 chunk 內的圖片嵌入語法推算出各張圖在 GCS 上的位址。
+    2. 依官方建議的文件格式組出 prompt，標題由筆記標題接上該 chunk 的章節路徑組成，
+       文字與各張圖片再一起組成單一則多模態內容。
+    3. 把模型輸出做 L2 normalize 後存回該筆 chunk。
+
+    Note:
+        多模態呼叫無法像純文字那樣把多個 chunk 併成一次請求，因此呼叫次數等同 chunk 數，
+        筆記越長成本越高。prompt 格式必須與查詢時使用的格式配對，改動其中一邊就要同步改另一邊。
 
     Args:
-        chunks: _chunk_markdown() 產出的 list[dict]，每筆含 "content" 與 "section"。
-        genai_client: 已初始化的 google-genai client。
-        note_file_path: 該筆記的 GCS blob 路徑，供解析 chunk 內圖片。
-        note_title: 筆記標題 (alias 或檔名)，組進 prompt 的 title。
-        bucket: GCS Bucket 物件，檢查圖片是否存在。
-        bucket_name: GCS bucket 名稱，預設 "personal-vaults"。
+        chunks: _chunk_markdown 產出的 chunk 清單，每筆含 content 與 section 兩個鍵。
+        genai_client: 已初始化的 google-genai Client 物件。
+        note_file_path: 該筆記的 GCS blob 路徑，供解析 chunk 內的圖片位址。
+        note_title: 筆記標題，取自別名或檔名，組進 prompt 的標題部分。
+        bucket: GCS Bucket 物件，用來檢查圖片是否存在。
+        bucket_name: GCS bucket 名稱，預設 personal-vaults。
 
     Returns:
-        在每筆 chunk dict 上新增欄位後的 list[dict]，每筆含：
-        "content" 原始 chunk 文字 (含 ![[ ]])、"image_paths" gs:// URI 清單 (無圖為 [])、
-        "embedding" 長度 EMBED_DIM(1536) 且已 L2 normalize。
-
-    Examples:
-        >>> chunks = [{"content": "![[img.png]] 這是內容", "section": "簡介"}]
-        >>> process_chunks(chunks, client, "path/note.md", "我的筆記", bucket)
-        [{
-            'content': '![[img.png]] 這是內容',
-            'section': '簡介',
-            'image_paths': ['gs://personal-vaults/note/_attachment/img.png'],
-            'embedding': [0.015, -0.023, ..., 0.004]
-        }]
+        在每筆 chunk 上補齊欄位後的清單。除原有的 content 與 section 外，
+        另有 image_paths 記錄該 chunk 引用的圖片位址，沒有圖片時為空清單；
+        以及 embedding 存放長度 1536 且已完成 L2 正規化的向量。
+        content 保留原始寫法，圖片嵌入語法不會被拿掉。
     """
     embedded = []
     for chunk in chunks:
@@ -318,15 +327,19 @@ def _embed_chunks_a_markdown(
 
 
 def _note_title(note: dict) -> str:
-    """優先使用筆記的 alias 作為 prompt 的 title，因為 alias 命名比 file name 少雜訊，
+    """取出一份筆記要放進 prompt 標題的名稱，優先使用別名。
 
-    舉例來說，alias 不會參雜日誌型筆記的前綴 '20250909...'
+    frontmatter 的別名欄位可能是清單，此時取第一個；沒有別名時改用去掉副檔名的檔名。
+
+    Note:
+        優先取別名是因為別名的命名比檔名少雜訊，例如日誌型筆記的檔名會帶有日期前綴，別名則不會，
+        那串日期進到 prompt 標題只會稀釋語意。
 
     Args:
-        note (dict): collection obsidian_note_metadata 結果，
+        note: 從 obsidian_note_metadata 查出的單筆筆記文件。
 
     Returns:
-        str: 可套在 prompt title 的筆記的 alias
+        可放進 prompt 標題的筆記名稱；別名與檔名都沒有時回空字串。
     """
     fm = note.get("archived_md_frontmatter", {}) or {}
     alias = fm.get("alias") or ""
@@ -340,48 +353,35 @@ def t_chunk_and_embed_v2(
     bucket_name: str = "personal-vaults",
     genai_client: genai.Client | None = None,
 ) -> tuple[list[dict], dict[str, dict]]:
-    """串接 fetch → preprocess → chunk → embed，產出 vector docs 與 {raw_md_path: {md_path, archived_md5}}。
+    """逐份處理待向量化的筆記，串接下載、清理、切塊與向量化四個步驟。
 
-    回傳 (all_vector_docs, embedded_by_raw_md_path)：
-      - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆帶 md_path（＝人工核可後的
-        archived_md_path 值），作為向量表與 collection obsidian_note_metadata 的 join 鍵。
-      - embedded_by_raw_md_path：本次成功處理（含切塊為空）的 {raw_md_path: {"md_path": archived_md_path,
-        "archived_md5": archived_md_md5_hash}}。key 為 metadata 唯一鍵 raw_md_path（CAS 仍以它定位筆記），
-        value 帶 md_path 供 load 層以向量欄位先刪後插、archived_md5 作 CAS 守衛值。失敗（拋例外）的檔不列入。
+    每份筆記依序拉取歸檔後的正文、清掉 Obsidian 特有語法、切成 chunk，最後逐個 chunk 做多模態向量化。
 
-    all_vector_docs 每筆輸出的結構：
-
-        ```
-        {
-            # 來源追蹤
-            "md_path":      "gs://personal-vaults/archived-notes/.../xxx.md",  # join 鍵（archived md 路徑）
-            "file_name":    "xxx.md",
-            "chunk_index":  0,          # 從 0 開始
-            "chunk_total":  6,          # 這份筆記共幾個 chunk
-
-            # 語意定位
-            "section":      "SQL - DQL敘述比較 > 針對一筆資料列…",
-            "content":      " (chunk 原始文字，保留 ![[圖片]] 寫法不更動) ",
-            "image_paths":  ["gs://personal-vaults/.../_attachment/xxx.png"],  # 該 chunk 含的圖片，無圖為 []
-
-            # Embedding
-            "embedding":    [...],      # list[float]，長度 1536，已 L2 normalize
-
-            # 繼承自 frontmatter (支援 Atlas pre-filter)
-            "tags":         ["MongoDB", "MySQL"],
-            "note_type":    "knowledge_summary",
-            "date":         "2026-04-13",
-        }
-        ```
+    Note:
+        單份筆記處理失敗時只記一筆 warning 後略過，不中斷整批，該筆記的 embedded_status 維持 false，
+        下一輪會再被挑出來重試。切塊結果為空的筆記，例如空白筆記，仍算成功處理並列入回傳的對照表，
+        否則每一輪都會被重新挑出來卻永遠切不出東西。
+        待做清單為空時直接回傳，不會初始化 client，因此不會產生任何呼叫成本。
 
     Args:
-        gate_list: get_embedding_gate_list() 回傳的待做筆記清單（每筆含 raw_md_path/archived_md_path 等）。
-        bucket_name: GCS bucket 名稱，預設 "personal-vaults"。
-        genai_client: 已初始化的 google-genai client；省略則由 _get_genai_client() 建立。
+        gate_list: get_embedding_gate_list 回傳的待做筆記清單，每筆含 raw_md_path 與 archived_md_path 等欄位。
+        bucket_name: GCS bucket 名稱，預設 personal-vaults。
+        genai_client: 已初始化的 google-genai Client 物件；省略時由 _get_genai_client 自行建立。
 
     Returns:
-        tuple (all_vector_docs, embedded_by_raw_md_path)：可入庫的 vector docs 清單 (每筆結構見上)，
-        與本次成功處理 (含切塊為空) 的 {raw_md_path: {"md_path": archived_md_path, "archived_md5": md5}}。
+        向量文件清單與成功筆記對照表組成的 tuple。
+
+        向量文件清單可直接寫入 note_vectors_multimodal，每筆分四組欄位。
+        追蹤來源的有 md_path 記錄歸檔後的 .md 路徑並作為 data lineage 的依據、file_name 記錄檔名、
+        chunk_index 為該 chunk 在筆記中的序號並從 0 起算、chunk_total 為這份筆記的 chunk 總數。
+        定位語意的有 section 記錄章節路徑、content 保留 chunk 原始文字且圖片語法不更動、
+        image_paths 記錄該 chunk 引用的圖片位址。向量本體是 embedding，長度 1536 且已完成 L2 正規化。
+        另有 tags、note_type 與 date 三個欄位繼承自 frontmatter，供 Atlas 做前置篩選。
+
+        成功筆記對照表的鍵是 raw_md_path，值含 md_path 供 Load 層先刪後插定位向量，
+        以及 archived_md5 作為 CAS 的守衛值。處理失敗的筆記不會列入這份對照表。
+
+        待做清單為空時，兩者都回空值。
     """
     if not gate_list:
         return [], {}  # 無待做筆記：不需初始化 genai client，直接回空
