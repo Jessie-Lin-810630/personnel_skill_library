@@ -232,21 +232,27 @@ st.markdown(
 ">
     </p>
     <h1 style="color:#e0e8f8; font-size:2.2rem; margin:0 0 0.5rem 0; font-weight:1000;">
-        From 生物製藥製程 to 資料工程
+        Dreams to Drive Every Data-driven Dream
     </h1>
     <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
-        我是 Jessie，在生技製藥產業工作 9 年的化工畢業生，<br>
+        我是 Jessie，曾在生技製藥產業工作 9 年，<br>
         以前我忙碌於技術移轉、跨部門業務語意對齊、資料探勘、挖掘數據價值。<br>
         但對自己下一段旅途的承諾，是從使用數據的人，成為為數據造橋的人。<br>
     </p>
     <p style="color:{color_map["GREEN"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
-        9 年以來，讓我有動力已不是分析本身，而是更前面的一步 —— <br>
+        9 年過去，讓我有動力不僅有分析本身，而是更前面的一步 —— <br>
         那些散落在不同系統、不同格式裡的資料，怎麼有效率被收攏、不會在過程中漏接。<br>
         這些任務可能不總是令人稱羨，但我就是覺得，把橋造好，後面的人才走得穩。<br>
         <br>
     </p>
     <p style="color:{color_map["PINK"]}; font-size:1rem; margin:0 0 1.2rem 0; letter-spacing:1px;">
-        這裡是新旅途起步的地方，紀錄著我實作產出紀錄與知識問答庫，如果想多認識我也歡迎逛逛我的
+        這裡是新旅途起步的地方，紀錄著我實作產出紀錄與知識問答庫，如果想多認識我也歡迎逛逛我的<br>
+        <a href="https://jessie-lin-810630.github.io"
+        target="_blank"
+        style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
+        Interactive Skill Tree
+        </a>
+          |
         <a href="https://github.com/Jessie-Lin-810630"
         target="_blank"
         style="color:{color_map["LIGHTBLUE"]}; text-decoration:none;">
@@ -267,6 +273,7 @@ st.markdown(
 # SECTION 1 — 雙雷達圖
 # ─────────────────────────────────────────
 st.markdown("### 🚀 技能雷達")
+st.caption("[或改使用互動式技能樹](https://jessie-lin-810630.github.io)")
 
 # Level 說明 + 生技雷達並排
 level_col, biotech_col, de_col = st.columns([0.6, 1.5, 1.5])
@@ -298,7 +305,7 @@ with level_col:
         )
 
 with biotech_col:
-    st.markdown("##### 💊 生技製藥技能雷達")
+    st.markdown("##### 💊 生物製藥技能雷達")
     _show_updated_at(biotech_updated_at)
     biotech_radar_event = st.plotly_chart(
         make_radar(biotech_labels, biotech_values, color_map["TEAL"], "", biotech_tasks),
@@ -322,7 +329,7 @@ detail_biotech_col, detail_de_col = st.columns([1, 1], gap="small")
 with detail_biotech_col:
     col1, col2 = st.columns([1.5, 2], gap=None)
     with col1:
-        st.markdown("##### 💊 生技製藥任務明細")
+        st.markdown("##### 💊 生物製藥任務明細")
     with col2:
         selected_axis_biotech, tasks_dict_biotech = render_task_selectbox(
             biotech_labels, biotech_tasks, biotech_radar_event, "biotech"
