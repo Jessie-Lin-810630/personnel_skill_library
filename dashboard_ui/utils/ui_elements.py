@@ -50,15 +50,22 @@ def render_side_bar():
     Returns:
         None: 直接寫入 Streamlit 側邊欄，不回傳值。
     """
-    st.sidebar.page_link("app.py", label="HOME", icon="🏠")
-    st.sidebar.page_link("pages/knowledge_factory.py", label="Chasing Great Data Engineering", icon="🏭")
+    st.sidebar.page_link("app.py", label="HOME - About Author", icon="🏠")
     with st.sidebar:
         st.divider()
-        st.caption("My artifacts")
-        st.sidebar.page_link("pages/onenote_review.py", label="OneNote Review System for RAG", icon="🔍")
-        st.sidebar.page_link("pages/ingestion_data_quality.py", label="Data Ingestion Quality", icon="📦")
-        st.sidebar.page_link("pages/retrieval_search_quality.py", label="RAG - Retrieval Quality", icon="🎯")
-        st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI Agent - Query and Answering", icon="🤖")
+        st.caption("作品區 - OneNote 文件串接 RAG 知識庫系統")
+        st.sidebar.page_link(
+            "pages/onenote_review.py", label="RAG pretreatment - OneNote Notes Review System", icon="🔍"
+        )
+        st.sidebar.page_link(
+            "pages/ingestion_data_quality.py", label="Pipeline Monitor - Data Ingestion Quality", icon="📦"
+        )
+        st.sidebar.page_link("pages/ai_knowledge_agent.py", label="AI - Query and Answering", icon="🤖")
+        st.sidebar.page_link(
+            "pages/retrieval_search_quality.py", label="Retrieval Monitor - Retrieval Quality", icon="🎯"
+        )
+        st.caption("了解更多此網站的架構")
+        st.sidebar.page_link("pages/knowledge_factory.py", label="Chasing Great Data Engineering", icon="🏭")
     return None
 
 
