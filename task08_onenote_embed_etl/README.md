@@ -30,14 +30,14 @@
 
 ```mermaid
 flowchart LR
-    E[Extract<br/>CDC 機制挑選筆記 + 下載 archived markdown 內文與圖片] --> T[Transform<br/>切塊 + 多模態向量化] --> L[Load<br/>寫入向量 +  更新向量化進度]
-    M[(Collection<br/>`onenote_note_metadata`)] -. 讀待尚未被向量化的筆記清單 .-> E
-    Arch[GCS<br/>`archived-notes/`] -. 內文與引用的圖片 .-> T
+    E[Extract<br/>gate 機制挑選筆記 + 下載 archived markdown 內文與圖片] --> T[Transform<br/>切塊 + 多模態向量化] --> L[Load<br/>寫入向量 +  更新向量化進度]
+    M[(Collection<br/>`onenote_note_metadata`)] -. 挑出尚未被向量化的歸檔筆記 .-> E
+    Arch[GCS<br/>bucket `onenote-vaults`<br/>`archived-notes/`] -. 內文與引用的圖片 .-> T
     L -. 寫入向量 .-> V[(Collection<br/>`note_vectors_multimodal`)]
     L -. 更新向量化進度 .-> M
 ```
 
-- **Extract**：以 CDC 機制下載筆記內文。
+- **Extract**：以 gate 機制挑出待向量化的筆記後下載內文。
     - 從 `onenote_note_metadata` 挑出狀態為 *已歸檔*、但向量化狀態標示為 *未完成* 的筆記，依其歸檔路徑從 GCS 的`archived-notes/` 下載筆記內文 (markdown file)。
 - **Transform**：以送入 embedding model 為導向進行內文清理出 chunks 後向量化。
     - 把內文兩段式切塊，先依 markdown 標題階層切、再依文字長度切。
@@ -45,8 +45,8 @@ flowchart LR
 
 - **Load**：以 'delete 後 insert' 模式將 embed 更新至向量資料庫。再回頭 update 筆記向量化完成狀態。
     - 對每份筆記，先刪去它在 `note_vectors_multimodal` 的舊向量、再插入新向量 (以避免同名筆記在重複執行本 ETL 後，殘留前次執行留下的 chunks，造成數據孤兒)。
-    - 採用 'compare-and-swap' 策略，比對這次下載的筆記 hash 是否與 `onenote_note_metadata` 登記的 hash 相符，相符則該筆記在 `onenote_note_metadata` 的向量化狀態更新為 '已完成'。
-        > 若您的 task07 silver 與 task08 任務批次執行時間沒有重疊，或是沒有其他 tasks 在 task08 執行期間可能覆蓋 GCS 上的筆記，則 'compare-and-swap' 的執行結果通常都是導向為 '已完成'。
+    - 更新向量化狀態時採用 compare-and-swap（先比較、條件成立才交換寫入，以下簡稱 CAS）：把「檢查」與「寫入」合併成同一個資料庫操作，只有在檢查條件當下全部成立才寫得進去，避免發生 race condition 導致資料血緣不一致問題。此處要同時成立的條件有三點：用 `archived_md_path` 這個欄位找到 `onenote_note_metadata` 裡要更新的那一筆、該筆的向量化狀態仍是「*未完成*」、其 `md_md5_hash` 欄位值仍等於本次從 GCS 下載下來做向量化的那份筆記之 md5 hash。三項齊備才把向量化狀態改為「*已完成*」。
+        > 若您的 task07 silver 與 task08 任務批次執行時間沒有重疊，或是沒有其他 tasks 在 task08 執行期間可能覆蓋 GCS 上的筆記，則 CAS 的執行結果通常都是導向為 '已完成'。
 
 ---
 
@@ -96,7 +96,7 @@ task08_onenote_embed_etl/
 | :--- | :--- | :--- | :--- |
 | `_id` | MongoDB 自動生成的唯一識別碼 (Primary key) | ObjectId | MongoDB 自動產生 |
 | `md_path` | 筆記歸檔在 GCS 的路徑 | String | `onenote_note_metadata` 的 `archived_md_path` |
-| `file_name` | 筆記檔名 | String | 歸檔 md 檔名 |
+| `file_name` | OneNote 頁面標題 | String | `onenote_note_metadata` 的 `page_title` |
 | `chunk_index` | 此 chunk 在筆記中的序號 | Integer | Transform 向量化產出 |
 | `chunk_total` | 該筆記的總 chunk 數 | Integer | Transform 向量化產出 |
 | `tags` | 筆記標籤 | Array (String) | `onenote_note_metadata` 的 `md_frontmatter.tags` |

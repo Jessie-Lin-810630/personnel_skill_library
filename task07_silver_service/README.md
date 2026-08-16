@@ -31,7 +31,7 @@
 
 # DataFlow
 
-Silver 服務是**純 Lazy Loading**，它不被設計為定時觸發的 ETL 批次任務，而是於前端網頁開放按鈕點選送出請求給 Silver 服務端口。當審查頁 POST 一個 `{page_id, dt, trigger}`，Silver 服務會依序執行：MongoDB Atlas 檢查快取資料、無快取資料預存，打 LLM 語意增強擴寫筆記文本、把 enriched 文本以 Markdown 檔存到 GCS 層 、回頭更新 metadata，標記檔案存放路徑以及該 enriched 文本尚待審查。
+Silver 服務是**純 Lazy Loading**，它不被設計為定時觸發的 ETL 批次任務，而是於前端網頁開放按鈕點選送出請求給 Silver 服務端口。當審查頁 POST 一個 `{page_id, dt, trigger}`，Silver 服務會先從 MongoDB Atlas 取出該版本的中繼資料，確認生成額度尚有剩餘，接著查看內容相同的筆記是否已經生成過 Markdown。若已經生成過就沿用那一份，不再花費 token；若還沒有，才下載該版本的 HTML 原始碼與內嵌圖片，送多模態 LLM 語意增強擴寫筆記文本，把 enriched 文本以 Markdown 檔存到 GCS 層，最後回頭更新 metadata，標記檔案存放路徑以及該 enriched 文本尚待審查。
 
 ```mermaid
 flowchart LR
@@ -45,11 +45,11 @@ flowchart LR
 
 - **端點**：接收 request.post 後，解析request body 的 `page_id`、`dt`、`trigger`，判斷是否要回覆 400、404、500 或 200。
 - **Transform（當回應 200 時會執行）**：
-    - 檢查快取: 先讀該版本筆記在 `onenote_note_metadata` 是否指向一份之前生成過的 Markdown，若無則會進入 LLM call 步驟，若有則不花費 token 、沿用該 Markdown 內文回傳給前端檢視內文。
-    - 以斷路器檢查 LLM call 額度剩餘量。
+    - 檢查剩餘額度。
+    - 檢查快取: 以該版本 HTML 原始碼的雜湊值，在 `onenote_note_metadata` 跨版本尋找是否已有一份生成過的 Markdown。找得到就不花費 token、沿用該 Markdown 內文回傳給前端檢視內文；找不到才進入 LLM call 步驟。
     - 有剩餘額度，將從 GCS 下載 HTML、把 tag `<img>` 轉成 Markdown 圖片語法並取純文字，連同圖片的 GCS URI 一起送入多模態 LLM，要求模型實際判讀每張圖並回傳結構化 JSON。
     - 剖析 JSON 取出 enriched 文本。
-    > 生成額度預設 2 次/per-note。
+    > 生成額度預設 2 次，以 HTML 原始碼的雜湊值計數，於 `trigger` 為 `regenerate` 時把關。
 - **Load**：將生成之文本寫到 GCS `processed-notes/.../dt=<對齊 Bronze 執行日>/<page>.md`，然後更新 MongoDB Atlas。
     - 更新中繼資料時，upsert 到 collection `onenote_note_metadata`。
     - 每次呼叫都 insert 一筆 enrichment log 到 collection `multimodal_llm_enrichment_logs`。
@@ -125,7 +125,7 @@ task07_silver_service/
 | `error_msg` | 錯誤訊息（成功為 null） | String / null | `t_enrich_html_to_markdown.py` 的 `t_enrich_html_to_markdown()` |
 | `updated_at` | 更新時間 | Date (ISO 8601) | `task07_common/audit_log.py` 的 `upsert_version_meta()` |
 
-> status: LLM call 執行順利時，status 將會從 `bronze_stored` 變化成 `fetched`、然後`pending_review`。若失敗，則從 `bronze_stored` 變化成 `fetched`，最後 `fetched_failed`。此欄位在 Gold 服務執行時，status 將覆蓋上新的值。
+> status: LLM call 執行順利時，status 將會從 `bronze_stored` 變化成 `fetched`、然後`pending_review`。若失敗，則從 `bronze_stored` 變化成 `fetched`，最後 `enrich_failed`。此欄位在 Gold 服務執行時，status 將覆蓋上新的值。
 
 > Collection 1 & 2 實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 

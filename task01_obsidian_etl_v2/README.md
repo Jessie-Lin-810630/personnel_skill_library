@@ -46,7 +46,7 @@ flowchart LR
         - 將下載之筆記內文內文錯位的 frontmatter 復歸正確位置。
         - 分類出 note type、topic、note tags、created date 等，並解析 wiki link 語法萃取出引用的圖片名稱與連結。這些是筆記的資料血緣、亦是資料特徵。
     - **Load**：將乾淨的筆記內文連同引用的圖片歸檔後、整併資料血緣資料列寫入 database。
-        - 寫入新的 .md 與檔案到 GCS 另一層 `archive-notes/` 與 `raw-notes/` 的檔案區隔。
+        - 寫入新的 .md 與檔案到 GCS 另一層 `archived-notes/` 與 `raw-notes/` 的檔案區隔。
         - 寫入後同時取回新檔案的 md5 hash 值，將 transform 階段分類出的 note type、topic、note tags、created date 等資料血緣，以 upsert 寫入 MongoDB Atlas `obsidian_note_metadata`，過程中以 `raw_md_path` 欄位為唯一鍵 (Upsert key) 執行 upsert。
         - 若寫入 GCS 失敗，亦會 upsert 狀態到 MongoDB Atlas `obsidian_note_metadata`，標記該筆記出現歸檔 error，詳見後方 [schema definition](#schema-of-collections-tables-in-database-of-mongodb-atlas) 以了解欄位定義。
         - **軟刪除判斷**：上述步驟皆針對已存在的檔案做更動，此步驟*額外針對在 GCS 'raw-notes/' 被刪去的筆記檔案、然而 database 內仍然紀錄著上一次的存取狀態* 的情境，在 `obsidian_note_metadata` 標記為 'deleted'，此 'deleted' 數值有助於 task06 v2 任務執行時能同步清除向量資料庫中過期的資料，進而避免檢索系統搜索到不存在的 grounding truth。
@@ -109,9 +109,9 @@ task01_obsidian_etl_v2/
 | `raw_md_path` | 原始筆記在 Bronze 層 GCS 的完整路徑（Upsert key） | String | Bronze bucket name + blob.name |
 | `raw_md_md5_hash` | 原始筆記在 GCS 的 MD5，**MD5 變更會觸發 CDC** | String | Bronze GCS blob metadata |
 | `raw_md_updated_at` | 原始筆記在 GCS 的最後修改時間 | Date (ISO 8601) | Bronze GCS blob metadata |
-| `archived_md_path` | 歸檔筆記在 Gold 層 GCS 的完整路徑 | String | Gold bucket name + blob.name |
-| `archived_md_md5_hash` | 歸檔筆記在 GCS 的 MD5，用於完整性校驗 | String | Gold GCS blob metadata |
-| `archived_at` | 歸檔到 Gold 層的時間 | Date (ISO 8601) | Load task 執行完成當下 |
+| `archived_md_path` | 歸檔筆記在 Silver 層 GCS 的完整路徑 | String | Silver bucket name + blob.name |
+| `archived_md_md5_hash` | 歸檔筆記在 GCS 的 MD5，用於完整性校驗 | String | Silver GCS blob metadata |
+| `archived_at` | 歸檔到 Silver 層的時間 | Date (ISO 8601) | Load task 執行完成當下 |
 | `archived_md_frontmatter` | 歸檔筆記的 Frontmatter（含下方四個子欄位） | Object | Transform 解析 markdown frontmatter |
 | `archived_md_frontmatter.tags` | 標籤列表，**影響 RAG 檢索品質** | Array (String) | markdown frontmatter |
 | `archived_md_frontmatter.date` | 筆記開始記錄的日期 | Date (ISO 8601) \| null | markdown frontmatter |
@@ -120,8 +120,8 @@ task01_obsidian_etl_v2/
 | `attached_images` | 筆記內圖片連結與 MD5 列表（含下方四個子欄位） | Array (Object) | GCS blob metadata + markdown body |
 | `attached_images.raw_image_path` | 歸檔前引用圖片的連結 | String | Bronze GCS blob.name |
 | `attached_images.raw_image_md5` | 歸檔前引用圖片的 MD5 | String | Bronze GCS blob metadata |
-| `attached_images.archived_image_path` | 歸檔後引用圖片的連結 | String | Gold GCS bucket name + blob.name |
-| `attached_images.archived_image_md5` | 歸檔後引用圖片的 MD5 | String | Gold GCS blob metadata |
+| `attached_images.archived_image_path` | 歸檔後引用圖片的連結 | String | Silver GCS bucket name + blob.name |
+| `attached_images.archived_image_md5` | 歸檔後引用圖片的 MD5 | String | Silver GCS blob metadata |
 | `note_user_id` | 筆記使用者 id | String | GCS blob name 解析 |
 | `notebook` | 筆記本名稱 | String | GCS blob name 解析 |
 | `section` | 分類區段（子目錄名稱） | String | Bronze GCS blob.name 解析 |

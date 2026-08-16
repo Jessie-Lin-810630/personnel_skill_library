@@ -9,9 +9,9 @@
 
 # Purpose
 
-- 從 Microsoft OneNote API 下載每一頁筆記的原文內嵌圖片。以 HTML 檔存放原文、以 PNG 檔存放圖片到 GCS 資料湖，其中，以日期分區辨識不同時間點下載的歷史版本。
+- 從 Microsoft OneNote API 下載每一頁筆記的原文與內嵌圖片。將內嵌圖片標籤改寫後另存 HTML 檔到 GCS、圖檔亦以 PNG 檔存放到 GCS 資料湖，其中，以日期分區辨識不同時間點下載的歷史版本。
 - 把每個版本的中繼資料、資料血緣，以及每次 API 請求的稽核紀錄，寫入 MongoDB Atlas。
-- 本層只做到下載、存檔與資料血緣的開端，接手的下游[Silver 服務](../task07_silver_service/README.md)負責透過 LLM 將筆記原文語意增強擴寫。
+- 本層只做到下載、存檔與資料血緣的開端，接手的下游 [Silver 服務](../task07_silver_service/README.md)負責透過 LLM 將筆記原文語意增強擴寫。
 
 
 # Table of Contents
@@ -27,7 +27,7 @@
 
 # DataFlow
 
-從 Microsoft OneNote graph API 經過使用者 delegated authorization 獲取每一頁筆記的原文與內嵌圖片後，以 capture data change 設計模式判斷是否需要下載，下載時以 `dt=` 日期分區寫進 GCS 資料湖，其中筆記原始碼以 HTML 檔寫入、圖片以 PNG 檔寫入。過程中，API 請求與筆記的中繼資料、資料特徵、資料血緣適時寫入 MongoDB Atlas。
+從 Microsoft OneNote graph API 經過使用者 delegated authorization 獲取每一頁筆記的原文與內嵌圖片後，以 capture data change 設計模式判斷是否上傳新版本到 GCS，上傳時以 `dt=` 日期分區寫進 GCS 資料湖，其中筆記原始碼以 HTML 檔寫入、圖片以 PNG 檔寫入。過程中，API 請求與筆記的中繼資料、資料特徵、資料血緣適時寫入 MongoDB Atlas。
 
 ```mermaid
 flowchart LR

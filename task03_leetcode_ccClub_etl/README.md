@@ -26,31 +26,34 @@
 
 # DataFlow
 
-task03 是兩條各自獨立的 pipeline（LeetCode 與 ccClub），最後把摘要寫進**同一個** `ccClub&leetcode_summary`（各自 partial update、欄位互不覆蓋）。
+task03 由兩條各自獨立的 pipeline 組成，一條抓 LeetCode、一條抓 ccClub，兩者互不依賴，執行順序也不影響結果。每條 pipeline 各自取回本人已解的題目與難度統計，清洗成每題一筆的文檔後寫進自己的 collection。兩條 pipeline 最後都會把摘要寫進同一份 `ccClub&leetcode_summary`，但各自只更新屬於自己平台的那幾個欄位，因此同一天先跑哪一條都不會把另一條的成果清掉。
 
 ```mermaid
 flowchart LR
-    L0[LeetCode GraphQL API] --> LE[Extract<br/>e_query_leetcode_graphql.py]
-    LE --> LT[Transform<br/>t_transform_leetcode.py]
-    LT --> LL[Load<br/>l_load_leetcode_doc_to_mongodb.py]
+    L0[LeetCode GraphQL API] --> LE[Extract<br/>查詢已解題清單與各難度已解題數]
+    LE --> LT[Transform<br/>攤平巢狀欄位並彙總 LeetCode 側摘要]
+    LT --> LL[Load<br/>以唯一鍵 upsert 題目文檔與摘要欄位]
 
-    C0[ccClub REST API] --> CE[Extract<br/>e_crawler_ccClub.py]
-    CE --> CT[Transform<br/>t_transform_ccClub.py]
-    CT --> CL[Load<br/>l_load_ccClub_doc_to_mongodb.py]
+    C0[ccClub REST API] --> CE[Extract<br/>登入後讀已解題清單並逐題補齊題目細節]
+    CE --> CT[Transform<br/>組成題目文檔並彙總 ccClub 側摘要]
+    CT --> CL[Load<br/>以唯一鍵 upsert 題目文檔與摘要欄位]
 
-    LL -. 寫入 .-> M1[(solved_problems_on_leetcode)]
-    CL -. 寫入 .-> M2[(solved_problems_on_ccClub)]
-    LL -. 寫入 .-> M3[(ccClub&leetcode_summary)]
-    CL -. 寫入 .-> M3
+    LL -. 每題一筆文檔 .-> M1[(Collection<br/>`solved_problems_on_leetcode`)]
+    CL -. 每題一筆文檔 .-> M2[(Collection<br/>`solved_problems_on_ccClub`)]
+    LL -. LeetCode 側摘要欄位 .-> M3[(Collection<br/>`ccClub&leetcode_summary`)]
+    CL -. ccClub 側摘要欄位 .-> M3
 ```
 
 - **Extract**：所有跟 LeetCode / ccClub 溝通的邏輯都在這裡，含認證、分頁與逐題補資料。
-    - LeetCode：以兩支 GraphQL query 抓「已解題清單」與「各難度已解題數」；已解題清單以單次請求抓取（`skip=0, limit=100`，未分頁、上限 100 題）；cookie 過期防呆。
-    - ccClub：以 `requests.Session` 帳密登入並取得 rotate 後的 csrftoken；逐題呼叫 `GET /api/problem?problem_id={id}` 補齊 topic 與 difficulty，每題間隔 0.3 秒 throttle 保護 server。
+    - LeetCode：以兩支 GraphQL query 抓「已解題清單」與「各難度已解題數」；已解題清單以單次請求抓取（`skip=0, limit=100`，未分頁、上限 100 題）。
+        - cookie 過期防呆：回應裡若連題目總數都讀不到，代表查詢語句或 cookie 有問題，此時記一筆 error 並回傳空清單，讓下游知道這輪沒有資料可用。若題目總數與題目清單雙雙為空，則是 cookie 過期最典型的樣子，此時記一筆 warning 提醒您回頭更新 cookie。
+    - ccClub：以 `requests.Session` 帳密登入並取得 rotate 後的 csrftoken；先從 `GET /api/profile` 讀出 ACM 與 OI 兩類的已解題 id 清單，再依這份清單逐題呼叫 `GET /api/problem?problem_id={id}` 補齊 topic 與 difficulty，每題間隔 0.3 秒 throttle 保護 server。
 - **Transform**：把 API 回來的原始資料清洗成乾淨的題目文檔，並統計出摘要。
-    - LeetCode：攤平 GraphQL 巢狀欄位與統計各 difficulty 題數。
+    - LeetCode：攤平 GraphQL 巢狀欄位，並把 Extract 取回的各難度已解題數原樣收進摘要。
     - ccClub：difficulty 欄位值標準化。
-- **Load**： upsert 寫入 MongoDB。
+- **Load**： upsert 寫入 MongoDB，支援冪等重跑。
+    - Collection `solved_problems_on_leetcode` 以 `frontendQuestionId` 為唯一鍵；`solved_problems_on_ccClub` 以 `problem_id` 為唯一鍵，兩者都以批次寫入送出。
+    - Collection `ccClub&leetcode_summary` 以 `snapshot_date` 為唯一鍵，該欄位只記到日、格式為 `YYYY-mm-dd`，因此快照日當天僅留存最後一筆。兩條 pipeline 都寫這份文件，但各自只以 `$set` 更新屬於自己平台的那幾個欄位、不整份取代，所以同一天由另一條 pipeline 寫入的欄位不會被清掉，先後順序也不影響結果。
 
 
 # Project Structures
@@ -157,6 +160,8 @@ task03_leetcode_ccClub_etl/
 | `problemDifficultyOnCCclub`      | ccClub 各難度百分比      | Array (Object)                      | 從 collection `solved_problems_on_ccClub` 計算         |
 | `topicsPercentOnCCclub`          | ccClub 各主題百分比      | Object (Embedded Float)             | 從 collection `solved_problems_on_ccClub` 計算         |
 | `topicsPercentOnLeetcode`        | LeetCode 各主題百分比    | Object (Embedded Float)             | 從 collection `solved_problems_on_leetcode` 計算       |
+
+> **`topicsPercentOnLeetcode` 與 `topicsPercentOnCCclub` 欄位的分母是「主題標籤出現的總次數」，不是題數。** 一題掛多個標籤時每個標籤各計一次，因此所有主題標籤的百分比加總為 100。
 
 - example of a row in JSON
 

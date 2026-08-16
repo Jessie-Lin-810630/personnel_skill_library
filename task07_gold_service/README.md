@@ -46,10 +46,10 @@ flowchart LR
 - **端點**：接收 request.POST 後，解析request body 的 `page_id`、`dt`、`role`、`action`判斷是否要回覆 400、404、409、422、500 或 200。
 - **Load**：
     - **approve**：
-        - 先把關是否早有別的版本被歸檔，若有回 409 拒絕 approve。
+        - 先把關當次所歸檔的版本，在眾多已歸檔的版本中，是否坐落於最新的 `dt` 日期，若不是新的日期，代表可能審閱到過時版本，不允許歸檔，回 409 拒絕 approve。
         - 若無，從 GCS 複製 Markdown、圖片到 `archived-notes/`。
         - 以 `(page_id, dt)` 複合 upsert key，upsert metadata，更新文件的生命週期狀態與 data lineage 欄位。
-        - 退役同名筆記頁面的其他待審版本：將文件生命週期狀態標示為 `overwritten`或 `rejected`。
+        - 退役同名筆記頁面的其他待審版本：將文件審閱狀態標示為 `overwritten`或 `rejected`。
         > 在此設計下，您只能允許同名筆記一次僅歸檔一個版本，保證文件在向量資料庫中指向唯一真實。除非您於歸檔後，線下使用 OneNote APP 更新了該筆記內文，此時程式會在下一次執行時，將該筆記視為必須啟動下一輪生命週期，您就可再次做第二次歸檔。
     - **reject**：不對 GCS 做任何動作，只 upsert metadata。
 
