@@ -1,13 +1,14 @@
-"""從 onenote_note_metadata 挑待向量化版本（gate）、並從 archived-notes 取歸檔 md 內文。
+"""從 onenote_note_metadata 查詢待向量化筆記作為 gating，然後從 GCS 的 archived-notes/ 取歸檔 md 內文。
 
-查 status=archived 且 embedded_status=false 的版本 → 回傳含 archived md 路徑/md5/圖片血緣的清單
-→ 依 md_archive_path 從 onenote-vaults/archived-notes/ 下載 md body 清洗。此為 embedding 的 ingestion 端。
-gate 邏輯沿用 task06_obsidian_embed_etl_v2（copy 而非 import，讓 obsidian/onenote 兩來源各自演化）。
+1. 查 status=archived 且 embedded_status=false 的版本，回傳含 archived md 路徑、md5 與圖片血緣的清單。
+2. 依 md_archive_path 從 onenote-vaults/archived-notes/ 下載 md 內文 (markdown body) 後做清洗。
+
+gate 的程式邏輯由 task06_obsidian_embed_etl_v2 copy 過來。
 
 Required .env keys:
     GCS_USER_CREDENTIALS             (On-premise only) path to GCS service account JSON (for download archived md).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string.
-    MONGO_DB_NAME                    Target database name (skill_dashboard).
+    MONGO_DB_NAME                    Target database name (defaults to skill_dashboard).
 
 Optional .env keys:
     ONENOTE_GCS_BUCKET               GCS data lake bucket (defaults to onenote-vaults).

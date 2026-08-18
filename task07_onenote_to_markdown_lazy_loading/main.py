@@ -1,8 +1,12 @@
 """Bronze 層 ETL 入口：每週腳本只做到 Bronze，完全不呼叫 LLM。
 
-執行流程：下載 html → 算 hash → 比對 → 有變動才以 dt= 分區寫 GCS →
-upsert to MongoDB onenote_note_metadata（status=bronze_stored）。
-Silver enrichment 不在此執行，改由 UI on-demand 觸發（見 task07_silver_service)
+執行流程：
+    1. 下載 OneNote 頁面 html，算出 hash 後與既有版本比對。
+    2. 有變動才以 dt= 分區寫入 GCS。
+    3. upsert to MongoDB onenote_note_metadata（status=bronze_stored）。
+
+Silver enrichment 不在此執行，改由 UI on-demand 觸發（見 task07_silver_service）。
+
 Usage:
     poetry run python -m task07_onenote_to_markdown_lazy_loading.main
 

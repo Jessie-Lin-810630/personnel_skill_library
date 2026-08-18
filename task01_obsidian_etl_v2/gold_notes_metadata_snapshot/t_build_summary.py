@@ -1,8 +1,10 @@
 """對 obsidian_note_metadata 或 onenote_note_metadata 的現況，盤出當日快照所需的統計原料。
 
-只計 status=archived 與被退件（review_closed + rejected）兩桶 → 逐筆累加 tag/topic/type 分佈與
-已向量化數 → 兩表 frontmatter 欄名不同（obsidian 用 archived_md_frontmatter、onenote 用 md_frontmatter）
-在此分岔 → 回傳含 snapshot_source 與 summary 的 dict，交 upsert_summary 合併寫入。
+1. 只計 status=archived 與被退件（review_closed + rejected）這兩類筆記，其餘不納入統計原料。
+2. 逐筆累加 tag、topic、type 的分佈與已向量化數。
+3. 兩張表的 frontmatter 欄名不同（obsidian 用 archived_md_frontmatter、onenote 用 md_frontmatter），
+   取值在此分岔。
+4. 回傳含 snapshot_source 與 summary 的 dict，交 upsert_summary 合併寫入。
 
 Required .env keys:
     MONGO_ALTAS_URI   MongoDB Atlas connection string.

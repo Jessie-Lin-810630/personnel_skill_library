@@ -1,7 +1,11 @@
 """主題分類工具：借用 task01 的 TOPIC_KEYWORDS 與推導邏輯，供 task07 三服務共用。
 
-從 tags 與檔名/標題比對 TOPIC_KEYWORDS 推斷 topic：把 tags 轉小寫並補上檔名一起當比對目標 →
-依鍵順序逐一比對，任一關鍵字命中就回該 topic → 全不中回 other。分類邏輯 copy 自
+從 tags 與檔名/標題比對 TOPIC_KEYWORDS 推斷 topic：
+1. 把 tags 轉小寫並補上檔名，一起當作比對目標。
+2. 依 TOPIC_KEYWORDS 的鍵順序逐一比對，任一關鍵字命中就回該 topic。
+3. 全部關鍵字都沒命中時回 other。
+
+分類邏輯 copy 自
 task01_obsidian_etl_v2/silver_transform_markdown/t_build_metadata_docs
 （copy 而非 import，讓 task01/task07 各自獨立演化），
 確保 onenote 與 obsidian 兩來源在同一份向量表下 topic 語意一致。

@@ -1,7 +1,10 @@
 """Silver 層 Load：把 on-demand enrich 產出的 md 寫入 GCS，並 upsert 版本到 metadata。
 
-執行流程：把 md 寫入 GCS processed_note（dt= 對齊 bronze 執行日）→
-upsert onenote_note_metadata（enriched_md_path、md_md5_hash、enriched_md_exported_at、status=pending_review）。
+執行流程：
+    1. 把 md 寫入 GCS processed_note（dt= 對齊 bronze 執行日）。
+    2. upsert onenote_note_metadata（enriched_md_path、md_md5_hash、enriched_md_exported_at、
+       status=pending_review）。
+
 由 t_enrich_html_to_markdown 在 cache miss 時呼叫。
 """
 

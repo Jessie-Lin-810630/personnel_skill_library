@@ -1,7 +1,9 @@
 """對 archived md body 做 chunking 與多模態 embedding，產出以 md_path（archived md 路徑）為 join 鍵的 vector docs。
 
-清理 Obsidian 特有語法 → 兩段式 chunking → 每 chunk 都送 text 與 圖片 uri 給多模態模型 gemini-embedding-2
-→ L2 normalize → 組 vector doc。
+1. 清理 Obsidian 特有語法。
+2. 對內文做兩段式 chunking。
+3. 每個 chunk 都把 text 與圖片 uri 送給多模態模型 gemini-embedding-2。
+4. 對回傳向量做 L2 normalize，再組成 vector doc。
 
 Required .env keys:
     AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.

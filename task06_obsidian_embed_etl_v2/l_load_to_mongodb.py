@@ -1,12 +1,13 @@
 """把向量本體載入目的地 note_vectors_multimodal，並消費軟刪除訊號 purge 對應向量。
 
-load_vectors_incremental_v2 對每份筆記先刪後插 note_vectors_multimodal、以 archived_md_md5_hash 守衛的 CAS
-翻 obsidian_note_metadata.embedded_status=true → purge_deleted_vectors 清 status=deleted 且已向量化者的
-向量後翻 embedded_status=false。
+1. 函式 load_vectors_incremental_v2 對每份筆記先刪後插 note_vectors_multimodal，
+   再以 archived_md_md5_hash 守衛的 CAS 把 obsidian_note_metadata.embedded_status 翻成 true。
+2. 函式 purge_deleted_vectors 消費軟刪除訊號，清掉 status=deleted 且已向量化筆記的向量本體，
+   再把 embedded_status 翻回 false。
 
 Required .env keys:
     MONGO_ALTAS_URI   MongoDB Atlas connection string.
-    MONGO_DB_NAME     Target database name (skill_dashboard).
+    MONGO_DB_NAME     Target database name (default to skill_dashboard).
 """
 
 from datetime import datetime, timezone

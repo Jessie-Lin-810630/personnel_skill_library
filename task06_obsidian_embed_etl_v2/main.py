@@ -1,14 +1,16 @@
 """task06 v2 入口：對 task01_v2 medallion 資料做增量 embedding 與軟刪除 purge。
 
-gate 讀 obsidian_note_metadata（status=archived AND embedded_status=false）→ 從 archived 層 chunk+embed →
-先刪後插 note_vectors_multimodal、CAS 翻 embedded_status → purge 軟刪除筆記的向量。
+1. gate 讀 obsidian_note_metadata，挑出 status=archived 且 embedded_status=false 的筆記。
+2. 讀 archived 層的內容做 chunking 與多模態 embedding。
+3. 先刪後插 note_vectors_multimodal，再以 CAS 把 embedded_status 翻成 true。
+4. purge 已被軟刪除筆記殘留的向量。
 
 Usage:
     poetry run python -m task06_obsidian_embed_etl_v2.main
 
 Required .env keys:
     MONGO_ALTAS_URI                   MongoDB Atlas connection string.
-    MONGO_DB_NAME                     Target database name (skill_dashboard).
+    MONGO_DB_NAME                     Target database name (default to skill_dashboard).
     GCS_USER_CREDENTIALS              (On-premise only) GCS service account JSON path.
     AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
     GCP_PROJECT_ID                    Agent Platform project.

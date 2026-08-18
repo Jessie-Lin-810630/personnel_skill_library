@@ -1,8 +1,11 @@
 """對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為 join 鍵的 vector docs。
 
-兩段式 chunking → 每 chunk 解析 markdown ![](_images/x.png) 圖片、以 basename 對上 attached_images
-的 archived_image_path、打 GCS 確認圖片仍存在 → 送 text 與圖片 uri 給多模態模型 gemini-embedding-2
-→ L2 normalize → 組 vector doc。
+1. 對內文做兩段式 chunking。
+2. 每個 chunk 解析 markdown ![](_images/x.png) 圖片，以 basename 對上 attached_images
+   的 archived_image_path，並打 GCS 確認圖片仍存在。
+3. 把 text 與圖片 uri 送給多模態模型 gemini-embedding-2。
+4. 對回傳向量做 L2 normalize，再組成 vector doc。
+
 chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy 而非 import，兩來源各自演化）；
 與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、
 data lineage 依據的欄位命名 md_path（存 archived md 路徑）。

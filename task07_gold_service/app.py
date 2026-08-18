@@ -1,13 +1,12 @@
 """Gold 層 Archive 端點：把 task07 lazy_loading 的核可後歸檔端點化。
 
 執行流程：
-    1. 接收 POST /archive 的 page_id + dt + role + action
-    2. Action 為 "approved"，呼叫 archive_note，內部流程為:
-    複製 md+png 到 archived-notes → upsert Collection onenote_note_metadata
-    → 回讀 archived md，萃取 frontmatter → upsert onenote_note_metadata
-    3. Action 為 "rejected"，呼叫 reject_note，內部流程為:
-    upsert Collection onenote_note_metadata
-    → 讀 rejected md，萃取 md_frontmatter → upsert onenote_note_metadata
+    1. 接收 POST /archive 的 page_id + dt + role + action。
+    2. Action 為 "approved" 時呼叫 archive_note，其內部先複製 md 與 png 到 archived-notes、
+       upsert Collection onenote_note_metadata，最後回讀 archived md 萃取 frontmatter 後再次
+       upsert onenote_note_metadata。
+    3. Action 為 "rejected" 時呼叫 reject_note，其內部先 upsert Collection onenote_note_metadata，
+       再讀 rejected md 萃取 md_frontmatter 後再次 upsert onenote_note_metadata。
     4. Streamlit 審查頁維持唯讀，只透過此端點觸發。
 
 Usage:

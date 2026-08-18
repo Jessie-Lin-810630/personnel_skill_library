@@ -1,11 +1,12 @@
-"""Silver 層 enrich 端點：把 task07 lazy_loading 的 on-demand enrichment 服務本體端點化。
+"""Silver 層 enrich 端點：把 on-demand enrichment 服務本體端點化。
 
 執行流程：
-    1. 接收 POST /enrich 的 page_id + dt + trigger
-    → 呼叫 t_enrich_html_to_markdown 對該版本做 on-demand enrichment，
-    2. enrichment 內部流程為查快取 → 必要時打 LLM → 寫 md 到 GCS processed-notes
-    → upsert Collection onenote_note_metadata → 把回傳 dict JSON 化。
-    3. Streamlit 審查頁維持對 GCS 唯讀，無權呼叫 ETL 對 GCS 寫入，只能透過此端點觸發 enrich。
+    1. 接收 POST /enrich 的 page_id、dt 與 trigger，呼叫 t_enrich_html_to_markdown 對該版本做
+       on-demand enrichment。
+    2. enrichment 觸發後內部先從 Collection onenote_note_metadata 查快取，未命中快取才允許打 LLM。
+    3. 接著 LLM 輸出的 enriched markdown 寫到 GCS processed-notes/。
+    4. 再 upsert Collection onenote_note_metadata，最後回傳端點回應 (JSON 化的 python dict)。
+    5. Streamlit 審查頁維持對 GCS 唯讀，無權呼叫 ETL 對 GCS 寫入，只能透過此端點觸發 enrich。
 
 Usage:
     poetry run python -m task07_silver_service.app
@@ -21,7 +22,7 @@ Required .env keys:
     ENVIRONMENT                      Deploymeny environment. Either of local, dev or prod.
 
 Optional .env keys:
-    ONENOTE_GCS_BUCKET               GCS data lake bucket (defaults to onenote-vaults).
+    ONENOTE_GCS_BUCKET               GCS data lake bucket (default to onenote-vaults).
 """
 
 from dotenv import load_dotenv

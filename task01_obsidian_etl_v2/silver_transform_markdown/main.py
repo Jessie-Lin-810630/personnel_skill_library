@@ -1,4 +1,4 @@
-"""task01_v2 Silver 層入口：CDC gate 挑變更檔 → 清洗 → 歸檔 GCS → upsert metadata → 軟刪除。
+"""task01_v2 Silver 層入口，以 CDC 挑出變更的筆記，清洗歸檔到 GCS 並更新 metadata。
 
 1. 掃描 GCS 的 gs://<bucket>/raw-notes/，取得目標 .md 檔與圖片檔的 md5 hash，
 2. 再從 MongoDB 撈既有 md5 hash，
@@ -7,7 +7,7 @@
 再 upsert .md 的 metadata 到 MongoDB；單筆清/歸檔失敗，都記 error 後略過，不中斷函式。
 5. 對 gs://<bucket>/raw-notes/ 已消失的筆記做軟刪除。
 
-本層不含 Gold 快照（見 gold_notes_metadata_snapshot）；db 與 bucket_name 由頂層 main 傳入。
+db 與 bucket_name 由頂層 main 傳入，不是這支 main 傳入。
 
 Required .env keys:
     MONGO_ALTAS_URI                 MongoDB Atlas connection string.

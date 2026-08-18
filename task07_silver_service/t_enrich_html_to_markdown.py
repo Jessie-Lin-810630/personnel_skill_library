@@ -1,9 +1,11 @@
-"""Silver 層 Transform：純 Lazy Loading，提供 t_enrich_html_to_markdown 供 UI on-demand 呼叫。
+"""Silver 層 Transform：供 flask app on-demand 呼叫。
 
-執行流程：UI 呼叫 t_enrich_html_to_markdown(page_id, dt) → 讀 Collection onenote_note_metadata
-取 html_hash → 查 html_hash 是否能快取到已存好的對應 md (命中則撈取既有 md 拋給前端、跳過 LLM call)
-→ 未命中則呼叫 LLM 重整 html 生成 md
-→ 存 md 到 GCS 在 upsert Collection onenote_note_metadata，更新 html note 的資料血緣。
+執行流程：
+    1. 從 UI 透過 flask app 呼叫 t_enrich_html_to_markdown(page_id, dt)，
+       讀 Collection onenote_note_metadata 取 html_hash。
+    2. 以 html_hash 查是否能快取到已存好的對應 md，命中則撈取既有 md 拋給前端、跳過 LLM call。
+    3. 未命中則呼叫 LLM 重整 html 生成 md。
+    4. 存 md 到 GCS，再 upsert Collection onenote_note_metadata，更新 html note 的資料血緣。
 
 設計要點：
 - 不在 ETL 主動執行；提供 t_enrich_html_to_markdown(page_id, dt) 函式供 UI on-demand 呼叫。
@@ -174,15 +176,14 @@ def _get_genai_client() -> genai.Client:
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
     # from google.oauth2.service_account import Credentials
     # json_path = os.getenv("AGENT_PLATFORM_USER_CREDENTIALS")
-    # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-    # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)
-
     # project = os.getenv("GCP_PROJECT_ID")
-    # if not project or not credentials:
+    # if not project or not json_path:
     #     raise EnvironmentError(
     #         "找不到 GCP_PROJECT_ID / AGENT_PLATFORM_USER_CREDENTIALS，請確認已設定在 .env 或 secret manager。"
     #     )
-    # return genai.Client(vertexai=True, project=project, location="us-central1", credentials=credentials)
+    # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)
+    # return genai.Client(vertexai=True, project=project, location="us", credentials=credentials)
 
     # Cloud run 跑下面區塊：
     project = os.getenv("GCP_PROJECT_ID")

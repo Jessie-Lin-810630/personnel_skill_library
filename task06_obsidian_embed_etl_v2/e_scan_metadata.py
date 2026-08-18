@@ -1,12 +1,12 @@
-"""從 obsidian_note_metadata 挑待向量化筆記（gate）、並從 archived-notes 取清洗後 md 內文。
+"""從 obsidian_note_metadata 查詢待向量化筆記作為 gating，然後從 GCS 的 archived-notes/ 取出清洗後的 md 內文。
 
-查 status=archived 且 embedded_status=false 的筆記 → 回傳含 archived 路徑/md5/圖片血緣的清單
-→ 依 archived_md_path 從 archived-notes/ 下載 md body 清洗。此為 embedding 的 ingestion 端。
+1. 查 status=archived 且 embedded_status=false 的筆記，回傳含 archived 路徑、md5 與圖片血緣的清單。
+2. 依 archived_md_path 從 archived-notes/ 下載 md 內文 (markdown body) 後做清洗。
 
 Required .env keys:
     GCS_USER_CREDENTIALS            (On-premise only) path to GCS service account JSON (for download md).
     MONGO_ALTAS_URI                  MongoDB Atlas connection string.
-    MONGO_DB_NAME                    Target database name (skill_dashboard).
+    MONGO_DB_NAME                    Target database name (default to skill_dashboard).
 """
 
 import frontmatter

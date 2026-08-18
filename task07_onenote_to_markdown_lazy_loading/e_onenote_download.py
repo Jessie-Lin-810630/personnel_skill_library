@@ -1,8 +1,11 @@
 """Bronze 層 Extract：下載 OneNote 頁面 html、比對 hash、有變動才分區寫入 GCS。
 
-執行流程：下載 OneNote 頁面 html → 算 html_sha_hash → 與 onenote_note_metadata 最新一筆 hash 比對 →
-有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata（status=bronze_stored、
-含 attached_images 圖片血緣與 topic 初判）。
+執行流程：
+    1. 下載 OneNote 頁面 html，算出 html_sha_hash。
+    2. 與 onenote_note_metadata 最新一筆 hash 比對，判斷這個版本有無變動。
+    3. 有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata
+       （status=bronze_stored、含 attached_images 圖片血緣與 topic 初判）。
+
 本層完全不呼叫 LLM；Silver enrichment 改由 UI on-demand 觸發。
 """
 
