@@ -811,7 +811,7 @@ def e_onenote_download() -> int:
         logger.warning("No notebooks selected. Exiting.")
         return 0
 
-    logger.info(f"Bronze layer: download from bucket={gcs.get_bucket_name()} with dt={dt}")
+    logger.info(f"Bronze layer: downloading to GCS bucket={gcs.get_bucket_name()} with dt={dt}")
     new_versions = download_notebooks(notebook_ids, headers, limiter, app, cache, dt)
     logger.success(f"Bronze layer: done — {new_versions} 個新版本寫入 GCS (其餘未變動筆記今日已跳過)")
     return new_versions
