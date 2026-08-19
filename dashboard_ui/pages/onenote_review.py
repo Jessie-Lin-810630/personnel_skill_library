@@ -27,7 +27,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
-from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages
+from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages, to_tpe_time_text
 from utils.ui_elements import color_map, render_side_bar
 
 load_dotenv()
@@ -413,7 +413,7 @@ status = version.get("status", "")
 is_version_archived = status == "archived"
 if is_version_archived:
     st.success(
-        f"✅ 此版本已於 {str(version.get('archived_at', ''))[:19]} 歸檔"
+        f"✅ 此版本已於 {to_tpe_time_text(version.get('archived_at', ''))} 歸檔"
         f"（{version.get('reviewed_by_role', '')}），唯讀。"
     )
 

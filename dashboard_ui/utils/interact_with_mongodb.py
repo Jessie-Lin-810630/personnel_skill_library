@@ -9,6 +9,8 @@ Required .env keys:
 """
 
 import os
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -569,3 +571,38 @@ def get_problem_features(db: Database, collection: str = "ccClub&leetcode_summar
         "ccClub-Python": data[0]["topicsPercentOnCCclub"],
         "snapshot_date": data[0]["snapshot_date"],
     }
+
+
+def to_tpe_time_text(value: object) -> str:
+    """把 MongoDB 取回的時間值換算成台北時間，並轉成秒級精度的顯示文字。
+
+    Note:
+        - 在 MongoClient 未開啟 tz_aware=True 的前提下，
+        `archived_at` 這類欄位讀回來是不保留時區的 datetime 物件，
+        故此處先補上 UTC 時刻後轉成台北時間。
+        - 更好的預防性寫法是在初始化 MongoClient 時加上 tz_aware=True, tzinfo=timezone.utc，
+        此函式就可以退居第二次防禦。
+
+    Args:
+        value: 時間欄位的原始值，可能是 datetime、ISO 格式字串或空值。
+
+    Returns:
+        str: 換算後的 "YYYY-MM-DD HH:MM:SS" 文字；無法解析時為該值的字串形式取前 19 字元。
+    """
+    dt_value = value
+    # 先字串轉 datetime 物件
+    if isinstance(dt_value, str):
+        try:
+            # 如果是 ISO8601 時間格式，會轉成功
+            dt_value = datetime.fromisoformat(dt_value)
+        except ValueError:
+            return dt_value[:19]
+    # 如不是字串、也不是 datetime，例如空值、自訂類別，只能直接 return 前 19 字元
+    elif not isinstance(dt_value, datetime):
+        return str(value)[:19]
+
+    # 確認 datetime 物件是否有設定時區過，沒有則宣告是 UTC 時間、不改動數字，才用 astimezone 轉時區
+    # 雲端容器多半預設 UTC，少了這句仍會轉對；本地機器時區非 UTC 時才會看到錯誤時刻
+    if dt_value.tzinfo is None:
+        dt_value = dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d %H:%M:%S")
