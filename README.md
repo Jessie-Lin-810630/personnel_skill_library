@@ -32,6 +32,7 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 **設計要點**：data pipelines 程式腳本大量使用資料的 hash 演算結果保證管道重試時的冪等性 (idempotency)，資料表設計則強調資料血緣的可追溯性，例如：主要文本的版本號碼、主要文本引用的圖片指向哪個路徑、清理完成的文本來自於哪份原始文本，從而**保護向量檢索庫的 grounding 指向 single truth、故障排查時也會比較精準。這亦是本專案所希望強調的資料治理品質**。最後，因應長文本的資料特性會使得輸入的 tokens 較多，data pipelines 亦謹慎採用**增量載入 (incremental load) 設計模式**，避免無意義的重複請求 APIs 端口。
 
 > [Demo Video for task01, task06, task07 and task08 on Youtube](https://youtu.be/U-Fm0WrquWU)
+
 > [Live Implementation (all tasks)](https://dashboard-ui-219985522999.asia-east1.run.app)
 
 ## Feature
