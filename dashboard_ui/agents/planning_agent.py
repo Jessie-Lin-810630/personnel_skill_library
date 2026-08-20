@@ -33,19 +33,20 @@ PLANNING_HISTORY_INTRO = "以下是這個 session 過去的學習地圖討論紀
 
 
 def generate_learning_map(query: str, session_id: str, planning_top_k: int = PlanningAgent.TOP_K) -> dict:
-    """學習地圖初版生成。
+    """生成學習地圖的初版內容。
+
+    先把使用者需求寫進對話紀錄，再以需求文字做向量檢索取得筆記脈絡，
+    連同脈絡與需求送進模型產出結構化的學習路徑，最後把回應與來源明細一併寫回對話紀錄。
+    檢索不到任何筆記時不呼叫模型，直接回覆請使用者補充現有技術背景。
 
     Args:
-        query:      使用者描述目標方向與現有背景，例如
-                    「我想從生技轉資料工程，目前熟 Python 與 SQL，請給我學習建議」
-        session_id: 目前對話的 uuid4
-        planning_top_k: vector_search 取回的 chunk 數量，預設使用 PlanningAgent.TOP_K = 10
+        query: 使用者描述的目標方向與現有背景，例如想從生技轉資料工程、目前熟悉 Python 與 SQL。
+        session_id: 目前對話的 uuid4。
+        planning_top_k: 向量檢索取回幾筆 chunk，預設取自 PlanningAgent.TOP_K。
 
     Returns:
-        {
-            "answer":  "結構化學習路徑文字",
-            "sources": [{"file_name": ..., "section": ..., "score": ...}, ...]
-        }
+        含 answer 與 sources 兩個鍵的 dict。answer 為結構化的學習路徑文字，
+        sources 為去重後的來源筆記清單；檢索不到筆記時 sources 為空 list。
     """
     client = get_genai_client()
 
@@ -128,18 +129,20 @@ def generate_learning_map(query: str, session_id: str, planning_top_k: int = Pla
 
 
 def refine_learning_map(followup_query: str, session_id: str, planning_top_k: int = PlanningAgent.TOP_K) -> dict:
-    """多輪追問調整。
+    """依使用者的追問調整既有的學習地圖。
+
+    與初版生成的差別在於這裡一定會帶入過去的規劃討論歷史，這正是多輪調整能接續前文的關鍵；
+    向量檢索也改以追問內容為查詢字串，讓取回的筆記更貼近這一輪想展開的主題。
+    這次檢索不到新筆記時仍會呼叫模型，改以提示語請模型依先前討論的脈絡作答。
 
     Args:
-        followup_query:      使用者的追問或調整需求，例如「把 MLOps 的部分展開」
-        session_id: 目前對話的 uuid4（沿用初版生成時的同一個 session）
-        planning_top_k: vector_search 取回的 chunk 數量，預設使用 PlanningAgent.TOP_K = 10
+        followup_query: 使用者的追問或調整需求，例如把某個階段的內容再展開。
+        session_id: 目前對話的 uuid4，沿用初版生成時的同一個 session。
+        planning_top_k: 向量檢索取回幾筆 chunk，預設取自 PlanningAgent.TOP_K。
 
     Returns:
-        {
-            "answer":  "調整後的學習路徑文字",
-            "sources": [{"file_name": ..., "section": ..., "score": ...}, ...]
-        }
+        含 answer 與 sources 兩個鍵的 dict。answer 為調整後的學習路徑文字，
+        sources 為去重後的來源筆記清單；這次沒有檢索到筆記時 sources 為空 list。
     """
     client = get_genai_client()
 

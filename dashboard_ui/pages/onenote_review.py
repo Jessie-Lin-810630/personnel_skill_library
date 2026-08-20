@@ -27,7 +27,7 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
-from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages
+from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages, to_tpe_time_text
 from utils.ui_elements import color_map, render_side_bar
 
 load_dotenv()
@@ -301,6 +301,14 @@ st.divider()
 
 @st.cache_data(ttl=60)
 def _load_versions() -> list[dict]:
+    """讀取所有待審閱的筆記版本並快取一分鐘，供三層下拉選單與版本切換使用。
+
+    快取時間刻意設短，因為審查動作會即時改變版本的可審閱狀態；
+    觸發生成或送出審核結果後也會主動清空快取，讓畫面立刻反映最新狀態。
+
+    Returns:
+        待審閱的筆記版本文件清單，依 html_downloaded_at 由新到舊排序；無資料時為空 list。
+    """
     db = get_db_atlas()
     return get_onenote_versioned_pages(db)
 
@@ -374,7 +382,14 @@ page_versions.sort(key=lambda v: str(v.get("html_downloaded_at", "")), reverse=T
 
 
 def _version_label(v: dict) -> str:
-    """圓鈕顯示文字：dt + 下載時間 + 是否已生成 md。"""
+    """組出版本切換選項的顯示文字，內容為版本日期加上生成狀態。
+
+    Args:
+        v: 單一筆記版本的 metadata 文件。
+
+    Returns:
+        str: 版本日期與生成狀態串接後的文字，尚未生成 Markdown 時另附觸發生成的提示。
+    """
     dt = v.get("dt", "?")
     mark = "✅ 已生成，可審閱" if v.get("enriched_md_path") else "🟠 尚未生成，切換版本後觸發生成即可開始審閱"
     return f"{dt}　{mark}"
@@ -398,7 +413,7 @@ status = version.get("status", "")
 is_version_archived = status == "archived"
 if is_version_archived:
     st.success(
-        f"✅ 此版本已於 {str(version.get('archived_at', ''))[:19]} 歸檔"
+        f"✅ 此版本已於 {to_tpe_time_text(version.get('archived_at', ''))} 歸檔"
         f"（{version.get('reviewed_by_role', '')}），唯讀。"
     )
 
@@ -416,7 +431,18 @@ if "guest_reviewed" not in st.session_state:
 
 
 def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
-    """POST Silver enrich 端點，回傳 (result_dict, error_msg)。"""
+    """呼叫 Silver enrich 端點，為當前選定的版本生成語意增強後的 Markdown。
+
+    請求會帶上 ID token，端點需驗證呼叫方身分。逾時上限設為 180 秒，因 LLM 生成耗時較長。
+    各類錯誤一律轉成可直接顯示給使用者的訊息回傳，不向上拋出例外，避免整頁中斷。
+
+    Args:
+        trigger: 觸發來源，區分是首次進入該版本自動觸發，還是使用者手動要求重新生成。
+
+    Returns:
+        端點回應內容與錯誤訊息組成的 tuple。成功時錯誤訊息為 None，
+        失敗時回應內容為 None、錯誤訊息說明失敗原因。
+    """
     if not SILVER_URL:
         return None, "SILVER_ENDPOINT_URL 未設定，無法呼叫 Silver 端點。"
 
@@ -446,7 +472,18 @@ def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
 
 
 def _trigger(trigger: str) -> None:
-    """呼叫端點、依結果更新 UI 狀態；成功產出 md 則清快取重載。"""
+    """觸發 Silver 端點生成 Markdown，並依回應結果更新畫面狀態。
+
+    三種失敗情形分別處理：呼叫失敗與 circuit breaker 冷卻中會把訊息記進 session state，
+    讓同一個版本在本次 session 不再自動重試；超出重新生成次數上限則只提示，不記錄。
+    生成成功時清空版本清單快取並重跑整頁，讓右側改為渲染新產出的 Markdown。
+
+    Args:
+        trigger: 觸發來源，區分是首次進入該版本自動觸發，還是使用者手動要求重新生成。
+
+    Returns:
+        None: 只更新畫面與 session state，不回傳值。
+    """
     with st.spinner("重新生成中，請稍後，Document Enrichment 進行中..."):
         data, err = _call_silver(trigger)
     if err:
@@ -494,13 +531,17 @@ img_prefix = html_uri.rsplit("/", 1)[0] if html_uri else ""
 
 
 def _flatten_onenote_html(html: str) -> str:
-    """從 OneNote html 中移除絕對定位。
+    """取出 OneNote 匯出 HTML 的 body 內層，並移除絕對定位與固定寬度。
 
-    _replace_images_in_html() 回傳值仍然是一份完整的 HTML 文件，但是因為
-    `<body>` 內層包了 `<div style="position:absolute...>` 絕對定位。
-    這會造成定位高度隨文件流而浮動，無法讓父層的整個白底區域高度固定下來，有時長有時短，
-    所以要取出 `<body>` 內層，並移除絕對定位。
+    OneNote 匯出的 HTML 會在 body 內層包一層絕對定位的區塊。
+    絕對定位的元素脫離正常文件流，撐不開父層高度，導致白底區塊的高度忽長忽短。
+    因此這裡改抽出 body 內層，並清掉絕對定位、位移座標與固定寬度三類樣式，讓內容回到正常文件流。
 
+    Args:
+        html: 已完成圖片內嵌的完整 HTML 文件字串。
+
+    Returns:
+        str: 可直接放進白底框架渲染的 HTML 片段；找不到 body 標籤時原樣回傳。
     """
     # 只取 body 內層
     m = re.search(r"<body[^>]*>(.*?)</body>", html, re.S | re.I)
@@ -514,7 +555,27 @@ def _flatten_onenote_html(html: str) -> str:
 
 
 def _replace_images_in_html(html: str) -> str:
+    """把 HTML 中指向圖片資料夾的相對路徑，替換成內嵌的 base64 圖片。
+
+    圖片實體存放在資料湖中該版本分區底下的圖片資料夾，瀏覽器無法直接取用，
+    因此逐一讀出並改以 data URI 內嵌。個別圖片讀取失敗時保留原始寫法，只讓該張圖顯示不出來。
+
+    Args:
+        html: 從資料湖讀出的原始 HTML 文件字串。
+
+    Returns:
+        str: 圖片來源已替換為 base64 data URI 的 HTML 字串。
+    """
+
     def repl(m):
+        """把單一個 HTML 圖片來源的比對結果，換成內嵌的 base64 圖片。
+
+        Args:
+            m: 正則的比對結果，第一組是圖片檔名。
+
+        Returns:
+            str: 改寫後的 src 屬性字串；該圖讀取失敗時原樣回傳比對到的內容。
+        """
         data_uri = read_image_base64_by_uri(f"{img_prefix}/_images/{m.group(1)}")
         return f'src="{data_uri}"' if data_uri else m.group(0)
 
@@ -522,7 +583,27 @@ def _replace_images_in_html(html: str) -> str:
 
 
 def _replace_images_in_md(md: str) -> str:
+    """把 Markdown 中指向圖片資料夾的相對路徑，替換成內嵌的 base64 圖片。
+
+    替換時保留原本的圖片替代文字。個別圖片讀取失敗時保留原始語法，只讓該張圖顯示不出來。
+
+    Args:
+        md: 從資料湖讀出的原始 Markdown 字串。
+
+    Returns:
+        str: 圖片來源已替換為 base64 data URI 的 Markdown 字串。
+    """
+
     def repl(m):
+        """把單一個 Markdown 圖片語法的比對結果，換成內嵌的 base64 圖片。
+
+        Args:
+            m: 正則的比對結果，第一組是替代文字、第二組是圖片檔名。
+
+        Returns:
+            str: 改寫後的 Markdown 圖片語法，替代文字保持不變；
+                該圖讀取失敗時原樣回傳比對到的內容。
+        """
         data_uri = read_image_base64_by_uri(f"{img_prefix}/_images/{m.group(2)}")
         return f"![{m.group(1)}]({data_uri})" if data_uri else m.group(0)
 
@@ -570,7 +651,19 @@ with col_md:
 
 
 def _call_gold(action: str) -> None:
-    """POST Gold 端點執行 approve 歸檔 / reject 標記；成功清快取重載。"""
+    """呼叫 Gold 端點送出審核結果，核可即歸檔，退件則標記為已退回。
+
+    訪客帳號僅供展示，這裡直接以提示訊息呈現操作成功的樣子，完全不呼叫端點，資料庫也不做任何寫入。
+    正式角色的請求會帶上 ID token 與當前登入角色，逾時上限設為 180 秒，因複製檔案到資料湖耗時較長。
+    各類錯誤一律直接顯示給使用者，不向上拋出例外。成功時清空版本清單快取並重跑整頁，
+    讓已處理的版本立即退出待審清單。
+
+    Args:
+        action: 審核結果，approved 代表核可歸檔，rejected 代表退件。
+
+    Returns:
+        None: 只更新畫面與遠端狀態，不回傳值。
+    """
     # Guest 為示範帳號：只呈現操作成功的表象，完全不呼叫 Gold 端點、後端 MongoDB 不做任何寫入
     if is_guest:
         # 記住此版本已操作 → 下方按鈕禁用；toast 可跨 rerun 顯示成功假象

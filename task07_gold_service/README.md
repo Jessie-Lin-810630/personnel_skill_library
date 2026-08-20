@@ -46,10 +46,10 @@ flowchart LR
 - **端點**：接收 request.POST 後，解析request body 的 `page_id`、`dt`、`role`、`action`判斷是否要回覆 400、404、409、422、500 或 200。
 - **Load**：
     - **approve**：
-        - 先把關是否早有別的版本被歸檔，若有回 409 拒絕 approve。
+        - 先把關當次所歸檔的版本，在眾多已歸檔的版本中，是否坐落於最新的 `dt` 日期，若不是新的日期，代表可能審閱到過時版本，不允許歸檔，回 409 拒絕 approve。
         - 若無，從 GCS 複製 Markdown、圖片到 `archived-notes/`。
-        - 以 `(page_id, dt)` 複合 upsert key，upsert metadata，更新文件的生命週期狀態與資料血緣欄位。
-        - 退役同名筆記頁面的其他待審版本：將文件生命週期狀態標示為 `overwritten`或 `rejected`。
+        - 以 `(page_id, dt)` 複合 upsert key，upsert metadata，更新文件的生命週期狀態與 data lineage 欄位。
+        - 退役同名筆記頁面的其他待審版本：將文件審閱狀態標示為 `overwritten`或 `rejected`。
         > 在此設計下，您只能允許同名筆記一次僅歸檔一個版本，保證文件在向量資料庫中指向唯一真實。除非您於歸檔後，線下使用 OneNote APP 更新了該筆記內文，此時程式會在下一次執行時，將該筆記視為必須啟動下一輪生命週期，您就可再次做第二次歸檔。
     - **reject**：不對 GCS 做任何動作，只 upsert metadata。
 
@@ -116,7 +116,7 @@ task07_gold_service/
 >(2) [由於一段時期同名筆記，只能擇一種版本歸檔](#dataflow)，故在同一時間被迫退役的版本，若其內容與 approve 版的內容完全相同，被迫退役版將會標上`status=review_closed`、`review_result=overwritten`。
 >(3) 內容不同且需要被迫退役者，將標上 `status=review_closed`、`review_result=rejected`。
 
-> Collection 與其他 tasks 的 collection 實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 與其他 tasks 的 collection 實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 # Data Source
 

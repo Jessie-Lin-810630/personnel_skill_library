@@ -23,6 +23,9 @@ BASE_URL = "https://api.github.com"  # 根據後綴字拼接出不同 endpoint U
 def get_headers(token: str, username: str) -> dict:
     """依 token 與 username 組出後續請求 GitHub API 共用的 headers。
 
+    Note:
+        - API 版本以 X-GitHub-Api-Version 寫死在回傳值裡，GitHub 日後淘汰該版本時要在這裡改。
+
     Args:
         token: GitHub personal access token。
         username: GitHub 帳號名稱，寫入 User-Agent。
@@ -39,17 +42,26 @@ def get_headers(token: str, username: str) -> dict:
 
 
 def _check_and_wait_rate_limit(response: requests.Response, rate_limit_buffer: int = 100) -> None:
-    """每收到 response 後用此函式檢查剩餘配額，若觸及緩衝值就主動 sleep 到 reset 時間點。
+    """每收到回應後檢查剩餘配額，若觸及緩衝值就主動暫停到配額重置的時間點。
 
-    先處理 retry-after（secondary rate limit），再依 x-ratelimit-remaining 與
-    x-ratelimit-reset 判斷是否要暫停。三個 rate limit header 的意義：
-      retry-after 為觸發 secondary rate limit 時要等的秒數，優先處理。
-      x-ratelimit-remaining 為這個小時內還剩幾次 request，即剩餘配額。
-      x-ratelimit-reset 為配額重置的 UTC epoch seconds。
+    先看 retry-after，有值就依它指定的秒數等待後結束；沒有才改看剩餘次數與重置時戳，
+    剩餘次數低於緩衝值時暫停到重置時間為止。
+
+    Note:
+        - 三個 header 各有意義：retry-after 是觸發 secondary rate limit 時 GitHub 指定要等的秒數，
+          優先處理；x-ratelimit-remaining 是這個小時內還剩幾次請求；x-ratelimit-reset 是配額重置的
+          UTC epoch 秒數。
+        - 部分 endpoint 不回傳後兩者，此時直接跳過檢查。
+        - 等待秒數多加 5 秒是安全邊際，因為本機時鐘與伺服器時鐘可能不同步、伺服器重置配額也可能延遲，
+          算出來的差值偏低估。
+        - 這支函式以阻塞方式等待，最長可能佔住整個執行緒將近一小時。
 
     Args:
         response: 剛拿到的 requests.Response，從其 header 讀配額資訊。
-        rate_limit_buffer: x-ratelimit-remaining 低於此緩衝值就暫停，預設 100 次。
+        rate_limit_buffer: 剩餘次數低於此緩衝值就暫停，預設 100 次。
+
+    Returns:
+        None: 只做等待，不回傳值，也不更動傳入的 response。
     """
     # 優先處理 retry-after（secondary rate limit 用）
     retry_after = response.headers.get("retry-after")
@@ -90,17 +102,30 @@ def _check_and_wait_rate_limit(response: requests.Response, rate_limit_buffer: i
 def _paginate(url: str, headers: dict, params: dict = None, *, timeout: int = 10) -> list[dict]:
     """通用分頁抓取器，逐頁抓完指定 endpoint 的所有結果。
 
-    每頁以 per_page=100 抓取以減少 request 次數，每次回應都檢查 rate limit，
-    遇 403 或 429 就等 300 秒重試，每頁最多重試 3 次，但如有連線層錯誤直接往外拋不重試。
+    每頁固定要 100 筆以減少請求次數，抓到空頁就停。每收到一次回應都檢查配額，
+    收到 403 或 429 時等 300 秒再試，同一頁最多試 3 次。
+
+    Note:
+        - 403 與 429 在這裡當成配額問題而重試，其餘非 2xx 一律往外拋，交給呼叫端決定怎麼處理，
+          因為同一個狀態碼在不同 endpoint 的意義不同，例如 409 在 commits 代表空 repo。
+        - 連線層錯誤與 JSON 解析失敗都不重試，直接往外拋。
+        - 3 次都沒拿到 200 時會拋出通用 Exception，而不是留著非 2xx 的回應往下走。
 
     Args:
         url: 要分頁抓取的 API endpoint。
         headers: 請求共用的 headers。
-        params: 額外的 query 參數，預設 None。
+        params: 額外的 query 參數，預設 None；傳入的字典會被就地加上分頁參數。
         timeout: 單次請求逾時秒數，預設 10。
 
     Returns:
-        所有頁面合併後的 list of dict。
+        所有頁面合併後的字典清單；endpoint 沒有任何結果時為空清單。
+
+    Raises:
+        Exception: 同一頁重試 3 次仍未取得 200 時拋出。
+        requests.HTTPError: 回應為 403 與 429 以外的非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
     """
     results = []
     params = params or {}
@@ -163,14 +188,20 @@ def _paginate(url: str, headers: dict, params: dict = None, *, timeout: int = 10
 def fetch_repos(headers: dict) -> list[dict]:
     """抓取使用者身為 owner 與 collaborator 的所有 repo。
 
-    以 endpoint /user/repos 搭配 type=all 一次涵蓋 owner、collaborator 與
-    organization_member，真正的 role 留待 transform 階段用 owner.login 判斷。
+    以 /user/repos 一次取回這個 token 能看到的全部 repo，不在請求階段區分身分。
+
+    Note:
+        - 該 endpoint 預設就涵蓋 owner、collaborator 與 organization_member 三種身分，
+          回應本身不標示是哪一種，真正的身分留待 build_repo_document 以 owner.login 判斷。
 
     Args:
         headers: 請求共用的 headers。
 
     Returns:
-        所有 repo 的 raw dict 清單。
+        所有 repo 的原始字典清單。
+
+    Raises:
+        Exception: 分頁抓取失敗時，由 _paginate 拋出的例外一律原樣往外拋。
     """
     url = f"{BASE_URL}/user/repos"
     all_repos = _paginate(url, headers)
@@ -181,6 +212,12 @@ def fetch_repos(headers: dict) -> list[dict]:
 def fetch_all_branches(owner: str, repo_name: str, headers: dict) -> list:
     """抓取單一 repo 的所有 branch 名稱。
 
+    分頁取回該 repo 的 branch 清單後，只留下每個 branch 的名稱。
+
+    Note:
+        - 請求失敗時只記一行帶狀態碼的訊息就原樣往外拋，不在這裡印 traceback，
+          以免同一個例外在各層重複記錄；完整 traceback 由 run_task02 最外層統一印出。
+
     Args:
         owner: repo 擁有者的 login 名稱。
         repo_name: repo 名稱。
@@ -188,6 +225,9 @@ def fetch_all_branches(owner: str, repo_name: str, headers: dict) -> list:
 
     Returns:
         該 repo 所有 branch 名稱的清單。
+
+    Raises:
+        requests.HTTPError: GitHub 回應非 2xx 時拋出。
     """
     url = f"{BASE_URL}/repos/{owner}/{repo_name}/branches"
     required_branches = []
@@ -206,7 +246,14 @@ def fetch_all_branches(owner: str, repo_name: str, headers: dict) -> list:
 def fetch_a_repo_commits(owner: str, repo_name: str, headers: dict, branches: list[str]) -> list[dict]:
     """逐 branch 抓取單一 repo 的所有 commits。
 
-    空 repo（沒有任何 commit）的 branch 會回傳 409，遇到時跳過並回傳空清單。
+    對每個 branch 各分頁抓一次，把結果合併成同一份清單。
+
+    Note:
+        - 沒有任何 commit 的 repo 會回應 409，此時記一筆 warning 後直接回空清單，不視為失敗；
+          由於空 repo 的每個 branch 都會是 409，這裡不繼續試其他 branch。
+        - 合併結果不去重，同一個 commit 若同時存在於多個 branch 會重複出現，
+          去重與篩選作者留在 build_repo_document 處理。
+        - 單次請求逾時放寬到 30 秒，因為 commit 歷史長的 repo 單頁回應較慢。
 
     Args:
         owner: repo 擁有者的 login 名稱。
@@ -215,7 +262,11 @@ def fetch_a_repo_commits(owner: str, repo_name: str, headers: dict, branches: li
         branches: 要逐一抓取 commits 的 branch 名稱清單。
 
     Returns:
-        該 repo 所有 commit 的 raw dict 清單，每筆含 sha、commit.message 與 commit.author.date。
+        該 repo 所有 commit 的原始字典清單，每筆含 sha、commit.message 與 commit.author.date；
+        空 repo 時為空清單。
+
+    Raises:
+        requests.HTTPError: GitHub 回應 409 以外的非 2xx 時拋出。
     """
     url = f"{BASE_URL}/repos/{owner}/{repo_name}/commits"
     all_commits = []
@@ -240,9 +291,16 @@ def fetch_a_repo_commits(owner: str, repo_name: str, headers: dict, branches: li
 
 
 def fetch_a_repo_readme(owner: str, repo_name: str, headers: dict, returned_max_chars: int = 300) -> dict:
-    """抓取單一 repo 的 README，回傳前 returned_max_chars 個字元。
+    """抓取單一 repo 的 README，只取開頭一小段內文。
 
-    找不到 README（404）時回傳 readme_html_url 與 readme_summary 皆為空字串的 dict。
+    取回 README 後把 base64 內容解碼成文字，截到指定字元數為止。
+
+    Note:
+        - repo 沒有 README 會回應 404，這是正常情形，此時兩個欄位都回空字串、不視為失敗；
+          其餘非 2xx 一律往外拋，不靜默吞掉。
+        - 解碼時忽略無法解碼的位元組，因此含非 UTF-8 內容的 README 會少掉那些字元，
+          但不會中斷整批抓取。
+        - 這支函式不分頁，README 只有一份。
 
     Args:
         owner: repo 擁有者的 login 名稱。
@@ -251,7 +309,14 @@ def fetch_a_repo_readme(owner: str, repo_name: str, headers: dict, returned_max_
         returned_max_chars: README 內文擷取的最大字元數，預設 300。
 
     Returns:
-        含 readme_html_url 與 readme_summary 兩鍵的 dict。
+        含 readme_html_url 與 readme_summary 兩個鍵的字典；沒有 README 時兩者都是空字串。
+
+    Raises:
+        requests.HTTPError: GitHub 回應 404 以外的非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
+        binascii.Error: README 的 base64 內容無法解碼時拋出。
     """
     url = f"{BASE_URL}/repos/{owner}/{repo_name}/readme"
     try:

@@ -14,15 +14,18 @@ from google import genai
 
 
 def get_genai_client() -> genai.Client:
-    """初始化指向 Agent Platform 的 google-genai client (限定給 location=us-central1，供 chat 模型用)。
+    """初始化指向 Agent Platform 的 google-genai client，供 chat 類模型呼叫。
 
-    與 query_with_vector_search._get_embed_client 分開，因為該函式只調用在 us 的模型。
+    這個 client 綁定 us-central1，與 query_with_vector_search 內建立 embedding client 的函式分開，
+    因為 embedding 模型只在 us 提供服務，兩者所在 region 不同。
+    雲端執行時憑證由 Cloud Run 的 runtime service account 以應用程式預設憑證供給，
+    地端則需解除函式內的註解區塊，改以 service account 金鑰檔初始化。
 
     Returns:
-        指向 Agent Platform (location=us-central1) 的 google-genai Client 物件。
+        綁定 us-central1 的 google-genai Client 物件。
 
     Raises:
-        EnvironmentError: 缺少 GCP_PROJECT_ID 或 AGENT_PLATFORM_USER_CREDENTIALS 時拋出。
+        EnvironmentError: 環境變數 GCP_PROJECT_ID 未設定時拋出。
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError

@@ -9,9 +9,9 @@
 
 # Purpose
 
-- 從 Microsoft OneNote API 下載每一頁筆記的原文內嵌圖片。以 HTML 檔存放原文、以 PNG 檔存放圖片到 GCS 資料湖，其中，以日期分區辨識不同時間點下載的歷史版本。
+- 從 Microsoft OneNote API 下載每一頁筆記的原文與內嵌圖片。將內嵌圖片標籤改寫後另存 HTML 檔到 GCS、圖檔亦以 PNG 檔存放到 GCS 資料湖，其中，以日期分區辨識不同時間點下載的歷史版本。
 - 把每個版本的中繼資料、資料血緣，以及每次 API 請求的稽核紀錄，寫入 MongoDB Atlas。
-- 本層只做到下載、存檔與資料血緣的開端，接手的下游[Silver 服務](../task07_silver_service/README.md)負責透過 LLM 將筆記原文語意增強擴寫。
+- 本層只做到下載、存檔與資料血緣的開端，接手的下游 [Silver 服務](../task07_silver_service/README.md)負責透過 LLM 將筆記原文語意增強擴寫。
 
 
 # Table of Contents
@@ -27,7 +27,7 @@
 
 # DataFlow
 
-從 Microsoft OneNote graph API 經過使用者 delegated authorization 獲取每一頁筆記的原文與內嵌圖片後，以 capture data change 設計模式判斷是否需要下載，下載時以 `dt=` 日期分區寫進 GCS 資料湖，其中筆記原始碼以 HTML 檔寫入、圖片以 PNG 檔寫入。過程中，API 請求與筆記的中繼資料、資料特徵、資料血緣適時寫入 MongoDB Atlas。
+從 Microsoft OneNote graph API 經過使用者 delegated authorization 獲取每一頁筆記的原文與內嵌圖片後，以 capture data change 設計模式判斷是否上傳新版本到 GCS，上傳時以 `dt=` 日期分區寫進 GCS 資料湖，其中筆記原始碼以 HTML 檔寫入、圖片以 PNG 檔寫入。過程中，API 請求與筆記的中繼資料、資料特徵、資料血緣適時寫入 MongoDB Atlas。
 
 ```mermaid
 flowchart LR
@@ -100,7 +100,7 @@ task07_common/
 | `attempt_id` | 第幾次嘗試（首次為 1） | Integer | `e_onenote_download.py` 的 `api_get()` |
 | `status` / `status_code` | 該次 attempt 結果與 HTTP 碼（傳輸層錯誤記 0） | String / Integer | `e_onenote_download.py` 的 `api_get()`／`download_notebooks()` |
 | `latency_ms` | 該次請求耗時（毫秒） | Integer | `e_onenote_download.py` 的 `api_get()` |
-| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 冪等鍵） | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
+| `html_sha_hash` | 下載 HTML 原始碼的 sha256（變動判定 / enrichment 內容指紋） | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
 | `html_path` | HTML 寫入 GCS 的完整路徑 | String / null | `e_onenote_download.py` 的 `download_notebooks()` |
 | `downloaded` | 本次是否實際寫入新版本到 GCS（雜湊相同則 false） | Bool | `e_onenote_download.py` 的 `download_notebooks()` |
 | `environment` | 執行環境（local / dev / prod） | String | `task07_common/audit_log.py` 的 `log_api_call()` |
@@ -109,16 +109,16 @@ task07_common/
 ## Collection 2 — `onenote_note_metadata`（Bronze 寫入的欄位）
 
 - 每筆 = 一頁 OneNote 的**某一版本**
-- 複合主鍵 (page_id, dt)。
+- 複合唯一鍵 (Upsert key)：`page_id + dt`。
 - Bronze 階段寫入以下欄，其餘欄位由 Silver & Gold 任務 upsert：
 
 | **欄位名稱** | **欄位語意** | **資料型別** | **值來源** |
 | :--- | :--- | :--- | :--- |
-| `page_id` | OneNote 頁面 ID（主鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
-| `dt` | 下載日（主鍵之一，版本鍵） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
+| `page_id` | OneNote 頁面 ID（複合鍵之一） | String | `e_onenote_download.py` 的 `download_notebooks()` |
+| `dt` | 下載日（複合鍵之一，同時是資料湖的 partition key） | String (`YYYY-MM-DD`) | `e_onenote_download.py` 的 `download_notebooks()` |
 | `onenote_user_id` | 筆記使用者 id | String | `e_onenote_download.py` 的 `_extract_user_account()` |
 | `notebook` / `section` / `page_title` | 筆記本 / 章節 / 頁面標題 | String | `e_onenote_download.py` 的 `download_notebooks()` |
-| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 冪等鍵） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
+| `html_sha_hash` | HTML 原始碼 sha256（變動判定 / enrichment 內容指紋） | String | `task07_common/hashing.py` 的 `html_source_hash()` |
 | `html_md5_hash` | GCS html 物件 md5 | String | `task07_common/gcs.py` 的 `upload_text()` |
 | `html_path` | html 在 GCS 的路徑 | String | `e_onenote_download.py` 的 `download_notebooks()` |
 | `html_downloaded_at` | HTML 下載時間 | Date (ISO 8601) | `task07_common/audit_log.py` |
@@ -130,7 +130,7 @@ task07_common/
 
 > status: Bronze 任務執行完之後只會分成 `bronze_stored` 與 `fetched_failed`，於 Silver / Gold 服務執行時，status 可有更多不同變化。
 
-> Collection 1 & 2 實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 1 & 2 實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 
 # Data Source

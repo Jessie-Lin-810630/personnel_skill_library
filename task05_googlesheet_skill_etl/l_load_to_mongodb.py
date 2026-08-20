@@ -26,12 +26,26 @@ def get_db(mongo_uri: str, db_name: str) -> Database:
 
 
 def upsert_skill_scores(db: Database, collection_name: str, df: pd.DataFrame) -> None:
-    """以「雷達軸」與「經手任務」為唯一鍵，把任務分數批次 upsert 到指定 collection。
+    """以雷達軸與經手任務兩個欄位為唯一鍵，把任務分數批次 upsert 到指定 collection。
+
+    先把 DataFrame 逐列轉成 document，各組成一個 upsert 操作後以一次批次寫入送出。
+
+    Note:
+        - 以兩個欄位組成唯一鍵，是因為同一個雷達軸底下有多筆任務，單靠雷達軸無法定位到某一列。
+        - 任務改名時會被當成新的一筆寫入，舊的那筆留在 collection 裡不會消失。
+        - collection 名稱由呼叫端指定，生技與資料工程共用這支函式寫進各自的 collection。
 
     Args:
         db: 目標 pymongo Database。
         collection_name: 要寫入的 collection 名稱。
-        df: 含任務分數的 DataFrame，會轉成 document 逐筆寫入。
+        df: 含任務分數的 DataFrame，逐列轉成 document 寫入。
+
+    Returns:
+        None: 分數寫進 MongoDB 指定的 collection，新增與更新筆數只記進 log，不回傳值。
+
+    Raises:
+        KeyError: DataFrame 缺少雷達軸或經手任務欄位時拋出。
+        pymongo.errors.InvalidOperation: 傳入空的 DataFrame 導致批次寫入沒有任何操作時拋出。
     """
     docs = df.to_dict("records")  # 轉成 list of dict
     collection = db[collection_name]  # A collection object
@@ -47,9 +61,24 @@ def upsert_skill_scores(db: Database, collection_name: str, df: pd.DataFrame) ->
 def upsert_skill_radar_summary(db: Database, df: pd.DataFrame) -> None:
     """以 snapshot_date、雷達軸與雷達圖名稱為唯一鍵，把雷達摘要批次 upsert 到 skill_radar_summary。
 
+    先把 DataFrame 逐列轉成 document，各組成一個 upsert 操作後以一次批次寫入送出。
+
+    Note:
+        - 唯一鍵含日期，所以每天各留一份快照，同一天重跑只會覆蓋當天那幾列，歷史天數不受影響，
+          skill_radar_summary 因此能畫出各軸等級隨時間變化的走勢。
+        - 雷達圖名稱也在唯一鍵裡，因為兩張雷達圖的軸名稱可能重複。
+
     Args:
         db: 目標 pymongo Database。
-        df: 含雷達摘要的 DataFrame，會轉成 document 逐筆寫入。
+        df: 含雷達摘要的 DataFrame，逐列轉成 document 寫入。
+
+    Returns:
+        None: 摘要寫進 MongoDB 的 skill_radar_summary，新增與更新筆數只記進 log，不回傳值。
+
+    Raises:
+        KeyError: DataFrame 缺少 snapshot_date、雷達軸或雷達圖名稱任一欄位時拋出。
+        AttributeError: 傳入 None 時拋出，代表上游的 build_combined_summaries 收到空清單。
+        pymongo.errors.InvalidOperation: 傳入空的 DataFrame 導致批次寫入沒有任何操作時拋出。
     """
     summary = df.to_dict("records")  # 轉成 list of dict
     collection = db["skill_radar_summary"]  # A collection object

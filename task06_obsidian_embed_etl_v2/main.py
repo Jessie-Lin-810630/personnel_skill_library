@@ -1,14 +1,16 @@
 """task06 v2 入口：對 task01_v2 medallion 資料做增量 embedding 與軟刪除 purge。
 
-gate 讀 obsidian_note_metadata（status=archived AND embedded_status=false）→ 從 archived 層 chunk+embed →
-先刪後插 note_vectors_multimodal、CAS 翻 embedded_status → purge 軟刪除筆記的向量。
+1. gate 讀 obsidian_note_metadata，挑出 status=archived 且 embedded_status=false 的筆記。
+2. 讀 archived 層的內容做 chunking 與多模態 embedding。
+3. 先刪後插 note_vectors_multimodal，再以 CAS 把 embedded_status 翻成 true。
+4. purge 已被軟刪除筆記殘留的向量。
 
 Usage:
     poetry run python -m task06_obsidian_embed_etl_v2.main
 
 Required .env keys:
     MONGO_ALTAS_URI                   MongoDB Atlas connection string.
-    MONGO_DB_NAME                     Target database name (skill_dashboard).
+    MONGO_DB_NAME                     Target database name (default to skill_dashboard).
     GCS_USER_CREDENTIALS              (On-premise only) GCS service account JSON path.
     AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
     GCP_PROJECT_ID                    Agent Platform project.
@@ -28,10 +30,23 @@ BUCKET_NAME = "personal-vaults"
 def run_task06_v2():
     """task06_v2 入口，對 task01_v2 的 medallion 資料做增量 embedding 與軟刪除 purge。
 
-    1. 檢查 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
-    2. 從 obsidian_note_metadata 挑出待向量化的筆記，若沒有就只跑 purge 後結束。
-    3. 對待做筆記從 archived 層 chunk 與 embed，先刪後插進 note_vectors_multimodal，並以 CAS 翻 embedded_status。
-    4. 最後消費軟刪除訊號，清掉已被軟刪除筆記的向量。
+    1. 檢查 MongoDB 連線用的環境變數，缺任一就中止。
+    2. 從 obsidian_note_metadata 挑出已歸檔但尚未向量化的筆記，沒有的話就只跑 purge 後結束。
+    3. 讀取 archived-notes/ 下的內容做切塊與向量化，先刪後插進 note_vectors_multimodal，
+       再以 CAS 把 embedded_status 翻成 true。
+    4. 清掉已被軟刪除筆記的向量。
+
+    Note:
+        單份筆記處理失敗已在 t_chunk_and_embed_v2 內就地略過，這裡最外層攔的是 client 初始化
+        與資料庫讀寫這類全域錯誤，只在此印一次完整 traceback 後往外拋，避免同一個例外在各層重複記錄。
+        因此這支函式正常結束不代表每份筆記都成功，未成功者的 embedded_status 維持 false，下一輪會再被挑出來。
+
+    Returns:
+        None: 向量寫進 MongoDB 的 note_vectors_multimodal，各項筆數只記進 log，不回傳值。
+
+    Raises:
+        EnvironmentError: 環境變數 MONGO_ALTAS_URI 或 MONGO_DB_NAME 未設定時拋出。
+        Exception: client 初始化或資料庫讀寫失敗時，記錄 traceback 後原樣往外拋。
     """
     mongo_uri = os.getenv("MONGO_ALTAS_URI")
     db_name = os.getenv("MONGO_DB_NAME")

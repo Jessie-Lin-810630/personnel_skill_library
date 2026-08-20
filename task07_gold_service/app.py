@@ -1,13 +1,12 @@
 """Gold 層 Archive 端點：把 task07 lazy_loading 的核可後歸檔端點化。
 
 執行流程：
-    1. 接收 POST /archive 的 page_id + dt + role + action
-    2. Action 為 "approved"，呼叫 archive_note，內部流程為:
-    複製 md+png 到 archived-notes → upsert Collection onenote_note_metadata
-    → 回讀 archived md，萃取 frontmatter → upsert onenote_note_metadata
-    3. Action 為 "rejected"，呼叫 reject_note，內部流程為:
-    upsert Collection onenote_note_metadata
-    → 讀 rejected md，萃取 md_frontmatter → upsert onenote_note_metadata
+    1. 接收 POST /archive 的 page_id + dt + role + action。
+    2. Action 為 "approved" 時呼叫 archive_note，其內部先複製 md 與 png 到 archived-notes、
+       upsert Collection onenote_note_metadata，最後回讀 archived md 萃取 frontmatter 後再次
+       upsert onenote_note_metadata。
+    3. Action 為 "rejected" 時呼叫 reject_note，其內部先 upsert Collection onenote_note_metadata，
+       再讀 rejected md 萃取 md_frontmatter 後再次 upsert onenote_note_metadata。
     4. Streamlit 審查頁維持唯讀，只透過此端點觸發。
 
 Usage:
@@ -34,10 +33,18 @@ app = Flask(__name__)
 
 @app.route("/archive", methods=["POST"])
 def archive():
-    """接收 page_id + dt + role + action，approve 歸檔 / reject 標記 review_closed。
+    """接收頁面代號、版本分區、審核者角色與審核結果，據此執行歸檔或退件。
 
-    HTTP 狀態碼：缺欄位或非法 action 400；查無版本 404；approve 遇同名衝突 409；
-    未預期例外 500；其餘 200（回傳結果 dict 由呼叫端判讀）。
+    先驗證必要欄位與審核結果是否合法，再依審核結果分派給 Gold 層的歸檔或退件函式。
+
+    Note:
+        歸檔比退件多兩種失敗狀態碼：已有較新版本歸檔時回 409，
+        該版本尚未生成 md 或複製失敗這類業務錯誤回 422，兩者都不算傳輸失敗。
+
+    Returns:
+        Flask 回應物件與 HTTP 狀態碼組成的 tuple。缺欄位或審核結果非法回 400，
+        查無版本回 404，歸檔遇較新版本回 409，歸檔的其他業務錯誤回 422，
+        未預期例外回 500，成功回 200。
     """
     body = request.get_json(silent=True) or {}
     page_id = body.get("page_id")

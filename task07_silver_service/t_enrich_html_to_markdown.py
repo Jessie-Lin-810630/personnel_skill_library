@@ -1,9 +1,11 @@
-"""Silver 層 Transform：純 Lazy Loading，提供 t_enrich_html_to_markdown 供 UI on-demand 呼叫。
+"""Silver 層 Transform：供 flask app on-demand 呼叫。
 
-執行流程：UI 呼叫 t_enrich_html_to_markdown(page_id, dt) → 讀 Collection onenote_note_metadata
-取 html_hash → 查 html_hash 是否能快取到已存好的對應 md (命中則撈取既有 md 拋給前端、跳過 LLM call)
-→ 未命中則呼叫 LLM 重整 html 生成 md
-→ 存 md 到 GCS 在 upsert Collection onenote_note_metadata，更新 html note 的資料血緣。
+執行流程：
+    1. 從 UI 透過 flask app 呼叫 t_enrich_html_to_markdown(page_id, dt)，
+       讀 Collection onenote_note_metadata 取 html_hash。
+    2. 以 html_hash 查是否能快取到已存好的對應 md，命中則撈取既有 md 拋給前端、跳過 LLM call。
+    3. 未命中則呼叫 LLM 重整 html 生成 md。
+    4. 存 md 到 GCS，再 upsert Collection onenote_note_metadata，更新 html note 的資料血緣。
 
 設計要點：
 - 不在 ETL 主動執行；提供 t_enrich_html_to_markdown(page_id, dt) 函式供 UI on-demand 呼叫。
@@ -50,7 +52,14 @@ _IMG_MIME = {
 
 
 def _img_mime(uri: str) -> str:
-    """由 URI 副檔名推出圖片 mime type；未知副檔名一律回 image/png。"""
+    """依副檔名判斷圖片的 mime type，供組裝多模態請求時標註。
+
+    Args:
+        uri: 圖片的完整物件位址，只取其副檔名參與判斷。
+
+    Returns:
+        對應的 mime type 字串；副檔名不在對照表內時一律回 image/png。
+    """
     return _IMG_MIME.get(PurePosixPath(uri).suffix.lower(), "image/png")
 
 
@@ -85,22 +94,56 @@ gemini_response_schema = {
 
 
 class _LLMServiceGuard:
-    """連續失敗達門檻則開斷路一段冷卻時間。綁服務、不綁單一筆記。"""
+    """簡易版 circuit breaker，連續失敗達門檻就暫停呼叫模型一段冷卻時間。
+
+    Note:
+        只實作 closed 與 open 兩個狀態，沒有標準 circuit breaker 的 half-open。
+        冷卻時間一到就全額恢復流量，不會先放一個試探請求，因此模型端若尚未復原，
+        恢復瞬間的請求會一起湧上去，並需再累積一輪連續失敗才會重新跳脫。
+        以本服務的規模而言可接受，但不要照標準三狀態去推測它的行為。
+
+        狀態綁在服務層而非單一筆記，因此任何一篇筆記連續失敗都會讓整個服務暫停，
+        這是刻意的取捨：連續失敗通常代表模型端或憑證有問題，逐篇重試只會放大損失。
+        狀態存在記憶體，服務重啟即歸零，多個執行個體之間也不共享。
+    """
 
     def __init__(self, max_consecutive_failures: int = 5, cooldown_seconds: int = 300):
+        """建立 circuit breaker，設定跳脫門檻與冷卻時間。
+
+        Args:
+            max_consecutive_failures: 連續失敗幾次就暫停，預設 5 次。
+            cooldown_seconds: 暫停多久，單位秒，預設 300 秒。
+        """
         self.max = max_consecutive_failures
         self.cooldown = cooldown_seconds
         self._consecutive = 0  # 實際連續失敗次數
         self._open_until = 0.0  # 暫停到何時
 
     def is_open(self) -> bool:
+        """查詢目前是否處於 open 狀態，也就是還在冷卻期間內。
+
+        Returns:
+            仍在冷卻時間內為 True，此時呼叫端應略過模型呼叫。
+        """
         return time.time() < self._open_until
 
     def record_success(self) -> None:
+        """記錄一次成功，把連續失敗次數歸零並回到 closed 狀態。
+
+        Returns:
+            None: 只更新這個物件的內部狀態，不回傳值。
+        """
         self._consecutive = 0
         self._open_until = 0.0
 
     def record_failure(self) -> None:
+        """記錄一次失敗，連續次數達門檻就跳脫成 open 狀態。
+
+        跳脫時記一筆 error，並把連續次數歸零，讓冷卻結束後重新計算。
+
+        Returns:
+            None: 只更新這個物件的內部狀態，不回傳值。
+        """
         self._consecutive += 1
         if self._consecutive >= self.max:
             self._open_until = time.time() + self.cooldown
@@ -115,29 +158,32 @@ _guard = _LLMServiceGuard()
 
 
 def _get_genai_client() -> genai.Client:
-    """初始化指向 Agent Platform 的 google-genai client (限定給 location=us-central1 模型用)。
+    """初始化指向 Agent Platform 的 google-genai client，供重整 html 的模型呼叫。
 
-    與 query_with_vector_search._get_embed_client 分開，因為該函式只調用在 us 的模型。
+    這個 client 綁定 us-central1，因為本服務使用的模型部署在該 region。
+
+    Note:
+        雲端執行時憑證由 Cloud Run 的 runtime service account 以應用程式預設憑證供給，
+        地端則需先解除函式內的註解區塊，改以 service account 金鑰檔初始化，否則會取不到憑證。
 
     Returns:
-        指向 Agent Platform (location=us-central1) 的 google-genai Client 物件。
+        綁定 us-central1 的 google-genai Client 物件。
 
     Raises:
-        EnvironmentError: 缺少 GCP_PROJECT_ID 或 AGENT_PLATFORM_USER_CREDENTIALS 時拋出。
+        EnvironmentError: 環境變數 GCP_PROJECT_ID 未設定時拋出。
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
     # from google.oauth2.service_account import Credentials
     # json_path = os.getenv("AGENT_PLATFORM_USER_CREDENTIALS")
-    # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-    # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)
-
     # project = os.getenv("GCP_PROJECT_ID")
-    # if not project or not credentials:
+    # if not project or not json_path:
     #     raise EnvironmentError(
     #         "找不到 GCP_PROJECT_ID / AGENT_PLATFORM_USER_CREDENTIALS，請確認已設定在 .env 或 secret manager。"
     #     )
-    # return genai.Client(vertexai=True, project=project, location="us-central1", credentials=credentials)
+    # scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    # credentials = Credentials.from_service_account_file(json_path, scopes=scopes)
+    # return genai.Client(vertexai=True, project=project, location="us", credentials=credentials)
 
     # Cloud run 跑下面區塊：
     project = os.getenv("GCP_PROJECT_ID")
@@ -147,7 +193,16 @@ def _get_genai_client() -> genai.Client:
 
 
 def _classify_note_type(filename: str) -> str:
-    """依檔名是否含日期字樣分類：有日期為 daily-log，否則 knowledge-summary。"""
+    """依檔名是否帶有日期字樣，判斷這份筆記屬於哪一種類型。
+
+    可辨識的日期寫法有連字號、底線、純數字八碼與中文年月日四種。
+
+    Args:
+        filename: 筆記檔名或頁面標題。
+
+    Returns:
+        帶日期字樣時回 daily-log，否則回 knowledge-summary。
+    """
     DATE_IN_FILENAME = re.compile(
         r"\d{4}-\d{2}-\d{2}|"
         r"\d{4}_\d{2}_\d{2}|"
@@ -158,14 +213,16 @@ def _classify_note_type(filename: str) -> str:
 
 
 def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
-    """把 html 中每個 <img> 就地換成 markdown 圖片語法 `![alt](src)`。
+    """把 html 裡的每個圖片標籤就地換成 Markdown 的圖片語法。
+
+    替代文字取自圖片標籤本身，缺漏時填 image；其中的中括號與驚嘆號會換成連字號，
+    避免這些符號讓 Markdown 的圖片語法解析失敗。
 
     Args:
-        html_content (str): 原始 html 字串。
+        html_content: 原始 html 字串。
 
     Returns:
-        BeautifulSoup: 已將 img tag 替換為 markdown 圖片語法的 soup 物件；
-            後續可再 `.get_text()` 取純文字送入 LLM。
+        圖片標籤已替換成 Markdown 語法的 soup 物件，呼叫端可再取其純文字送進模型。
     """
     soup = BeautifulSoup(html_content, "html.parser")
     for img in soup.find_all("img"):
@@ -182,21 +239,24 @@ def convert_img_tag_to_md_str(html_content: str) -> BeautifulSoup:
 def _call_llm(
     client: genai.Client, page_title: str, plain_text: str, img_uris: list[str] | None = None
 ) -> tuple[dict, dict]:
-    """呼叫 Gemini 做多模態 document enrichment，回傳 (parsed_dict, token_usage)。失敗則 raise。
+    """呼叫模型對筆記做多模態重整，同時產出標籤、別名與重整後的內容。
 
-    除了文字，內文 ![]() 連結對應的原圖會以 gs:// URI 一併送入，讓 model 實際判讀圖片
-    內容、產出更精準的「AI生成圖釋」。每張圖前面附一段文字標籤，標明它對應內文哪個
-    `_images/<檔名>` 連結，方便 model 對齊。
+    除了文字，內文圖片連結對應的原圖也會一併送入，讓模型實際判讀圖片內容並產出圖片概述。
+    每張圖前面各附一段文字標籤，標明它對應內文哪一個圖片連結，方便模型對齊。
+    模型以 JSON schema 約束輸出，因此回應可直接解析成結構化結果。
 
     Args:
-        client (genai.Client): google-genai Client 物件。
-        page_title (str):  筆記標題。
-        plain_text (str):  欲讓模型判讀的文本。
-        img_uris (list[str] | None = None):  欲讓模型生成圖釋的圖片 URI。
+        client: google-genai Client 物件。
+        page_title: 筆記標題，寫進 prompt 供模型理解主題。
+        plain_text: 要讓模型判讀的純文字內容。
+        img_uris: 要讓模型判讀的圖片位址清單，預設為 None，代表這篇沒有圖片。
 
     Returns:
-        parsed_dict, token_usage (tuple[dict, dict]):
-            parsed_dict 為 LLM enrich 過的文本；token_usage 為 token 劑量
+        模型解析結果與 token 用量組成的 tuple。前者含 tags、alias 與 new_content 三個鍵，
+        後者含輸入、輸出與合計三種 token 數。
+
+    Raises:
+        ValueError: 模型回應無法解析成結構化結果時拋出。
     """
     img_uris = img_uris or []
     prompts = f"""Analyze this note and extract:
@@ -249,15 +309,22 @@ def _call_llm(
 
 
 def _build_markdown(llm: dict, page_title: str, dt: str) -> str:
-    """把 LLM 回傳的 tags / alias / new_content 組成含 Obsidian frontmatter 的 md 全文。
+    """把模型產出的標籤、別名與內容組成含 frontmatter 的 md 全文。
+
+    標籤與別名逐項轉小寫，並把空白與底線換成連字號；筆記類型由頁面標題判斷；
+    日期直接取版本分區字串。
+
+    Note:
+        標籤與別名的每個元素都用雙引號框住，因為模型輸出浮動，可能出現以特殊符號開頭的值，
+        不加引號會讓日後解析 frontmatter 失敗。
 
     Args:
-        llm (dict): `_call_llm()` 回傳的解析結果，含 `tags`、`alias`、`new_content`。
-        page_title (str): 頁面標題，供 alias 預設值與 note_type 分類。
-        dt (str): 執行日期字串，寫入 frontmatter 的 `date`。
+        llm: _call_llm 回傳的解析結果，含 tags、alias 與 new_content 三個鍵。
+        page_title: 頁面標題，供別名的預設值與筆記類型判斷使用。
+        dt: 版本分區字串，寫進 frontmatter 的日期欄位。
 
     Returns:
-        str: frontmatter + 內文的完整 markdown 字串。
+        frontmatter 接上內文的完整 md 字串。
     """
     tags = llm.get("tags", [])
     alias = llm.get("alias", [page_title])
@@ -279,23 +346,33 @@ def _build_markdown(llm: dict, page_title: str, dt: str) -> str:
 def t_enrich_html_to_markdown(
     page_id: str, dt: str, trigger: str = "on_demand", client: genai.Client | None = None
 ) -> dict:
-    """Silver 層: 由 on-demand 觸發 Document enrichment。供 UI 點擊某版本時呼叫。
+    """Silver 層的 on-demand 入口，把一個版本的 html 重整成 md，供審查頁點擊某版本時呼叫。
 
-    依序做：regenerate 配額檢查 → 相同 html_hash 在 collection metadata 中，
-    是否找得到已經生成好的對應 md (命中則撈取既有 md 拋給前端、當次 消耗 LLM call tokens=0)
-    → 無命中，先由服務級斷路器檢查 LLM call 是否過量 → 無過量才允許下載 html 後呼叫 LLM 生成 md
-    → 存 md 到 GCS 並 upsert metadata，更新 html note 之資料血緣。
+    1. 讀取該版本的 metadata，取不到就回覆查無此版本。
+    2. 若這次是重新生成，先檢查該內容已用掉的配額是否達上限。
+    3. 若這次不是重新生成，先查快取，找到相同內容已生成過的 md 就直接重用。
+    4. 快取沒命中時檢查 circuit breaker，仍在冷卻期間就不呼叫模型。
+    5. 下載 html、把圖片標籤轉成 Markdown 語法、取出純文字與圖片位址後呼叫模型。
+    6. 把模型輸出組成含 frontmatter 的 md 寫進 GCS，並更新 metadata。
+
+    Note:
+        三道守門的用意各不相同：配額擋的是單篇筆記反覆重生的成本，
+        快取擋的是不同版本或不同頁面之間內容重複的成本，circuit breaker 擋的是模型端整體異常時的連續損失。
+        命中快取時只更新 metadata 讓該版本進入待審狀態，不重新寫 md，該次 token 記為 0。
+        模型呼叫失敗不往外拋，改把版本狀態記成 enrich_failed 並在回傳值帶錯誤訊息，
+        因此呼叫端要看回傳的 status 而不是有沒有收到例外。
 
     Args:
-        page_id (str): OneNote page id。
-        dt (str): 版本日期分區字串 (對齊 bronze layer Extract task 執行日)。
-        trigger (str, optional): 觸發來源；`regenerate` 會略過快取、強制重生並受配額限制。
-            Defaults to "on_demand".
-        client (genai.Client | None, optional): 可注入的 genai client；省略則自行初始化。
-            Defaults to None.
+        page_id: OneNote 頁面代號。
+        dt: 版本分區字串，值沿用 Bronze 層下載這份筆記的日期。
+        trigger: 觸發來源，預設 on_demand；傳 regenerate 會略過快取、強制重新生成並受配額限制。
+        client: 可注入的 google-genai Client 物件，預設為 None，此時自行初始化。
 
     Returns:
-        dict: {status, cache_hit, md_path, circuit_open, error}；不同分支帶不同欄位。
+        含 status 的結果字典，md 寫進 GCS、狀態寫進 MongoDB 的 onenote_note_metadata。
+        status 可能是 not_found、pending_review、enrich_failed 或該版本原本的狀態；
+        另依分支帶上 cache_hit 標示是否重用既有 md、md_path 指向產出的 md、
+        circuit_open 標示 circuit breaker 是否處於冷卻中、error 說明失敗或配額用盡的原因。
     """
     # # 地端執行的話，加跑下面一行區塊：
     # gcs.get_client_on_premise()

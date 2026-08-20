@@ -1,10 +1,14 @@
-"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為血緣鍵的 vector docs。
+"""對 archived md body 做 chunking 與多模態 embedding，產出以 md_archive_path 為 join 鍵的 vector docs。
 
-兩段式 chunking → 每 chunk 解析 markdown ![](_images/x.png) 圖片、以 basename 對上 attached_images
-的 archived_image_path、打 GCS 確認圖片仍存在 → 送 text 與圖片 uri 給多模態模型 gemini-embedding-2
-→ L2 normalize → 組 vector doc。
+1. 對內文做兩段式 chunking。
+2. 每個 chunk 解析 markdown ![](_images/x.png) 圖片，以 basename 對上 attached_images
+   的 archived_image_path，並打 GCS 確認圖片仍存在。
+3. 把 text 與圖片 uri 送給多模態模型 gemini-embedding-2。
+4. 對回傳向量做 L2 normalize，再組成 vector doc。
+
 chunking / embedding / normalize copy 自 task06_obsidian_embed_etl_v2（copy 而非 import，兩來源各自演化）；
-與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、血緣欄命名 md_path（存 archived md 路徑）。
+與 obsidian 版差異：圖片語法為標準 markdown ![]()（非 wiki-link）、
+data lineage 依據的欄位命名 md_path（存 archived md 路徑）。
 
 Required .env keys:
     AGENT_PLATFORM_USER_CREDENTIALS   (On-premise only) Agent Platform gemini-embedding-2 service account key.
@@ -51,13 +55,19 @@ _IMAGE_LINK_PATTERN = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 
 def _get_genai_client() -> genai.Client:
-    """初始化 google-genai client。
+    """初始化指向 Agent Platform 的 google-genai client，供 embedding 模型呼叫。
+
+    這個 client 綁定 us，因為 embedding 模型只在該 region 提供服務。
+
+    Note:
+        - 雲端執行時憑證由 Cloud Run 的 runtime service account 以應用程式預設憑證供給，
+          地端則需先解除函式內的註解區塊，改以 service account 金鑰檔初始化，否則會取不到憑證。
 
     Returns:
-        已認證、指向 Agent Platform 的 genai.Client。
+        綁定 us 的 google-genai Client 物件。
 
     Raises:
-        EnvironmentError: 缺少 AGENT_PLATFORM_USER_CREDENTIALS 或 GCP_PROJECT_ID 環境變數時。
+        EnvironmentError: 環境變數 GCP_PROJECT_ID 未設定時拋出。
     """
     # # 地端測試跑下面區塊：
     # # 先驗環境變數再建 Credentials，否則 json_path 為 None 會讓 Credentials 先拋 TypeError/FileNotFoundError
@@ -82,17 +92,21 @@ def _get_genai_client() -> genai.Client:
 def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 100) -> list[dict]:
     """對一份筆記內文做兩段式 chunking，先依標題切、再把過長段落切小。
 
-    1. 用 MarkdownHeaderTextSplitter 依 H1 到 H4 切，並把命中的標題串成 section 路徑。
-    2. 對每個標題段落再用 RecursiveCharacterTextSplitter 切小，分隔符順序對中文較友善。
+    1. 依 H1 到 H4 四層標題切開，並把命中的標題串成章節路徑。
+    2. 對每個標題段落再依字元數切小。
     3. 濾掉純空白的片段。
 
+    Note:
+        - 第二段切分的分隔符依序是空行、換行、句號、逗號、空格，這個順序對中文較友善，
+          能盡量在語意邊界斷開而不是硬切在字中間。
+
     Args:
-        content: 已取出的筆記內文。
+        content: 從歸檔 .md 取出的筆記正文。
         chunk_size: 每個 chunk 的目標字元數，預設 800。
         chunk_overlap: 相鄰 chunk 的重疊字元數，預設 100。
 
     Returns:
-        list，每筆是含 content 純文字片段與 section 標題路徑的字典。
+        每筆含 content 與 section 兩個鍵的字典清單，前者是純文字片段，後者是該片段所屬的標題路徑。
     """
     # 第一段:  設定 MarkdownHeaderTextSplitter 要識別的標題層級
     headers_to_split_on = [
@@ -140,22 +154,27 @@ def _chunk_markdown(content: str, chunk_size: int = 800, chunk_overlap: int = 10
 def _resolve_chunk_images(
     text_in_chunk: str, archived_by_basename: dict[str, str], bucket: Bucket, bucket_name: str = "onenote-vaults"
 ) -> tuple[str, list[str]]:
-    """從一個 chunk 的文字抽出所有 markdown 圖片 ![](_images/xxx.png)，對上 archived 圖片 gs:// URI。
+    """從單一 chunk 的文字抽出所有 markdown 圖片語法，解析成 GCS 上的完整位址。
 
-    OneNote 歸檔 md 的圖片為標準 markdown 語法、連結多為相對的 `_images/<檔名>`；
-    以連結 basename 對上該筆記 attached_images 的 archived_image_path 拿到精確路徑，
-    再打一次 GCS 確認該圖片仍存在（防範 metadata 有記、但 archived 圖片事後被移動或刪除），
-    存在才收進 image_uris。對不上 basename、或圖片已不在 GCS 者記 warning 後略過。
+    OneNote 歸檔後的 .md 使用標準 markdown 圖片語法，連結多是相對路徑，因此取連結的檔名部分，
+    對上該筆記 attached_images 記錄的歸檔位址，再確認該圖片在 GCS 上仍然存在，存在才收下。
+
+    Note:
+        - 圖片位址不自行推算而是查 attached_images，因為 OneNote 的歸檔位址由 task07 決定，
+          無法從 .md 的相對連結還原。
+        - 查到位址後仍要再確認一次檔案存在，是為了防範 metadata 有記錄、但歸檔圖片事後被移動或刪除。
+        - 檔名對不上或圖片已不在 GCS 時記一筆 warning 後略過該張，這個 chunk 仍會以剩下的內容繼續向量化，
+          所以回傳的圖片數可能少於文字中出現的次數。
 
     Args:
-        text_in_chunk: 單一 chunk 的原始文字 (可能含 ![]() 圖片)。
-        archived_by_basename: 該筆記 {圖片 basename: archived_image_path(gs:// URI)} 對照表。
+        text_in_chunk: 單一 chunk 的原始文字，可能含 markdown 圖片語法。
+        archived_by_basename: 該筆記的圖片檔名對到其歸檔位址的對照表。
         bucket: 已建立的 GCS Bucket 物件，用來檢查圖片是否存在。
-        bucket_name: GCS bucket 名稱，用來從 archived_image_path 剝除 gs:// 前綴。
+        bucket_name: GCS bucket 名稱，用來從歸檔位址剝除 gs 協定與 bucket 前綴。
 
     Returns:
-        tuple (text_for_model, image_uris)：去除 ![]() 後的純文字，
-        與該 chunk 命中且確認存在的 archived gs:// URI 清單 (無圖為 [])。
+        送進模型的純文字與圖片位址清單組成的 tuple。純文字已拿掉 markdown 圖片語法並整理過空行，
+        因為圖片改以獨立的 Part 傳入模型；該 chunk 沒有對上任何圖片時位址清單為空。
     """
     image_uris = []
     for m in _IMAGE_LINK_PATTERN.finditer(text_in_chunk):
@@ -177,16 +196,17 @@ def _resolve_chunk_images(
 
 
 def _normalize(vec: list[float]) -> list[float]:
-    """L2 normalize 成單位向量。
+    """對向量做 L2 normalize，轉成長度為 1 的單位向量。
 
-    gemini-embedding 只有預設維度 3072 會自動正規化；MRL 截斷到 1536 時不會，
-    cosine 相似度前需自行正規化，否則分數失真。
+    Note:
+        - gemini-embedding 只有在使用預設的 3072 維時才會自動正規化，以 MRL 截斷到 1536 維時不會，
+          因此計算 cosine 相似度前必須自行正規化，否則分數失真。
 
     Args:
-        vec: 待正規化的向量。
+        vec: embedding 模型輸出的原始向量。
 
     Returns:
-        L2 正規化後的單位向量；零向量 (norm 為 0) 則原樣回傳。
+        L2 正規化後的單位向量；傳入零向量時原樣回傳，避免除以零。
     """
     norm = math.sqrt(sum(v * v for v in vec))
     return [v / norm for v in vec] if norm else vec
@@ -200,26 +220,32 @@ def _embed_chunks_a_markdown(
     bucket: Bucket,
     bucket_name: str = "onenote-vaults",
 ) -> list[dict]:
-    """對一份 markdown 筆記的每個 chunk 做多模態向量化 (gemini-embedding-2)。
+    """對一份筆記的每個 chunk 做多模態向量化。
 
-    多模態無法像純文字那樣把多個 chunk batch 在一次呼叫，故每個 chunk 各呼叫一次：
-    1. 圖片類型：由 chunk 內 markdown ![]() 連結 basename 對上 archived_image_path。
-    2. 文字類型：依官方 document 任務格式組 prompt "title: {title} | text: {content}"，
-       title = 筆記標題 + 該 chunk 的 section；文字 part 與圖片 part 組成單一 multimodal Content。
-    3. 將輸出做 L2 normalize 後存回。
+    每個 chunk 各呼叫模型一次，逐一完成三件事：
+    1. 以 chunk 內圖片連結的檔名對上該筆記歸檔圖片在 GCS 上的位址。
+    2. 依官方建議的文件格式組出 prompt，標題由筆記標題接上該 chunk 的章節路徑組成，
+       文字與各張圖片再一起組成單一則多模態內容。
+    3. 把模型輸出做 L2 normalize 後存回該筆 chunk。
+
+    Note:
+        - 多模態呼叫無法像純文字那樣把多個 chunk 併成一次請求，因此呼叫次數等同 chunk 數，
+          筆記越長成本越高。
+        - prompt 格式必須與查詢時使用的格式配對，改動其中一邊就要同步改另一邊。
 
     Args:
-        chunks: _chunk_markdown() 產出的 list[dict]，每筆含 "content" 與 "section"。
-        genai_client: 已初始化的 google-genai client。
-        archived_by_basename: 該筆記 {圖片 basename: archived_image_path} 對照表。
-        note_title: 筆記標題 (alias 或 page_title)，組進 prompt 的 title。
-        bucket: GCS Bucket 物件，檢查圖片是否存在。
-        bucket_name: GCS bucket 名稱，預設 "onenote-vaults"。
+        chunks: _chunk_markdown 產出的 chunk 清單，每筆含 content 與 section 兩個鍵。
+        genai_client: 已初始化的 google-genai Client 物件。
+        archived_by_basename: 該筆記的圖片檔名對到其歸檔位址的對照表。
+        note_title: 筆記標題，取自別名或 OneNote 頁面標題，組進 prompt 的標題部分。
+        bucket: GCS Bucket 物件，用來檢查圖片是否存在。
+        bucket_name: GCS bucket 名稱，預設 onenote-vaults。
 
     Returns:
-        在每筆 chunk dict 上新增欄位後的 list[dict]，每筆含：
-        "content" 原始 chunk 文字、"image_paths" gs:// URI 清單 (無圖為 [])、
-        "embedding" 長度 EMBED_DIM(1536) 且已 L2 normalize。
+        在每筆 chunk 上補齊欄位後的清單。除原有的 content 與 section 外，
+        另有 image_paths 記錄該 chunk 引用的圖片位址，沒有圖片時為空清單；
+        以及 embedding 存放長度 1536 且已完成 L2 正規化的向量。
+        content 保留原始寫法，markdown 圖片語法不會被拿掉。
     """
     embedded = []
     for chunk in chunks:
@@ -245,15 +271,19 @@ def _embed_chunks_a_markdown(
 
 
 def _archived_by_basename(note: dict) -> dict[str, str]:
-    """把一份筆記的 attached_images 整理成 {archived 圖片 basename: archived_image_path} 對照表。
+    """把一份筆記的 attached_images 整理成圖片檔名對到歸檔位址的對照表。
 
-    只收有 archived_image_path 的項；供 chunk 內 markdown ![]() 連結以 basename 對上。
+    逐張取出歸檔位址，以位址的檔名部分當鍵；沒有歸檔位址的圖片不收。
+
+    Note:
+        - 沒有歸檔位址代表該張圖片尚未被 task07 歸檔，此時 chunk 內引用它的語法會對不上而被略過，
+          這份筆記的其餘內容仍會照常向量化。
 
     Args:
-        note (dict): gate 回傳的版本 dict，含 attached_images。
+        note: get_embedding_gate_list 回傳的單筆版本文件，含 attached_images。
 
     Returns:
-        dict: {basename: archived_image_path(gs:// URI)}。
+        圖片檔名對到其歸檔位址的對照表；沒有任何可用圖片時為空字典。
     """
     mapping: dict[str, str] = {}
     for img in note.get("attached_images", []) or []:
@@ -264,13 +294,19 @@ def _archived_by_basename(note: dict) -> dict[str, str]:
 
 
 def _note_title(note: dict) -> str:
-    """優先使用筆記的 alias 作為 prompt 的 title，因為 alias 命名比 page_title 少雜訊。
+    """取出一份筆記要放進 prompt 標題的名稱，優先使用別名。
+
+    frontmatter 的別名欄位可能是清單，此時取第一個；沒有別名時改用 OneNote 的頁面標題。
+
+    Note:
+        - 優先取別名是因為別名的命名比 OneNote 頁面標題少雜訊，頁面標題常帶有分頁編號或日期，
+          那些字串進到 prompt 標題只會稀釋語意。
 
     Args:
-        note (dict): gate 回傳的版本 dict，含 md_frontmatter 與 page_title。
+        note: get_embedding_gate_list 回傳的單筆版本文件，含 md_frontmatter 與 page_title。
 
     Returns:
-        str: 可套在 prompt title 的筆記標題。
+        可放進 prompt 標題的筆記名稱；別名與頁面標題都沒有時回空字串。
     """
     fm = note.get("md_frontmatter", {}) or {}
     alias = fm.get("alias") or ""
@@ -284,41 +320,36 @@ def t_chunk_and_embed_onenote(
     bucket_name: str = "onenote-vaults",
     genai_client: genai.Client | None = None,
 ) -> tuple[list[dict], dict[str, str]]:
-    """串接 fetch → chunk → embed，產出 vector docs 與 {md_archive_path: 本次 md_md5_hash}。
+    """逐份處理待向量化的版本，串接下載、切塊與向量化三個步驟。
 
-    回傳 (all_vector_docs, embedded_md5_by_md_path)：
-      - all_vector_docs：可寫入 note_vectors_multimodal 的 list[dict]，每筆帶 md_path（= md_archive_path），
-        作為與 collection onenote_note_metadata 的數據血緣。
-      - embedded_md5_by_md_path：本次成功處理（含切塊為空）的 {md_archive_path: md_md5_hash}，
-        供 load 層做「先刪後插 + CAS 翻 embedded_status」只對成功的檔翻 done，
-        失敗 (拋例外) 的檔不列入，下輪會重試。
+    每份筆記依序拉取歸檔後的正文、切成 chunk，最後逐個 chunk 做多模態向量化。
 
-    all_vector_docs 每筆輸出的結構：
-
-        ```
-        {
-            "md_path":      "gs://onenote-vaults/archived-notes/.../n.md",  # 血緣鍵（archived md 路徑）
-            "file_name":    "n",          # page_title
-            "chunk_index":  0,            # 從 0 開始
-            "chunk_total":  6,            # 這份筆記共幾個 chunk
-            "section":      "SQL - DQL敘述比較 > 針對一筆資料列…",
-            "content":      " (chunk 原始文字) ",
-            "image_paths":  ["gs://onenote-vaults/.../_images/xxx.png"],  # 該 chunk 命中的 archived 圖片
-            "embedding":    [...],        # list[float]，長度 1536，已 L2 normalize
-            "tags":         ["MongoDB"],  # 繼承自 md_frontmatter，支援 Atlas pre-filter
-            "note_type":    "knowledge_summary",
-            "date":         "2026-04-13",
-        }
-        ```
+    Note:
+        - 單份筆記處理失敗時只記一筆 warning 後略過，不中斷整批，該版本的 embedded_status 維持 false，
+          下一輪會再被挑出來重試。
+        - 切塊結果為空的筆記，例如空白筆記，仍算成功處理並列入回傳的對照表，
+          否則每一輪都會被重新挑出來卻永遠切不出東西。
+        - 待做清單為空時直接回傳，不會初始化 client，因此不會產生任何呼叫成本。
 
     Args:
-        gate_list: get_embedding_gate_list() 回傳的待做版本清單（每筆含 md_archive_path/md_md5_hash 等）。
-        bucket_name: GCS bucket 名稱，預設 "onenote-vaults"。
-        genai_client: 已初始化的 google-genai client；省略則由 _get_genai_client() 建立。
+        gate_list: get_embedding_gate_list 回傳的待做版本清單，每筆含 archived_md_path 與 md_md5_hash 等欄位。
+        bucket_name: GCS bucket 名稱，預設 onenote-vaults。
+        genai_client: 已初始化的 google-genai Client 物件；省略時由 _get_genai_client 自行建立。
 
     Returns:
-        tuple (all_vector_docs, embedded_md5_by_md_path)：可入庫的 vector docs 清單 (每筆結構見上)，
-        與本次成功處理 (含切塊為空) 的 {md_archive_path: md_md5_hash}。
+        向量文件清單與成功版本對照表組成的 tuple。
+
+        向量文件清單可直接寫入 note_vectors_multimodal，每筆分四組欄位。
+        追蹤來源的有 md_path 記錄歸檔後的 .md 路徑並作為 data lineage 的依據、file_name 記錄 OneNote 頁面標題、
+        chunk_index 為該 chunk 在筆記中的序號並從 0 起算、chunk_total 為這份筆記的 chunk 總數。
+        定位語意的有 section 記錄章節路徑、content 保留 chunk 原始文字且圖片語法不更動、
+        image_paths 記錄該 chunk 引用的圖片位址。向量本體是 embedding，長度 1536 且已完成 L2 正規化。
+        另有 tags、note_type 與 date 三個欄位繼承自 md_frontmatter，供 Atlas 做前置篩選。
+
+        成功版本對照表的鍵是 archived_md_path，值是該版本的 md_md5_hash，
+        供 Load 層先刪後插定位向量並作為 CAS 的守衛值。處理失敗的版本不會列入這份對照表。
+
+        待做清單為空時，兩者都回空值。
     """
     if not gate_list:
         return [], {}  # 無待做版本：不需初始化 genai client，直接回空

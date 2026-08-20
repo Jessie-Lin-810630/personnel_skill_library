@@ -28,17 +28,16 @@
 
 ```mermaid
 flowchart LR
-    E[Extract<br/>CDC 機制挑選筆記 + 下載 archived markdown 內文與圖片] --> T[Transform<br/>切塊 + 多模態向量化] --> L[Load<br/>寫入向量 +  更新向量化進度] --> P[Purge<br/>清除軟刪除筆記的向量]
-    M[(Collection<br/>`obsidian_note_metadata`)] -. 讀待尚未被向量化的筆記清單 .-> E
-    Arch[GCS<br/>`archived-notes/`] -. 內文與引用的圖片 .-> T
+    M1[(Collection<br/>`obsidian_note_metadata`)] -. 挑出尚未被向量化的歸檔筆記 .-> E
+    E[Extract<br/>gate 機制挑選筆記 + 下載 archived markdown 內文與圖片] --> T[Transform<br/>切塊 + 多模態向量化] --> L[Load<br/>寫入向量 +  更新向量化進度] --> P[Purge<br/>依 `obsidian_note_metadata` 標為 deleted 的筆記<br/>清除其過期向量並翻回未向量化]
+    Arch[GCS<br/>bucket `personal-vaults`<br/>`archived-notes/`] -. 內文與引用的圖片 .-> T
+    L -. 更新向量化進度 .-> M2[(Collection<br/>`obsidian_note_metadata`)]
     L -. 寫入向量 .-> V[(Collection<br/>`note_vectors_multimodal`)]
-    L -. 更新向量化進度 .-> M
-    P <-. 確認被軟刪除的過期筆記.-> M
     P -. 清除過期向量資料 .-> V
 ```
 
-- **Extract**：以 CDC 機制下載筆記內文。
-    - 判斷從 `obsidian_note_metadata` 挑出狀態為 *已歸檔*、但向量化狀態標示為 *未完成* 的筆記，依其歸檔路徑從 GCS 的`archived-notes/` 下載筆記內文 (markdown file)。
+- **Extract**：以 gate 機制挑出待向量化的筆記後下載內文。
+    - 從 `obsidian_note_metadata` 挑出狀態為 *已歸檔*、但向量化狀態標示為 *未完成* 的筆記，依其歸檔路徑從 GCS 的`archived-notes/` 下載筆記內文 (markdown file)。
 - **Transform**：以送入 embedding model 為導向進行內文清理出 chunks 後向量化。
     - 剝除內文的 Obsidian 特有語法（移除 block ID、簡化 wiki-link），再做兩段式切塊，先依 markdown 標題階層切、再依文字長度切。
 
@@ -48,9 +47,10 @@ flowchart LR
 
 - **Load**：以 'delete後insert' 模式將 embed 更新至向量資料庫。再回頭 update 筆記向量化完成狀態。
     - 對每份筆記，先刪去它在 `note_vectors_multimodal` 的舊向量、再插入新向量 (以避免同名筆記在重複執行本 ETL 後，殘留前次執行留下的 chunks，造成數據孤兒)。
-    - 採用 'compare-and-swap' 策略，比對這次下載的筆記 md5 是否與 `obsidian_note_metadata` 登記的 md5 hash 相符，相符則該筆記在 `obsidian_note_metadata` 的向量化狀態更新為 '已完成'。
-        > 若您的 task01 v2 與 task06 任務批次執行時間沒有重疊，或是沒有其他 task 在 task06 執行期間可能覆蓋 GCS 上的筆記，則 'compare-and-swap' 的執行結果通常都是導向為 '已完成'。
-    - **Purge**：從向量資料庫  `note_vectors_multimodal` 中 delete，已在task01 v2 標為 'deleted` 的過期筆記資料列。
+    - 更新向量化狀態時採用 compare-and-swap（先比較、條件成立才交換寫入，以下簡稱 CAS）：把「檢查」與「寫入」合併成同一個資料庫操作，只有在檢查條件當下全部成立才寫得進去，避免發生 race condition 導致資料血緣不一致問題。此處要同時成立的條件有三點：用 `raw_md_path` 這個欄位找到 `obsidian_note_metadata` 裡要更新的那一筆、該筆的向量化狀態仍是「*未完成*」、其 `archived_md_md5_hash` 欄位值仍等於本次從 GCS 下載下來做向量化的那份筆記之 md5 hash。三項齊備才把向量化狀態改為「*已完成*」。
+        > 若您的 task01 v2 與 task06 任務批次執行時間沒有重疊，或是沒有其他 task 在 task06 執行期間可能覆蓋 GCS 上的筆記，則 CAS 的執行結果通常都是導向為 '已完成'。
+
+- **Purge**：從向量資料庫 `note_vectors_multimodal` 中 delete，已在 task01 v2 標為 'deleted' 的過期筆記資料列。
 
 
 # Project Structures
@@ -141,7 +141,7 @@ task06_obsidian_embed_etl_v2/
 }
 ```
 
-> Collection 與其他任務的 Collection 之實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 與其他任務的 Collection 之實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 
 

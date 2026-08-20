@@ -1,7 +1,7 @@
 """vector_search 測試：query 向量化 + $vectorSearch pipeline 組裝（v2）。
 
 以 Vertex AI gemini-embedding-2 為 embedding model、note_vectors_multimodal 為集合、
-血緣欄 md_path。_get_embed_client / _get_db 皆 mock，不打真實 API / DB。
+md_path 為 data lineage 依據。_get_embed_client / _get_db 皆 mock，不打真實 API / DB。
 """
 
 import math

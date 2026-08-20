@@ -14,7 +14,7 @@
 - [x] 3.1 `t_chunk_embed`：對 archived md 內文做 chunking（copy task06_v2 header + recursive 切法）
 - [x] 3.2 `t_chunk_embed`：圖片解析改抓標準 markdown `![](_images/<檔名>)`，以 basename 對上 `attached_images[].archived_image_path`；對不上記 warning 略過
 - [x] 3.3 `t_chunk_embed`：每 chunk 多模態 embedding（`Part.from_uri` 送 archived 圖片 gs:// URI），產 1536 維並 L2 normalize
-- [x] 3.4 `t_chunk_embed`：組向量 doc，血緣欄 `md_path`=`archived_md_path`、`image_paths`=archived 圖片、`file_name`=`page_title`、`tags`/`note_type`/`date` 取自 `md_frontmatter`
+- [x] 3.4 `t_chunk_embed`：組向量 doc，以 `md_path`=`archived_md_path` 作為 data lineage 依據、`image_paths`=archived 圖片、`file_name`=`page_title`、`tags`/`note_type`/`date` 取自 `md_frontmatter`
 - [x] 3.5 unittest：chunk doc 帶 `md_path`（archived 路徑）、圖片來源為 archived 路徑、markdown `![]()` 語法解析正確（mock embedding 呼叫）
 
 ## 4. Load：寫 note_vectors_multimodal + CAS 翻旗標
@@ -26,7 +26,7 @@
 ## 5. 串接與收尾
 
 - [x] 5.1 `main.py`：串 E→T→L（gate → chunk+embed → 先刪後插+CAS），補 loguru 日誌與 env 檢查；不含 purge
-- [ ] 5.2 端到端本地實跑核對 `note_vectors_multimodal` 新增 `md_path` 血緣的 chunk 與 `embedded_status`（需真實 GCS/Mongo/Vertex，待 `task07-c3-schema-align` live）
+- [ ] 5.2 端到端本地實跑核對 `note_vectors_multimodal` 新增帶 `md_path` 的 chunk 與 `embedded_status`（需真實 GCS/Mongo/Vertex，待 `task07-c3-schema-align` live）
 - [x] 5.3 `poetry run python -m unittest discover -s tests` 全綠
 - [x] 5.4 CLAUDE.md 的 ETL 表新增 task08 一列（來源 `onenote-vaults/archived-notes/`、目的地 `note_vectors_multimodal`）
-- [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `note_vectors_multimodal` 血緣欄；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存
+- [ ] 5.5 （跨分支待辦，非本 change）由另一分支把 task06_v2 的 `raw_md_path`→`md_path`、值改存 archived 路徑，收斂 `note_vectors_multimodal` 的 data lineage 欄位；同步通知 RAG（feature/dashboard-ui）過渡期兩欄並存

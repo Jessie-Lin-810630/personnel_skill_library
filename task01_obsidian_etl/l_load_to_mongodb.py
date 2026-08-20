@@ -98,7 +98,7 @@ def sync_notes(db: Database, notes_on_gcs: list[dict]) -> None:
 
 
 def upsert_note_summary(db: Database, summary: dict) -> None:
-    """以 snapshot_date 為鍵，每天只保留最新一筆快照"""
+    """以 snapshot_date 為唯一鍵 (Upsert key)，每天只保留最新一筆快照"""
     collection = db["obsidian_summary"]  # A collection object
     collection.update_one({"snapshot_date": summary["snapshot_date"]}, {"$set": summary}, upsert=True)
     logger.success(f"obsidian_summary 快照已更新，快照日期：{summary['snapshot_date']}")

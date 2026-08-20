@@ -1,8 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: C3 主鍵與 hash 欄位命名一致
+### Requirement: C3 複合唯一鍵與 hash 欄位命名一致
 
-`onenote_note_metadata`（C3）SHALL 以 `page_id`+`dt` 為 upsert 主鍵，支援同頁多版本。C3 的 html 變動判定 hash 欄位 SHALL 命名為 `html_sha_hash`（sha256 hexdigest），GCS html 物件指紋欄位 SHALL 命名為 `html_md5_hash`，silver md 物件指紋欄位 SHALL 命名為 `md_md5_hash`。C1（`onenote_graph_api_logs`）與 C2（`multimodal_llm_enrichment_logs`）寫入的 html sha256 欄位 SHALL 同樣命名為 `html_sha_hash`，跨 collection 命名一致。系統 MUST NOT 再以 `html_hash`／`html_md5`／`md_md5` 作為寫入 MongoDB 的 document key。
+`onenote_note_metadata`（C3）SHALL 以 `page_id`+`dt` 為複合唯一鍵 (Upsert key)，支援同頁多版本。C3 的 html 變動判定 hash 欄位 SHALL 命名為 `html_sha_hash`（sha256 hexdigest），GCS html 物件指紋欄位 SHALL 命名為 `html_md5_hash`，silver md 物件指紋欄位 SHALL 命名為 `md_md5_hash`。C1（`onenote_graph_api_logs`）與 C2（`multimodal_llm_enrichment_logs`）寫入的 html sha256 欄位 SHALL 同樣命名為 `html_sha_hash`，跨 collection 命名一致。系統 MUST NOT 再以 `html_hash`／`html_md5`／`md_md5` 作為寫入 MongoDB 的 document key。
 
 #### Scenario: Bronze 寫入使用一致的 hash 欄位名
 

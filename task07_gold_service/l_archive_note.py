@@ -1,19 +1,17 @@
 """Gold 層 Load：approve 歸檔 / reject 退件，兩者都把 md frontmatter 寫回 onenote_note_metadata 供好壞 md 分析。
 
-本層不做向量化 (解耦至另一條 pipeline Task06)。
-
 執行流程：
-    1. approve (archive_note)：取 Collection onenote_note_metadata 取得筆記 metadata 資料
-    → 把關是否早有同名已歸檔筆記。
-    → 複製 md (processed-notes) 與 png (raw-notes) 到 archived-notes/。
-    → upsert Collection onenote_note_metadata (status=archived、歸檔路徑、審核欄位)。
-    → 退役同頁其他 pending_review 版本 (status=review_closed、同 hash 標 overwritten 否則 rejected)。
-    → 讀回歸檔 md ，萃取 frontmatter 並統計 valid_img。
-    → 以內嵌 Object md_frontmatter upsert Collection onenote_note_metadata。
-    2. reject (reject_note): 取 Collection onenote_note_metadata 取得筆記 metadata 資料
-    → upsert Collection onenote_note_metadata (status=review_closed、審核欄位)
-    → 讀 md (processed-notes) 萃取 frontmatter 並統計 valid_img。
-    → 以內嵌 Object md_frontmatter upsert Collection onenote_note_metadata。
+    1. approve (archive_note)：先從 Collection onenote_note_metadata 取得筆記 metadata 資料，
+       - 把關是否早有同名已歸檔筆記，再複製 md (存在 processed-notes/) 與 png (存在 raw-notes/) 到 archived-notes/。
+       - 接著 upsert Collection onenote_note_metadata (修改 status=archived、歸檔路徑與審核欄位)，
+       並退役同名筆記的其他 pending_review 版 (修改 status=review_closed、依照 html hash 更新審核欄位)。
+       - 最後讀回歸檔在 archived-notes/ 的 md 萃取 frontmatter，檢驗有效圖片與連結失效的破圖數量，
+       在 'md_frontmatter' 欄位以內嵌 Object，upsert 到 Collection onenote_note_metadata。
+    2. reject (reject_note)：先從 Collection onenote_note_metadata 取得筆記 metadata 資料，
+       - 接著 upsert Collection onenote_note_metadata (修改 status=review_closed 與審核欄位)，
+       退件不搬動檔案，md 與 png 都留在原本的 processed-notes/ 與 raw-notes/。
+       - 最後讀回留在 processed-notes/ 的 md 萃取 frontmatter，檢驗有效圖片與連結失效的破圖數量，
+       在 'md_frontmatter' 欄位以內嵌 Object，upsert 到 Collection onenote_note_metadata。
 
 Usage:
     由 gold_service 的 /archive 端點在 approve/reject 時呼叫。
@@ -45,7 +43,16 @@ from task07_common.topic import infer_topic
 
 
 def _dt_to_date(dt_str: str) -> date | None:
-    """把 dt 分區字串 (YYYY-MM-DD 等) 轉為 date；無法解析回傳 None。"""
+    """把版本分區字串轉成日期物件，供比較版本新舊。
+
+    依序嘗試連字號、斜線、底線三種日期分隔寫法。
+
+    Args:
+        dt_str: 版本分區字串。
+
+    Returns:
+        對應的日期物件；三種寫法都不符或傳入 None 時，記一筆 warning 後回 None。
+    """
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y_%m_%d"):
         try:
             return datetime.strptime(dt_str, fmt).date()
@@ -58,18 +65,22 @@ def _dt_to_date(dt_str: str) -> date | None:
 
 
 def _infer_misposition_metadata(post: frontmatter.Post) -> dict[str, list | str]:
-    """當 frontmatter 漏寫進正文時的補救解析：掃描正文「頂端」的 key: value 區塊。
+    """當 frontmatter 誤植到正文時的補救解析，掃正文頂端的欄位區塊把值撿回來。
 
-    逐行掃描，碰到第一個真正的 markdown 標題行 (行首 '# '、'## '…) 才停，
-    避免行內標籤 (#python) 被誤判成標題而截斷。
-    用 str.partition 以控制回傳值只有三段，且在第一個冒號切開 key & value，
-    以免 value 內有含冒號 (時間 10:30、URL) 而多切。
+    1. 逐行往下掃，一路把殘留的分隔線與前後空白清掉。
+    2. 碰到第一個真正的 Markdown 標題行就停止。
+    3. 只在第一個冒號處切開欄位名與值，全形與半形冒號都接受。
+    4. 依欄位名把值收進 tags、date、type、alias 四個欄位。
+
+    Note:
+        判定標題行時要求 # 後面接空白或再一個 #，這樣行內標籤例如 #python 才不會被誤判成標題而提早截斷。
+        只切第一個冒號則是為了讓值本身含冒號的內容保持完整，例如時間 10:30 或網址。
 
     Args:
-        post (frontmatter.Post): frontmatter.loads() 解析後的物件。
+        post: frontmatter.loads 解析後的物件。
 
     Returns:
-        dict[str, list | str]: 最終，補救到的 tags / date / type / alias。
+        含 tags、date、type、alias 四個鍵的字典；正文頂端沒有可辨識的欄位時，各鍵維持空值。
     """
     fm: dict[str, list | str] = {"tags": [], "date": "", "type": "", "alias": []}
     for raw_line in post.content.splitlines():
@@ -98,7 +109,20 @@ def _infer_misposition_metadata(post: frontmatter.Post) -> dict[str, list | str]
 
 
 def _normalize_str_list(value) -> list[str]:
-    """把 frontmatter 的 tags/alias 正規化為 list[str] (容忍逗號分隔字串或既有 list)。"""
+    """把 frontmatter 的 tags 或 alias 正規化成字串清單，同時容忍逗號分隔字串與既有清單兩種寫法。
+
+    已是清單時逐項轉成字串並去除前後空白，是字串時先去掉方括號再以逗號切開，兩者都會濾掉空項。
+
+    Note:
+        這裡只去空白、不轉小寫，與 task01 對 Obsidian 標籤的處理不同，
+        因為 OneNote 的標籤由模型產出時已在 _build_markdown 統一過大小寫。
+
+    Args:
+        value: frontmatter 的 tags 或 alias 原始值，型別不定。
+
+    Returns:
+        正規化後的字串清單；無法處理的型別回空清單。
+    """
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
     if isinstance(value, str):
@@ -107,10 +131,23 @@ def _normalize_str_list(value) -> list[str]:
 
 
 def _normalize_date(value) -> datetime | None:
-    """把 frontmatter 的 date 正規化為 BSON 可編碼的 UTC datetime；無法解析回 None。"""
+    """把 frontmatter 的 date 正規化成帶 UTC 時區的 datetime。
+
+    已是 datetime 就直接回傳，是日期物件就補上 UTC 午夜時間，
+    是字串則依序嘗試連字號、斜線、底線三種日期分隔寫法。
+
+    Note:
+        補時間與補時區都是為了讓值能被 BSON 編碼，純日期型別無法直接寫進 MongoDB。
+
+    Args:
+        value: frontmatter 的 date 原始值，型別不定。
+
+    Returns:
+        帶 UTC 時區的 datetime；無法解析時回 None，該筆記的日期欄位便留空。
+    """
     if isinstance(value, datetime):
         return value
-    if isinstance(value, date):  # datetime.date (非 datetime) → 補 UTC 午夜
+    if isinstance(value, date):  # 純日期沒有時間，補 UTC 午夜再轉 datetime
         return datetime.combine(value, time.min, tzinfo=timezone.utc)
     if isinstance(value, str) and value.strip():
         for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y_%m_%d"):
@@ -126,22 +163,36 @@ _IMG_LINK_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 
 def _count_img_links(content: str) -> int:
-    """統計 md 正文 ![]() 圖片連結的總數（含改壞、指向不存在圖片者）。"""
+    """統計 md 正文裡圖片連結的總數。
+
+    Note:
+        總數包含連結被改壞、指向不存在圖片的那些，因此這個數字減去有效張數即為失效張數。
+
+    Args:
+        content: md 的正文，不含 frontmatter 區塊。
+
+    Returns:
+        圖片連結的出現次數。
+    """
     return len(_IMG_LINK_RE.findall(content))
 
 
 def _count_valid_images(content: str, img_paths: list[str]) -> int:
-    """統計 md 正文 ![]() 連結中，檔名有落入 img_paths (basename 比對) 的張數。
+    """統計 md 正文的圖片連結中，有多少張真的指向這份筆記實際擁有的圖片。
 
-    模型有隨機性，可能把圖片檔名改壞導致連結指向不存在的圖；命中對應圖者才算 validated，
-    此計數供事後追蹤模型輸出的圖片連結正確率。
+    只比對檔名，不比對完整路徑。
+
+    Note:
+        模型輸出帶有隨機性，可能把圖片檔名改壞而讓連結指向不存在的圖，因此需要這個計數
+        追蹤模型輸出圖片連結的正確率。歸檔時傳歸檔後的圖片路徑、退件時傳原始圖片路徑，
+        兩者檔名相同，所以比對結果一致。
 
     Args:
-        content (str): md 的正文 (不含 frontmatter 區)。
-        img_paths (list[str]): 對應的 png gs:// 路徑集合 (approve 傳 archived、reject 傳 raw，basename 一致)。
+        content: md 的正文，不含 frontmatter 區塊。
+        img_paths: 這份筆記實際擁有的圖片位址清單。
 
     Returns:
-        int: md 圖片連結命中對應圖片的次數。
+        連結檔名命中實際圖片的次數；沒有任何圖片時回 0。
     """
     valid_names = {PurePosixPath(p).name for p in (img_paths or [])}
     if not valid_names:
@@ -150,20 +201,24 @@ def _count_valid_images(content: str, img_paths: list[str]) -> int:
 
 
 def _build_md_quality_meta(md_str: str, img_paths: list[str] | None, page_title: str) -> dict:
-    """讀 md，組出要 upsert 進 metadata 的品質欄位：md_frontmatter、md_body、dismatched 統計與 topic。
+    """讀一份 md，組出要寫回 metadata 的品質欄位。
 
-    frontmatter 未寫進 metadata 區時以正文頂端補救解析；valid_img 由正文 ![]() 連結 basename
-    比對 img_paths 得出 (approve 傳 archived_image_path、reject 傳 raw_image_path，basename 一致)；
-    dismatched = 連結總數 - valid_img；topic 以 frontmatter tags＋頁面標題重算 (對齊 task01 分類)。
+    解析 frontmatter，欄位區是空的時改用正文頂端補救；統計圖片連結的有效與失效張數；
+    最後以標籤與頁面標題重新推算 topic。
+
+    Note:
+        topic 在 Bronze 階段只憑標題初判，這裡拿模型產出的 tags 一起重算會更準確，
+        因此同一份筆記的 topic 可能在此改變。失效張數由連結總數減去有效張數得出，
+        數值大於 0 代表模型改壞了圖片連結，供事後追蹤輸出品質。
 
     Args:
-        md_str (str): md 全文 (approve 為歸檔 md、reject 為 silver md)。
-        img_paths (list[str] | None): 該版對應的 png 路徑集合，供 valid_img basename 比對。
-        page_title (str): 頁面標題，供 topic 重算的比對來源之一。
+        md_str: md 全文，歸檔時傳歸檔後的內容、退件時傳 Silver 層的內容。
+        img_paths: 這份筆記實際擁有的圖片路徑清單，用來比對 md 全文內的圖片連結是否為有效路徑。
+        page_title: 頁面標題，作為重算 topic 的比對來源之一。
 
     Returns:
-        dict: {md_frontmatter, md_body, dismatched_img_count, md_has_dismatched_img, topic}，
-        供以同主鍵 upsert Collection onenote_note_metadata。
+        含 md_frontmatter、md_body、dismatched_img_count、md_has_dismatched_img 與 topic
+        五個鍵的字典，供呼叫端以同一組複合唯一鍵寫回 onenote_note_metadata。
     """
     post = frontmatter.loads(md_str)
     fm = post.metadata
@@ -196,22 +251,31 @@ def _build_md_quality_meta(md_str: str, img_paths: list[str] | None, page_title:
 
 
 def archive_note(page_id: str, dt: str, role: str) -> dict:
-    """Gold 層：把 approved 的 md 與 png 歸檔到 archived-notes/，並回寫 frontmatter 做品質確認。
+    """Gold 層的核可歸檔，把通過審查的 md 與圖片複製到 archived-notes/ 並回寫品質欄位。
 
-    歸檔到 gs://onenote-vaults/archived-notes/...，先更新一次 Collection onenote_note_metadata，
-    再讀回 archived md 檔萃取 frontmatter 做資料品質確認，做第二次 metadata 更新。
+    1. 讀取該版本的 metadata，取不到就回覆查無此版本；已歸檔過則直接回既有結果。
+    2. 比對這一版與最近一次歸檔的日期，較舊就拒絕歸檔。
+    3. 把 md 從 Silver 層、圖片從 Bronze 層分別複製到 Gold 層，並回填各張圖歸檔後的路徑與 md5。
+    4. 更新 metadata 的歸檔狀態、路徑與審核欄位。
+    5. 結束同一頁其他仍在審閱的版本。
+    6. 讀回歸檔後的 md，萃取品質欄位再寫回 metadata，最多重試三次。
 
-    Notes:
-        讀回 archived md 與第二次 metadata 更新，如果經使用者體驗發現前端回覆歸檔進度過慢，
-        則評估將 step 5 拆開走另一個 route。
+    Note:
+        第二步拒絕舊版本歸檔，是為了避免已有較新內容歸檔後又被舊版覆寫，也讓人工審閱不必回頭處理舊版。
+        第五步依內容雜湊決定其他版本的結果：與歸檔版相同者標為已被覆寫，不同者標為退件。
+        第六步的重試若全部失敗，仍回報歸檔成功，因為 md 與圖片都已複製完成、狀態也已更新，
+        只有品質欄位從缺，失敗原因記在 error_msg。
+        若日後審查頁反映歸檔回應太慢，可評估把第六步拆成另一個端點非同步執行。
 
     Args:
-        page_id (str): OneNote page id。
-        dt (str): 版本日期分區字串。
-        role (str): 審核者角色 (寫入 reviewed_by_role)。
+        page_id: OneNote 頁面代號。
+        dt: 版本分區字串。
+        role: 審核者角色，寫入 reviewed_by_role。
 
     Returns:
-        dict: {status, md_archive_path, img_archive_path, error}；不同分支帶不同欄位。
+        含 status 的結果字典，md 與圖片寫進 GCS、狀態寫進 MongoDB 的 onenote_note_metadata。
+        status 可能是 archived、not_found、archived_conflict、archive_failed 或該版本原本的狀態；
+        成功時另帶 md_archive_path 與 img_archive_path 指向歸檔後的位址，失敗時帶 error 說明原因。
     """
     ATTEMPTS = 3  # for step 5
 
@@ -235,7 +299,7 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
     if not enriched_md_path:
         return {"status": meta.get("status"), "error": "此版本目前無生成 md，無法歸檔"}
 
-    # 取出最近一次歸檔日
+    # 2. 取出最近一次歸檔日
     latest_archived = get_latest_archived_version(page_id)
     if latest_archived:
         # this_day = 現在在審閱的是哪個 dt 版本的 note，回傳 date part
@@ -257,26 +321,33 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
 
     now = now_utc()
     try:
-        # 2. 執行歸檔：從 processed-notes 複製 md 到 archived-notes
+        # 3-1. 歸檔 md：從 processed-notes/ 複製 md 到 archived-notes/
         md_name = PurePosixPath(enriched_md_path).name
         md_dst_blob = f"{archived_prefix}/{md_name}"
         md_md5_hash = gcs.copy_blob(enriched_md_path, md_dst_blob)
         md_archive_uri = gcs.gs_uri(md_dst_blob)
 
-        # 3. 執行歸檔：逐一從 raw-notes 複製 png 到 archived-notes，並把 archived 端路徑/md5
-        #    回填進對應的 attached_images Object（保留 raw 端欄位不動）。
+        # 3-2. 歸檔 img：逐一從 raw-notes/ 複製 png 到 archived-notes/，
+        #    並把 archived 的檔案路徑與 md5，組合到 'attached_images' 這個 list[dict]
+        #    'attached_images' 的元素 dict 在 bronze 層任務期間可能已經先插入了兩種 key，
+        #    'raw_image_path' 與 'raw_image_md5'。所以在這裡可以把 'raw_image_path' 讀出來，
+        #    即可知道現在這篇要歸檔的筆記的圖片正放在 raw-notes/ 下的哪個路徑。
+        #    路徑取得後就可以拆解出要複製到 archived-notes/ 下的哪個新路徑。
         attached_images: list[dict] = []
         img_archive_paths: list[str] = []
         for img in meta.get("attached_images", []) or []:
             raw_uri = img.get("raw_image_path")
-            if not raw_uri:
-                attached_images.append(img)
-                continue
+            if not raw_uri:  # 代表原文本來就沒有嵌進圖片
+                attached_images.append(img)  # 插入 [] 到欄位 attached_images
+                continue  # 本來就沒有內嵌圖片所以後面的 copy 都不用了。
             img_name = PurePosixPath(raw_uri).name
             img_dst_blob = f"{archived_prefix}/_images/{img_name}"
             archived_md5 = gcs.copy_blob(raw_uri, img_dst_blob)
             archived_uri = gcs.gs_uri(img_dst_blob)
             img_archive_paths.append(archived_uri)
+            # 在 bronze 層任務期間可能已經先插入了兩種 key，'raw_image_path' 與 'raw_image_md5'，
+            # 所以寫 **img 保住這兩個欄位。
+            # 僅增加 'archived_image_path' 與 'archived_image_md5' 兩個 key
             attached_images.append({**img, "archived_image_path": archived_uri, "archived_image_md5": archived_md5})
     except Exception as e:  # noqa: BLE001
         upsert_version_meta(page_id, dt, set_fields={"status": "archive_failed", "error_msg": f"[gold:copy] {e}"})
@@ -300,8 +371,9 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
         },
     )
 
-    # 4b. 退役同頁其他仍在審閱的候選版本：本輪已擇一歸檔，其餘連帶結束審閱期。
-    #     html_sha_hash 與歸檔版相同者標 overwritten（內容等同已被採納），不同者 rejected。
+    # 5. 退役同頁其他仍在審閱的候選版本：本輪已擇一歸檔，其餘連帶結束審閱期。
+    #    html_sha_hash 與當前歸檔版相同者，標 overwritten (因為內容本質相同的話等同視為已被歸檔)，
+    #    html_sha_hash 不同的筆記則一率判為 rejected。
     archived_hash = meta.get("html_sha_hash")
     for sib in get_sibling_pending_versions(page_id, dt):
         retired_result = "overwritten" if sib.get("html_sha_hash") == archived_hash else "rejected"
@@ -315,14 +387,14 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
             },
         )
 
-    # 5. 後台運作：讀回歸檔完成的 md、萃取 md_frontmatter/md_body/dismatched/topic，
+    # 6. 後台運作：讀回歸檔完成的 md、萃取 md_frontmatter/md_body/dismatched/topic，
     # 以內嵌 Object upsert Collection onenote_note_metadata
     for _ in range(ATTEMPTS):
         try:
             archived_md = gcs.download_text(md_archive_uri)
             quality = _build_md_quality_meta(archived_md, img_archive_paths, meta["page_title"])
             upsert_version_meta(page_id, dt, set_fields=quality)
-            logger.success(f"[gold] archived page_id={page_id}, dt={dt} → {md_archive_uri}")
+            logger.success(f"[gold] archived page_id={page_id}, dt={dt}, uri={md_archive_uri}")
             return {
                 "status": "archived",
                 "md_archive_path": md_archive_uri,
@@ -338,21 +410,26 @@ def archive_note(page_id: str, dt: str, role: str) -> dict:
 
 
 def reject_note(page_id: str, dt: str, role: str) -> dict:
-    """Gold 層：把 rejected 版本狀態翻成 review_closed，並回寫該 md 的 frontmatter 供品質分析。
+    """Gold 層的退件處理，把該版本標為結束審閱，並回寫該 md 的品質欄位供事後分析。
 
-    不歸檔；把 gs://onenote-vaults/processed-notes/... (silver 層) md 的 frontmatter 寫回
-    Collection onenote_note_metadata，追溯被退件筆記的資料品質，供流程分析。
+    1. 讀取該版本的 metadata，取不到就回覆查無此版本。
+    2. 更新狀態與審核欄位，標記為退件。
+    3. 讀 Silver 層那份 md，萃取品質欄位再寫回 metadata，最多重試三次。
 
-    Notes:
-        不寫任何 GCS。frontmatter 萃取為背景步驟，若萃取失敗只記 error_msg。
+    Note:
+        這支函式完全不寫 GCS，被退件的 md 仍留在 Silver 層不做搬移。
+        第三步只是背景分析用，即使該版本沒有 md 可讀、或重試全部失敗，退件本身仍算完成並回報成功，
+        失敗原因記在 error_msg。保留這些欄位是為了日後回頭分析筆記為何被退件。
 
     Args:
-        page_id (str): OneNote page id。
-        dt (str): 版本日期分區字串。
-        role (str): 審核者角色 (寫入 reviewed_by_role)。
+        page_id: OneNote 頁面代號。
+        dt: 版本分區字串。
+        role: 審核者角色，寫入 reviewed_by_role。
 
     Returns:
-        dict: {status, review_result, error}；查無版本回 not_found。
+        含 status 的結果字典，狀態寫進 MongoDB 的 onenote_note_metadata。
+        查無版本時 status 為 not_found 並帶 error 說明；其餘情況 status 為 review_closed、
+        review_result 為 rejected。
     """
     ATTEMPTS = 3
     # 1. 先從 metadata 撈取這份筆記的狀態

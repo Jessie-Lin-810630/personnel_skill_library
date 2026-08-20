@@ -1,12 +1,16 @@
+import os
 import sys
+import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Option A：把 dashboard_ui/ 加進 path，讓模組的裸 import（utils）如 app 實際跑法般解析
 sys.path.insert(0, str(PROJECT_ROOT / "dashboard_ui"))
 
-from utils.interact_with_mongodb import get_onenote_attachment_dismatch
+from utils.interact_with_mongodb import get_onenote_attachment_dismatch, to_tpe_time_text
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,6 +114,59 @@ class OnenoteAttachmentDismatchTests(unittest.TestCase):
     def test_empty_aggregate_result_returns_empty_list(self):
         result, _, _ = self._run(docs=[])
         self.assertEqual(result, [])
+
+
+# ── ToTpeTimeTextTests ────────────────────────────────────────────────────────
+
+
+class ToTpeTimeTextTests(unittest.TestCase):
+    """驗證時區換算：UTC 02:30 一律顯示為台北 10:30，且不因執行機器的系統時區而改變。"""
+
+    def setUp(self):
+        # 刻意把系統時區設成非 UTC，模擬本地開發機；naive 值若未補 UTC 就會換算錯誤
+        self._saved_tz = os.environ.get("TZ")
+        os.environ["TZ"] = "America/New_York"
+        time.tzset()
+        self.addCleanup(self._restore_tz)
+
+    def _restore_tz(self):
+        if self._saved_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._saved_tz
+        time.tzset()
+
+    def test_naive_datetime_is_read_as_utc(self):
+        self.assertEqual(to_tpe_time_text(datetime(2026, 8, 19, 2, 30, 5)), "2026-08-19 10:30:05")
+
+    def test_aware_utc_datetime_is_converted(self):
+        aware = datetime(2026, 8, 19, 2, 30, 5, tzinfo=timezone.utc)
+        self.assertEqual(to_tpe_time_text(aware), "2026-08-19 10:30:05")
+
+    def test_aware_non_utc_datetime_is_converted_by_its_own_offset(self):
+        aware = datetime(2026, 8, 19, 4, 30, 5, tzinfo=ZoneInfo("Asia/Tokyo"))
+        self.assertEqual(to_tpe_time_text(aware), "2026-08-19 03:30:05")
+
+    def test_iso_string_without_offset_is_read_as_utc(self):
+        self.assertEqual(to_tpe_time_text("2026-08-19T02:30:05"), "2026-08-19 10:30:05")
+
+    def test_iso_string_with_offset_is_converted(self):
+        self.assertEqual(to_tpe_time_text("2026-08-19T02:30:05+00:00"), "2026-08-19 10:30:05")
+
+    def test_microseconds_are_truncated_to_seconds(self):
+        self.assertEqual(to_tpe_time_text(datetime(2026, 8, 19, 2, 30, 5, 123456)), "2026-08-19 10:30:05")
+
+    def test_unparsable_string_is_returned_as_is(self):
+        self.assertEqual(to_tpe_time_text("N/A"), "N/A")
+
+    def test_long_unparsable_string_is_truncated_to_19_chars(self):
+        self.assertEqual(to_tpe_time_text("x" * 30), "x" * 19)
+
+    def test_empty_string_returns_empty_string(self):
+        self.assertEqual(to_tpe_time_text(""), "")
+
+    def test_none_returns_its_text_form(self):
+        self.assertEqual(to_tpe_time_text(None), "None")
 
 
 if __name__ == "__main__":

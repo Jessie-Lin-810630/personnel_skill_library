@@ -1,8 +1,11 @@
 """Bronze 層 Extract：下載 OneNote 頁面 html、比對 hash、有變動才分區寫入 GCS。
 
-執行流程：下載 OneNote 頁面 html → 算 html_sha_hash → 與 onenote_note_metadata 最新一筆 hash 比對 →
-有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata（status=bronze_stored、
-含 attached_images 圖片血緣與 topic 初判）。
+執行流程：
+    1. 下載 OneNote 頁面 html，算出 html_sha_hash。
+    2. 與 onenote_note_metadata 最新一筆 hash 比對，判斷這個版本有無變動。
+    3. 有變動才以 dt=<執行日> 分區寫入 GCS（html + _images），並 upsert onenote_note_metadata
+       （status=bronze_stored、含 attached_images 圖片血緣與 topic 初判）。
+
 本層完全不呼叫 LLM；Silver enrichment 改由 UI on-demand 觸發。
 """
 
@@ -58,17 +61,16 @@ if not CLIENT_ID:
 
 
 def _build_msal_app() -> tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
-    """建立可快取物件 cache 與 Microsoft 應用程式物件 app。不回傳 token。
+    """建立 MSAL 應用程式物件與其 token 快取，不取得 token。
 
-    此函式會自動檢查全域變數 CACHE_PATH (Path 物件) 是否存在，
-    若存在則會讀取並載入先前的快取紀錄。
+    先檢查 CACHE_PATH 指向的快取檔是否存在，存在就把先前的紀錄讀進記憶體，
+    再以此建立應用程式物件。
 
-    **Notes**:
-        此函式本身不會將更新後的快取寫回硬碟，呼叫端需自行負責後續儲存。
+    Note:
+        這支函式不會把更新後的快取寫回硬碟，呼叫端需自行負責寫回，否則下次執行仍要重新登入。
 
     Returns:
-        tuple[msal.PublicClientApplication, msal.SerializableTokenCache]:
-            傳回設定好的 MSAL 應用程式實例與 Token 快取物件。
+        MSAL 應用程式物件與 token 快取物件組成的 tuple。
     """
     # 建立可被序列化（也就是能轉成文字存成檔案）的快取物件 cache
     cache = msal.SerializableTokenCache()
@@ -85,7 +87,20 @@ def _build_msal_app() -> tuple[msal.PublicClientApplication, msal.SerializableTo
 
 
 def get_token() -> tuple[str, msal.PublicClientApplication, msal.SerializableTokenCache]:
-    """Acquire access token; triggers device-flow login when no cached token exists."""
+    """取得存取 OneNote 所需的 token，快取失效時改走互動式登入。
+
+    先從快取找既有帳號並嘗試在背景取得 token，此時過期的 token 會自動刷新。
+    背景取不到就啟動裝置流程，把驗證碼印在畫面上等待使用者在瀏覽器完成授權。
+    最後不論走哪條路徑，都把最新的快取狀態寫回硬碟。
+
+    Note:
+        互動式登入需要人工介入，這也是 Bronze 層只在地端執行、不納入雲端部署的原因。
+        取不到 token 時直接中止整個行程而非拋例外，因為後續每一步都需要它。
+
+    Returns:
+        存取 token、MSAL 應用程式物件與 token 快取物件組成的 tuple，
+        後兩者供後續請求在收到 401 時刷新 token。
+    """
     # 1. 建立應用程式物件、快取物件
     app, cache = _build_msal_app()
 
@@ -123,15 +138,36 @@ def get_token() -> tuple[str, msal.PublicClientApplication, msal.SerializableTok
 
 
 class RateLimiter:
-    """Sliding-window (滑動窗口演算法) limiter enforcing OneNote API caps (120/min, 400/hour)."""
+    """以滑動窗口演算法節流請求，讓送出頻率不超過 OneNote API 的上限。
+
+    同時維護一分鐘與一小時兩個窗口，任一個達到上限就等待到該窗口空出名額為止。
+
+    Note:
+        預設值刻意低於官方的每分鐘 120 次與每小時 400 次，留一點餘裕吸收計時誤差。
+        窗口狀態存在記憶體，因此節流只在單一行程內有效。
+    """
 
     def __init__(self, per_minute: int = 115, per_hour: int = 380):
+        """建立節流器，設定兩個窗口各自的請求上限。
+
+        Args:
+            per_minute: 每分鐘最多送出幾次請求，預設 115 次。
+            per_hour: 每小時最多送出幾次請求，預設 380 次。
+        """
         self.per_minute = per_minute
         self.per_hour = per_hour
         self._min_q = deque()  # 紀錄一分鐘內的請求時間
         self._hour_q = deque()  # 紀錄一小時內的請求時間
 
     def acquire(self):
+        """取得一個送出請求的名額，額度不足時就地等待到空出為止。
+
+        每輪先清掉已離開窗口的舊紀錄，再看兩個窗口是否還有名額；
+        沒有就算出最近一個名額何時釋出並睡到那時，取得名額後把當下時間記進兩個窗口。
+
+        Returns:
+            None: 只更新這個物件的內部狀態並視需要等待，不回傳值。
+        """
         while True:
             now = time.time()
             while self._min_q and now - self._min_q[0] > 60:
@@ -170,30 +206,35 @@ def api_get(
     page_id: str | None = None,
     request_id: str | None = None,
 ) -> requests.Response:
-    """對沒有分頁 (no pagination) 的單一 URL 請求所有資料，附設重試機制。
+    """對單一個 API 位址送出請求，內建節流與分類重試，最多嘗試十次。
 
-    此函式只會在發生「失敗的attempt時」將失敗紀錄寫入 Collection "onenote_graph_api_logs"；
-    成功的請求 (含 html_hash、downloaded) 由 download_notebook() 在拿到 hash 決策後自行寫入。
+    每次送出前先向節流器取得名額。回應非 2xx 時依狀態碼分四類處理：
+    收到 401 就刷新 token 後重試一次，收到 429 依伺服器指示的秒數加上退避時間後重試，
+    收到 5xx 依退避時間後重試，其餘 4xx 視為非暫時性錯誤不重試而直接往外拋。
+    連線逾時這類傳輸層錯誤同樣依退避時間重試。
+
+    Note:
+        這支函式只在嘗試失敗時寫稽核紀錄；成功的請求要等呼叫端拿到內容雜湊、
+        判斷完是否真的要寫入新版本後才自行寫紀錄，因此成功與否的紀錄分散在兩處。
+        收到 401 時會就地改寫傳入的 headers，呼叫端持有的同一個物件會跟著更新。
 
     Args:
-        url (str): 要請求的單一 Graph API endpoint URL（此函式不處理分頁）。
-        headers (dict): HTTP 請求標頭，需含 `Authorization: Bearer <token>`；
-            401 刷新 token 後會就地改寫本 dict。
-        limiter (RateLimiter): 滑動窗口 rate limiter，每次送出請求前先 `acquire()` 遵守 API 上限。
-        app (msal.PublicClientApplication): MSAL 應用程式物件，收到 401 時用以靜態刷新 token。
-        cache (msal.SerializableTokenCache): MSAL token 快取；刷新後序列化寫回 CACHE_PATH。
-        binary (bool, optional): 是否以 stream 方式下載二進位內容（如圖片）；預設 False（取文字）。
-        page_id (str | None, optional): 該請求所屬的 OneNote page id，僅用於寫 log 關聯。Defaults to None.
-        request_id (str | None, optional): 呼叫端可傳入共用的 request_id，讓 api_get 內部
-            寫的失敗 attempt log 與呼叫端事後寫的結果 log 掛同一個 ID（同一邏輯請求可 join）；
-            省略則自行生成（如 listing、圖片等各自獨立的請求）。
+        url: 要請求的單一 API 位址，這支函式不處理分頁。
+        headers: HTTP 請求標頭，需含 Bearer token。
+        limiter: 節流器，每次送出請求前先向它取得名額。
+        app: MSAL 應用程式物件，收到 401 時用來在背景刷新 token。
+        cache: MSAL token 快取，刷新後會寫回硬碟。
+        binary: 是否以串流方式下載二進位內容，預設 False 代表取文字。
+        page_id: 該請求所屬的頁面代號，僅用於稽核紀錄的關聯，預設為 None。
+        request_id: 呼叫端傳入的共用請求代號，讓這裡寫的失敗紀錄與呼叫端事後寫的結果紀錄
+            掛在同一個代號底下，預設為 None，此時自行產生一個。
 
     Returns:
-        requests.Response: 成功（2xx）的回應物件。
+        狀態碼為 2xx 的回應物件。
 
     Raises:
-        RuntimeError: token 刷新失敗，或重試 10 次仍失敗。
-        requests.exceptions.HTTPError: 遇到非暫時性的 4xx（400/403/404 等）錯誤。
+        RuntimeError: token 刷新失敗，或十次嘗試全部失敗時拋出。
+        requests.exceptions.HTTPError: 遇到非暫時性的 4xx 錯誤時原樣往外拋。
     """
     request_id = request_id or uuid.uuid4().hex[:12]
     token_refreshed = False
@@ -338,20 +379,23 @@ def api_get(
 def get_all_from_an_api(
     url: str, headers: dict, limiter: RateLimiter, app: msal.PublicClientApplication, cache: msal.SerializableTokenCache
 ) -> list[dict]:
-    """取得一個 API endpoint 所有分頁的資料（value；pagination by `@odata.nextLink`）。
+    """把一個 API 位址的所有分頁資料一次取齊。
 
-    **Notes:**
-        API endpoint 可以是 notebook URL、section URL 或 page URL。
+    逐次請求並累積每頁的內容，直到回應不再帶下一頁的位址為止。
+
+    Note:
+        OneNote Graph API 採 OData 協定分頁，下一頁的位址放在回應的 nextLink 欄位。
+        傳入的位址可以是筆記本、章節或頁面任一種。
 
     Args:
-        url (str): 起始 API endpoint URL（notebook / section / page 皆可）。
-        headers (dict): HTTP 請求標頭，需含 `Authorization: Bearer <token>`。
-        limiter (RateLimiter): 滑動窗口 rate limiter，遵守 OneNote API 上限。
-        app (msal.PublicClientApplication): MSAL 應用程式物件，供 401 時刷新 token。
-        cache (msal.SerializableTokenCache): MSAL token 快取。
+        url: 起始的 API 位址。
+        headers: HTTP 請求標頭，需含 Bearer token。
+        limiter: 節流器，每次送出請求前先向它取得名額。
+        app: MSAL 應用程式物件，收到 401 時用來在背景刷新 token。
+        cache: MSAL token 快取。
 
     Returns:
-        list[dict]: List of returned data in dicts of all pages.
+        所有分頁內容合併後的清單；沒有任何資料時為空清單。
     """
     items = []
     while url:
@@ -368,16 +412,19 @@ def get_all_from_an_api(
 def list_notebooks(
     headers: dict, limiter: RateLimiter, app: msal.PublicClientApplication, cache: msal.SerializableTokenCache
 ) -> list[dict]:
-    """列出該帳號所有 notebook 清單 (含notebook id、 notebook name、section name)。
+    """列出這個帳號底下所有筆記本，並逐一補上各自的章節名稱。
+
+    Note:
+        每個筆記本都要多送一次請求才能取得章節，因此筆記本數量會等比放大請求數與節流等待時間。
 
     Args:
-        headers (dict): HTTP 請求標頭，需含 `Authorization: Bearer <token>`。
-        limiter (RateLimiter): 滑動窗口 rate limiter，遵守 OneNote API 上限。
-        app (msal.PublicClientApplication): MSAL 應用程式物件，供 401 時刷新 token。
-        cache (msal.SerializableTokenCache): MSAL token 快取。
+        headers: HTTP 請求標頭，需含 Bearer token。
+        limiter: 節流器，每次送出請求前先向它取得名額。
+        app: MSAL 應用程式物件，收到 401 時用來在背景刷新 token。
+        cache: MSAL token 快取。
 
     Returns:
-        list[dict]: 每個 notebook 一筆，含 `id`、`name`、`sections`（section 名稱清單）。
+        每個筆記本一筆的清單，各含 id、name 與 sections 三個鍵，最後一個是章節名稱清單。
     """
     notebooks = get_all_from_an_api(
         "https://graph.microsoft.com/v1.0/me/onenote/notebooks", headers, limiter, app, cache
@@ -397,13 +444,19 @@ def list_notebooks(
 
 
 def prompt_selection(notebooks: list[dict]) -> list[str]:
-    """以 CLI interactive 介面請使用者確定要下載哪些筆記本。
+    """在終端機列出所有筆記本，請使用者輸入編號決定這次要下載哪幾本。
+
+    可以輸入單一編號、以逗號分隔的多個編號，或輸入全部代表全選。
+
+    Note:
+        這一步需要人工輸入，是 Bronze 層只能在地端執行的原因之一。
+        無法解析成編號的輸入會被略過，超出範圍的編號同樣被濾掉，因此全部輸入錯誤時會得到空清單。
 
     Args:
-        notebooks (list[dict]): `list_notebooks()` 回傳的 notebook 清單。
+        notebooks: list_notebooks 回傳的筆記本清單。
 
     Returns:
-        list[str]: 使用者選定要下載的 notebook id 清單；輸入「全部/all」則回傳全部。
+        使用者選定要下載的筆記本代號清單；沒有選中任何一本時為空清單。
     """
     print("\n找到以下筆記本：\n")
     for i, nb in enumerate(notebooks, 1):
@@ -421,28 +474,34 @@ def prompt_selection(notebooks: list[dict]) -> list[str]:
 
 
 def sanitize(name: str) -> str:
-    r"""把作業系統（Windows/Mac/Linux）檔名不允許的特殊符號（例如 / \ : ? * 等）全部替換成底線 _。
+    """把作業系統檔名不允許的符號全部換成底線，讓字串可安全用作路徑的一段。
+
+    處理的符號涵蓋各家作業系統的限制，包含斜線、冒號、問號、星號與控制字元等。
 
     Args:
-        name (str): 原始字串
+        name: 原始字串，通常是筆記本、章節或頁面的名稱。
 
     Returns:
-        str: 清理後字串
+        清理後的字串；清理完為空字串時改回 Untitled，避免產生沒有名稱的路徑。
     """
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip() or "Untitled"
 
 
 def _extract_user_account(sections: list[dict]) -> str | None:
-    """Extract account name from the first section's self URL.
+    """從章節資料的自身位址中解析出使用者帳號名稱。
 
-    e.g. 'https://.../users/abcd12345@gmail.com/onenote/...' → 'abcd12345'.
+    逐一檢查各章節的自身位址，找到第一個符合格式的就取出其中的帳號段落，
+    去掉網域部分後再做檔名清理。
+
+    Note:
+        帳號名稱會成為 GCS 路徑的一段，因此必須先清掉檔名不允許的符號。
+        取自章節而非帳號 API，是為了省下一次額外請求。
 
     Args:
-        sections (list[dict]): list of data of all sections to treated.
-        Sections can be the return values from function `get_all_from_an_api()`.
+        sections: 章節資料清單，通常是 get_all_from_an_api 的回傳值。
 
     Returns:
-        str | None: name of user account without `@.domain.com`.
+        不含網域的使用者帳號名稱；所有章節都解析不出時回 None。
     """
     for sec in sections:
         # [^/]+  匹配"一個或多個不是斜線 / 的任意字元"
@@ -464,9 +523,27 @@ def _store_images(
     page_id: str,
     img_prefix: str,
 ) -> tuple[list[str], list[str]]:
-    """下載 html 引用的圖片，上傳 GCS _images/，並把 img src 改寫為相對路徑。
+    """下載這份 html 引用的所有圖片，上傳到 GCS，並把原本的圖片連結改寫成相對路徑。
 
-    回傳 (img_md5_list, img_path_list)。
+    逐一取出圖片標籤，從其連結解析出資源代號與副檔名，組出存放路徑後下載並上傳，
+    最後把該標籤的連結改寫成指向圖片資料夾的相對路徑。
+
+    Note:
+        這支函式就地修改傳入的 soup 物件，呼叫端隨後直接把它序列化寫入 GCS 即可。
+        單張圖片失敗只記一筆 warning 後略過，不中斷整份筆記，
+        因此回傳的張數可能少於 html 中出現的圖片數，該圖的連結也會維持原本的外部位址。
+
+    Args:
+        soup: 已解析的 html 物件，其圖片標籤會被就地改寫。
+        headers: HTTP 請求標頭，需含 Bearer token。
+        limiter: 節流器，每次送出請求前先向它取得名額。
+        app: MSAL 應用程式物件，收到 401 時用來在背景刷新 token。
+        cache: MSAL token 快取。
+        page_id: 該筆記的頁面代號，僅用於稽核紀錄的關聯。
+        img_prefix: 這份筆記在 Bronze 層的路徑前綴，圖片存放在其底下的圖片資料夾。
+
+    Returns:
+        成功上傳的圖片 md5 清單與其完整位址清單組成的 tuple，兩份清單等長且順序一致。
     """
     img_md5: list[str] = []
     img_path: list[str] = []
@@ -505,21 +582,29 @@ def download_notebooks(
     cache: msal.SerializableTokenCache,
     dt: str,
 ) -> int:
-    """下載 OneNote Notebooks 的資料，且將成功下載的紀錄存於 Collection "onenote_graph_api_logs"。
+    """逐一走訪選定的筆記本、章節與頁面，把內容有變動的筆記下載並寫入 GCS。
 
-    逐 notebook → section → page 下載 html，算 html_hash 與 metadata 最新一筆比對；
-    有變動才 parsing、改寫圖片連結、以 dt= 分區寫入 GCS，並 upsert onenote_note_metadata。
+    每個筆記本先取出所有章節，每個章節再取出所有頁面，最後逐頁下載 html 原始碼並計算內容雜湊。
+    雜湊與該頁最新一筆紀錄相同就跳過不存新版本，不同才解析 html、下載並改寫圖片連結，
+    以版本分區寫入 GCS，並更新該版本的 metadata。
+
+    Note:
+        內容雜湊在解析 html 之前就先算，因此未變動的筆記完全不需要解析與下載圖片，
+        這是每週重跑成本能壓低的主因。
+        使用者帳號從第一個取得的章節解析一次後就沿用，因此同一次執行只支援單一帳號。
+        單頁下載失敗不中斷整批，改把該版本狀態記成 fetched_failed 後跳過，下一輪會再嘗試。
 
     Args:
-        notebook_ids (list[str]): 要下載的 notebook id 清單。
-        headers (dict): HTTP 請求標頭，需含 `Authorization: Bearer <token>`。
-        limiter (RateLimiter): 滑動窗口 rate limiter，遵守 OneNote API 上限。
-        app (msal.PublicClientApplication): MSAL 應用程式物件，供 401 時刷新 token。
-        cache (msal.SerializableTokenCache): MSAL token 快取。
-        dt (str): 執行日期分區字串（`YYYY-MM-DD`），作為 GCS `dt=` 分區與 metadata 版本鍵。
+        notebook_ids: 要下載的筆記本代號清單。
+        headers: HTTP 請求標頭，需含 Bearer token。
+        limiter: 節流器，每次送出請求前先向它取得名額。
+        app: MSAL 應用程式物件，收到 401 時用來在背景刷新 token。
+        cache: MSAL token 快取。
+        dt: 版本分區字串，值為本次執行日期，同時作為 GCS 的分區與 metadata 的版本欄位。
 
     Returns:
-        int: 本次實際偵測到 hash 變動並寫入 GCS 的新版本數。
+        本次確實偵測到內容變動並寫入 GCS 的新版本數；
+        html 與圖片寫進 GCS，版本 metadata 與請求紀錄寫進 MongoDB。
     """
     new_versions = 0  # 計算這次下載了多少版本
     user_account: str | None = None  # 保留空間以後可改從資料庫取 user account
@@ -701,13 +786,17 @@ def download_notebooks(
 
 
 def e_onenote_download() -> int:
-    """Bronze Extract 入口：取得 token、決定 notebook 清單、下載並回傳新版本數。
+    """Bronze 層 Extract 的入口，取得授權、選定筆記本後執行下載。
 
-    取得 token → 從互動模式選擇要下載得 notebook →
-    以今日 dt 呼叫 download_notebooks() → 回傳本次寫入 GCS 的新版本數。
+    先取得 token 並建立請求標頭與節流器，列出所有筆記本請使用者選擇，
+    最後以今日日期作為版本分區呼叫下載。
+
+    Note:
+        版本分區固定取執行當日日期，因此同一天重跑會寫進同一個分區、覆蓋當日的內容，
+        跨日重跑則會產生新版本供人工審閱。
 
     Returns:
-        int: 本次寫入 GCS 的新版本數；未選任何 notebook 時回傳 0。
+        本次寫入 GCS 的新版本數；使用者沒有選擇任何筆記本時回 0 且不執行下載。
     """
     token, app, cache = get_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -722,7 +811,7 @@ def e_onenote_download() -> int:
         logger.warning("No notebooks selected. Exiting.")
         return 0
 
-    logger.info(f"Bronze layer: download from bucket={gcs.get_bucket_name()} with dt={dt}")
+    logger.info(f"Bronze layer: downloading to GCS bucket={gcs.get_bucket_name()} with dt={dt}")
     new_versions = download_notebooks(notebook_ids, headers, limiter, app, cache, dt)
     logger.success(f"Bronze layer: done — {new_versions} 個新版本寫入 GCS (其餘未變動筆記今日已跳過)")
     return new_versions

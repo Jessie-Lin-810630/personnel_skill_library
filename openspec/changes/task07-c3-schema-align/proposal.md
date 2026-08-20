@@ -2,7 +2,7 @@
 
 task07 lazy_loading 三套服務（Bronze ETL、`task07_silver_service`、`task07_gold_service`，共用 `task07_common`）目前寫入 `onenote_note_metadata`（C3）的欄位，與交接文件 `doc/task07_onenote_versioned_etl_hand_over_v2.md` 第 305–350 行定稿的 C3 schema 有系統性落差：欄位命名不一致（`html_hash`/`html_md5`/`md_md5` vs 定稿的 `html_sha_hash`/`html_md5_hash`/`md_md5_hash`）、圖片血緣以三個平行陣列（`img_md5`/`img_path`/`img_archive_path`）表達而非定稿的 `attached_images` Object 陣列、且完全缺少 `topic`（Must）、`md_body`、`dismatched_img_count`/`md_has_dismatched_img`、`created_at`/`updated_at` 等欄位。此外 `task07_gold_service/l_archive_note.py:51` 有一處 Python 2 式 `except ValueError, TypeError:` 語法錯誤，導致該模組無法 import。
 
-對齊 C3 是下游向量化（task08 onenote embed，將與 task01/task06 共寫 `note_vectors_multimodal`）能以 `md_archive_path`/`archived_image_path` 為血緣鍵、以 `status=archived AND embedded_status=false` 為 gate 的前提。本 change 只對齊 task07 的資料契約與修 bug，不改 lazy loading / on-demand / 斷路器等既有行為。
+對齊 C3 是下游向量化（task08 onenote embed，將與 task01/task06 共寫 `note_vectors_multimodal`）能以 `md_archive_path`/`archived_image_path` 為 join 鍵、以 `status=archived AND embedded_status=false` 為 gate 的前提。本 change 只對齊 task07 的資料契約與修 bug，不改 lazy loading / on-demand / 斷路器等既有行為。
 
 ## What Changes
 
@@ -17,7 +17,7 @@ task07 lazy_loading 三套服務（Bronze ETL、`task07_silver_service`、`task0
 ## Capabilities
 
 ### New Capabilities
-- `onenote-note-metadata-schema`：定稿 C3（`onenote_note_metadata`）的欄位契約——主鍵 `page_id`+`dt`、命名一致的 hash 欄位、`attached_images` Object 陣列的跨層填寫規則、`topic` 推導、`md_body`/`dismatched_img_count`/`md_has_dismatched_img` 品質欄位，以及 `created_at`/`updated_at` 稽核時間戳。
+- `onenote-note-metadata-schema`：定稿 C3（`onenote_note_metadata`）的欄位契約——複合唯一鍵 `page_id`+`dt`、命名一致的 hash 欄位、`attached_images` Object 陣列的跨層填寫規則、`topic` 推導、`md_body`/`dismatched_img_count`/`md_has_dismatched_img` 品質欄位，以及 `created_at`/`updated_at` 稽核時間戳。
 
 ### Modified Capabilities
 - `silver-enrich-endpoint`：Silver 端點 upsert C3 的 md md5 欄位由 `md_md5` 改名為 `md_md5_hash`；快取查找／hash 判定所用欄位由 `html_hash` 改名為 `html_sha_hash`。

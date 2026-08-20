@@ -15,13 +15,22 @@ from loguru import logger
 
 
 def build_problem_feat_documents(raw_solved: list[dict]) -> list[dict]:
-    """把每題 AC 的 raw question 組裝成 solved_problems_on_leetcode 的 document。
+    """把每題 AC 的原始題目資料組裝成 solved_problems_on_leetcode 的 document。
+
+    逐題取出題號、題名與難度，並把題型標籤攤平成只有名稱的清單。
+
+    Note:
+        - 標籤只留名稱，捨棄 LeetCode 一併回傳的 id 與 slug，因為下游只用名稱做統計與顯示。
 
     Args:
-        raw_solved: 已 AC 題目的 raw question 清單。
+        raw_solved: fetch_solved_problems_features 回傳的已 AC 題目原始清單。
 
     Returns:
-        符合 solved_problems_on_leetcode schema 的 document 清單。
+        可寫入 solved_problems_on_leetcode 的 document 清單，每筆含 frontendQuestionId、
+        title、topic 與 difficulty；傳入空清單時為空清單。
+
+    Raises:
+        KeyError: 某題缺少 frontendQuestionId、title 或 difficulty 任一欄位時拋出。
     """
     logger.info("Building documents listing the features of problems on leetcode...")
     feature_docs = []
@@ -42,18 +51,30 @@ def build_leetcode_summary_partial(
     feature_docs: list[dict],
     solved_problem_stats: list[dict],
 ) -> dict:
-    """統計 LeetCode 題目文檔與解題統計，產出 ccClub&leetcode_summary 中 LeetCode 側的欄位。
+    """統計題目文檔與解題數，產出 ccClub&leetcode_summary 裡屬於 LeetCode 的那幾個欄位。
 
-    ccClub 側的欄位由 task03 另一支腳本補入，這裡只產 LeetCode 側，以 $set partial update
-    寫入不覆蓋 ccClub 欄位；feature_docs 為空但統計顯示有解題時視為上游不一致並回傳空 dict。
+    1. 先確認題目文檔與解題數統計互相吻合，不吻合就不產出摘要。
+    2. 累計各題型標籤出現的次數，依次數由多到少換算成百分比。
+    3. 連同當日日期與總題數組成一份摘要。
+
+    Note:
+        - 題目文檔為空但統計顯示有解題，代表 Extract 抓到的兩份資料互相矛盾，
+          多半是 cookie 過期讓題目清單全被濾掉、但解題數統計仍正常；
+          此時回空字典，讓 Load 層跳過寫入，避免用錯誤的 0 覆蓋掉前一天正確的摘要。
+        - 百分比的分母是所有標籤出現次數的總和而不是題數，一題掛多個標籤時會各計一次，
+          因此各標籤百分比加總為 100，但不能解讀成「解過的題目有幾成屬於某標籤」。
+        - ccClub 的欄位由 build_ccclub_summary_partial 另外產出，兩者寫進同一份文件、互不覆蓋。
 
     Args:
         feature_docs: build_problem_feat_documents 產出的題型特徵文檔清單。
-        solved_problem_stats: Extract 抓到的各難度 AC submission 統計。
+        solved_problem_stats: fetch_solved_problem_stats 抓到的各難度解題數統計。
 
     Returns:
         含 snapshot_date、totalSolvedProblemsOnLeetcode、problemDifficultyOnLeetcode 與
-        topicsPercentOnLeetcode 的 LeetCode 側摘要 dict；上游不一致時為空 dict。
+        topicsPercentOnLeetcode 四個鍵的摘要字典；兩份資料互相矛盾時為空字典。
+
+    Raises:
+        IndexError: feature_docs 與 solved_problem_stats 同時為空清單時拋出。
     """
     logger.info("Building partial summary documents for leetcode...")
 

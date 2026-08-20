@@ -28,7 +28,7 @@ class GateListTests(unittest.TestCase):
         self.assertEqual(result, [{"page_id": "p1"}])
         query, projection = mock_col.find.call_args[0]
         self.assertEqual(query, {"status": "archived", "embedded_status": False})
-        # 投影必含向量血緣與 CAS 守衛所需欄位
+        # 投影必含 data lineage 與 CAS 守衛所需欄位
         for key in ("archived_md_path", "md_md5_hash", "md_frontmatter", "page_title", "attached_images"):
             self.assertIn(key, projection)
 
@@ -121,7 +121,7 @@ class ChunkAndEmbedTests(unittest.TestCase):
         self.assertEqual(md5map, {note["archived_md_path"]: "MD5"})
         self.assertTrue(docs)
         d = docs[0]
-        # 向量血緣欄 md_path（note_vectors_multimodal 欄位）存 C3 的 archived_md_path 值
+        # note_vectors_multimodal 的 md_path 存 C3 的 archived_md_path 值，作為 data lineage 依據
         self.assertEqual(d["md_path"], note["archived_md_path"])
         self.assertEqual(d["file_name"], "python-note")
         self.assertEqual(d["tags"], ["python"])

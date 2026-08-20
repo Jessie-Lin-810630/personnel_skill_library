@@ -2,7 +2,7 @@
 
 > **開發目標**：在原 task07 (後稱為 v01) 的基礎上，把 OneNote → Markdown 的 data pipeline 改造為 **多版本可追溯 + 純 Lazy Loading** 架構。兩個核心目的：
 > (1) **Bronze layer 保留同一份筆記的歷史版本**：以 GCS `dt=` 日期分區保存多版本 HTML，取代原本依賴 GCS bucket versioning（後者無法在 GCP Console 直接讀取比對）。
-> (2) **省 multimodal LLM enrichment 的 token**：轉成 markdown 的過程並非自動呼叫 LLM 來執行，而是改為 UI **on-demand** 觸發才呼叫 LLM 做文檔語意增強擴寫 (enrichment) 同時存為 markdown，並以 `html_sha_hash` 為冪等鍵為 生成的 enriched markdown 建議快取機制，當使用者重複點擊同一版本時，就沿用已經生成過的 enriched markdown 、不再產生額外 token。
+> (2) **省 multimodal LLM enrichment 的 token**：轉成 markdown 的過程並非自動呼叫 LLM 來執行，而是改為 UI **on-demand** 觸發才呼叫 LLM 做文檔語意增強擴寫 (enrichment) 同時存為 markdown，並以 `html_sha_hash` 這個內容指紋來「為 生成的 enriched markdown 」建立快取機制，當使用者重複點擊同一版本時，就沿用已經生成過的 enriched markdown 、不再產生額外 token。
 > (3) **向量化視文件的生命週期狀態而選擇性呼叫 embedding model**：當 task07 v02 開發完成後進行 task08 開發，task08 需讀取 task07 v02 執行完成後更新的 onenote note metadata 表，以 SQL query 結果決定要批次處理哪些筆記的向量化工作，並非全數文檔都做向量化。此外，向量化開始後，其程式執行步驟，幾乎參照 task06 v02 設計，然後存放在同一個向量資料庫中。
 
 > **開發起始日期**：2026-07-01（於 `feature/html-to-markdown` 分支內另建 v02 變體資料夾）
@@ -12,8 +12,8 @@
 > **執行環境**：macOS / VS Code / pyenv (Python 3.14) / Poetry / MongoDB Atlas / GCS 資料湖 / Azure App Registration（公用用戶端，委派式驗證）/ Agent Platform (前 Vertex AI)
 
 > **與 v01 的差異**：
-> - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 主鍵為 `page_id`，一個筆記只存一個版本。
-> - v02 改存 onenote 筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；ETL 只做到 Bronze layer；呼叫 LLM 生成 markdown 由前端 on-demand 觸發 (Silver layer)；人工核可後歸檔 (Gold layer)；資料表 onenote metadata 主鍵改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
+> - v01（[`branch_html_to_md_summary.md`](./branch_html_to_md_summary.md)）輸出 onenote 筆記到本機磁碟、輸出筆記後到生成 markdown 的整段 ETL 採自動主動逐頁呼叫 LLM 中間無暫停、資料表 onenote metadata 複合唯一鍵 (Upsert key) 為 `page_id`，一個筆記只存一個版本。
+> - v02 改存 onenote 筆記到 GCS 資料湖，利用 dt 分區允許多版本筆記存放；ETL 只做到 Bronze layer；呼叫 LLM 生成 markdown 由前端 on-demand 觸發 (Silver layer)；人工核可後歸檔 (Gold layer)；資料表 onenote metadata 複合唯一鍵 (Upsert key) 改為 `(page_id, dt)`，以區分不同日下載的筆記版本，不互相取代。
 
 > - **三服務拆分部署容器**：task07 v02 從單一資料夾拆成三個獨立執行環境 + 一個共用套件：`task07_onenote_to_markdown_lazy_loading/`（Bronze ETL）、`task07_silver_service/`（Silver enrich Flask 端點）、`task07_gold_service/`（Gold 歸檔/退件 Flask 端點）、`task07_common/`（三者共用的 gcs/audit_log/hashing/topic）。向量化解耦到獨立的 `task08_onenote_embed_etl/`，與 Obsidian（task06_v2）共寫同一張向量表 `note_vectors_multimodal`。
 
@@ -32,7 +32,7 @@ feature/html-to-markdown/
 │   ├── audit_log.py                                  # 三個 MongoDB collections（C1/C2/C3）讀寫工具
 │   │                                                 # upsert_version_meta 集中補 created_at/updated_at
 │   ├── gcs.py                                        # GCS 資料湖讀寫、三層 blob 路徑組裝
-│   ├── hashing.py                                    # html sha256（變動判定 / enrichment 冪等鍵）
+│   ├── hashing.py                                    # html sha256（變動判定 / enrichment 內容指紋）
 │   └── topic.py                                      # topic 主題分類（copy 自 task01 TOPIC_KEYWORDS）
 │
 ├── task07_onenote_to_markdown_lazy_loading/          # Bronze ETL（只 Extract，不含 LLM）
@@ -95,7 +95,7 @@ archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/<page>.md       Gol
 archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/_images/<x>.ext Gold 歸檔圖片
 ```
 
-`dt=` 分區為版本鍵：同一份筆記每次偵測到 `html_sha_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。Gold 的 `dt` 對齊 Bronze 執行日。
+`dt=` 為 partition key，同時區分版本：同一份筆記每次偵測到 `html_sha_hash` 變動，就以當日 `dt` 寫一份新版本，歷史版本不互相覆蓋、可在 Console 直接讀取比對。Gold 的 `dt` 對齊 Bronze 執行日。
 
 ### 資料表 Collections
 
@@ -103,7 +103,7 @@ archived-notes/<user_id>/<notebook>/<section>/dt=<執行日>/_images/<x>.ext Gol
 
 1. `onenote_graph_api_logs` (簡稱 `C1`): [Schema 定義見後方](#collection-1onenote_graph_api_logs)
 2. `multimodal_llm_enrichment_logs` (簡稱 `C2`): [Schema 定義見後方](#collection-2multimodal_llm_enrichment_logs)
-3. `onenote_note_metadata` (簡稱 `C3`): [Schema 定義見後方](#collection-3onenote_note_metadata主鍵--page_id--dt)
+3. `onenote_note_metadata` (簡稱 `C3`): [Schema 定義見後方](#collection-3onenote_note_metadata複合唯一鍵--page_id--dt)
 
 ---
 
@@ -163,7 +163,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 ### MongoDB Collections
 > 總計三份 collections, C1, C2 and C3
-> 由 `task07_common/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為主鍵 upsert，支援同頁多版本。
+> 由 `task07_common/audit_log.py` 統一封裝。C1、C2 只追加 (insert)；C3 以 `(page_id, dt)` 為複合唯一鍵 (Upsert key) upsert，支援同頁多版本。
 
 ### Collection 1：`onenote_graph_api_logs`
 
@@ -216,7 +216,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 
 > `cache_hit=true` 時 tokens 皆為 0；`status="failure"` 時 tokens 為 `null`（區別「命中零成本」與「失敗沒算到」）。
 
-### Collection 3：`onenote_note_metadata`（主鍵 = `page_id` + `dt`）
+### Collection 3：`onenote_note_metadata`（複合唯一鍵 = `page_id` + `dt`）
 
 每筆 = 一頁 OneNote 的**某一版本**完整生命週期，貫穿 Bronze → Silver → Gold 逐步 upsert。欄位命名已對齊 hand-over v2 定稿（見文件第 303–347 行）。
 
@@ -232,7 +232,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
   "page_title": "MongoDB 索引設計",
 
   // Bronze（html + 圖片血緣 + topic 初判）
-  "html_sha_hash": "sha256...",             // 變動判定 / enrichment 冪等鍵
+  "html_sha_hash": "sha256...",             // 變動判定 / enrichment 內容指紋
   "html_md5_hash": "base64...",             // GCS html 物件 md5
   "html_path": "gs://onenote-vaults/raw-notes/.../dt=2026-07-01/MongoDB 索引設計.html",
   "html_downloaded_at": ISODate("2026-07-08T08:20:50.848+0000"),
@@ -291,7 +291,7 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 > `overwritten` 與 `rejected` 之分：被退役版本的 `html_sha_hash` 與歸檔版相同者標 `overwritten`（內容等同已被採納），不同者標 `rejected`，避免好/壞 md 分析被誤導。`embedded_status` 由 task08 向量化成功後才翻 `true`。
 
 > 相較 v01：
-> - C3 主鍵由 `page_id` 改為 `(page_id, dt)`；
+> - C3 複合唯一鍵由 `page_id` 改為 `(page_id, dt)`；
 > - 新增 `html_sha_hash`、`embedded_status`、`attached_images`、`topic`、`md_body`、`dismatched_img_count`/`md_has_dismatched_img`、`created_at`/`updated_at`；
 > - 欄位改名：silver md → `enriched_md_path`/`enriched_md_exported_at`、gold md → `archived_md_path`、圖片血緣由 `img_md5`/`img_path`/`img_archive_path` 三平行陣列重構為 `attached_images` Object 陣列。
 
@@ -304,10 +304,10 @@ Flask `POST /archive`，body `{page_id, dt, role, action}`；`action` 為 `appro
 | LLM 觸發 | ETL 主動逐頁呼叫 | **純 Lazy Loading**，UI on-demand 觸發 |
 | 省 token 機制 | 無 | `html_sha_hash` md 快取 + regenerate 配額 |
 | 斷路器 | 綁單一筆記版本次數 | **LLM 服務級**（連續失敗開斷路冷卻） |
-| C3 主鍵 | `page_id`（單版本） | `(page_id, dt)`（多版本） |
+| C3 唯一鍵 | `page_id`（單版本） | `(page_id, dt)`（多版本） |
 | C2 collection | `gemini_llm_logs` | `multimodal_llm_enrichment_logs`（加 `cache_hit`/`trigger`） |
 | LLM 模型 | `gemini-2.5-flash-lite` | `gemini-2.5-flash`（多模態判讀圖片） |
-| 變動判定鍵 | — | html 原始碼 sha256（非 Graph API `lastModifiedDateTime`） |
+| 變動判定 CDC gate | — | html 原始碼 sha256（非 Graph API `lastModifiedDateTime`） |
 
 ---
 ### 套件依賴
@@ -340,13 +340,13 @@ ENVIRONMENT=                      # local | dev | prod
 | 內容來源 | 依 `archived_md_path` 從 `onenote-vaults/archived-notes/` 下載歸檔 md（人工核可後的乾淨層） |
 | 圖片解析（`t_chunk_embed.py`） | 抓標準 markdown `![](_images/x.png)` (*此處就是跟 task06 v2 不同點*)，以 basename 對上 `attached_images[].archived_image_path` |
 | embedding | Vertex AI `gemini-embedding-2`，1536 維、L2 normalize |
-| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；向量血緣欄 `md_path` 存 `archived_md_path` 值、`image_paths` 存 archived 圖片 |
+| 寫入（`l_load_to_mongodb.py`） | per-note 先 `delete_many({md_path})` 再 `insert_many` 進 `note_vectors_multimodal`；`md_path` 存 `archived_md_path` 值作為 data lineage 依據、`image_paths` 存 archived 圖片 |
 | CAS 翻旗標 | 以 `md_md5_hash` 守衛（`archived_md_path` 定位版本），只有仍 `embedded_status=false` 且 md5 未變才翻 `embedded_status=true`＋以同一時戳蓋 `embedded_at` 與 `updated_at`（task08 直接以 pymongo 翻旗標、未走 `upsert_version_meta` 集中補時戳，故自行同步 `updated_at` 避免 `embedded_at` 晚於 `updated_at`） |
 | purge | **無**（OneNote 版本以 `review_closed` 退役、無 `status=deleted` 軟刪除） |
 
 ### MongoDB Collections
 
-**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，血緣鍵 `md_path`＝人工核可後的 archived md 路徑）
+**`note_vectors_multimodal`**（每筆 = 一份筆記的一個 chunk，join 鍵 `md_path`＝人工核可後的 archived md 路徑）
 ```json
 {
     "_id" : ObjectId("6a6304..."),

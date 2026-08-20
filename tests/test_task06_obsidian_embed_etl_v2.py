@@ -121,14 +121,14 @@ class ChunkEmbedV2Tests(unittest.TestCase):
 
         self.assertTrue(docs)
         for d in docs:
-            # 向量血緣欄改為 md_path，值＝人工核可後的 archived md 路徑（非 raw）
+            # data lineage 依據改為 md_path，值＝人工核可後的 archived md 路徑（非 raw）
             self.assertEqual(d["md_path"], archived)
             self.assertNotIn("raw_md_path", d)
             self.assertEqual(d["embedding"], [0.6, 0.8])
         # 圖片來源指向 archived-notes 的 _attachment（非 raw-notes）
         all_imgs = [p for d in docs for p in d["image_paths"]]
         self.assertIn("gs://personal-vaults/archived-notes/u/nb/01-d/_attachment/a.png", all_imgs)
-        # map 以 metadata 主鍵 raw_md_path 為 key，value 帶 md_path 與 CAS 守衛 md5
+        # map 以 metadata 唯一鍵 raw_md_path 為 key，value 帶 md_path 與 CAS 守衛 md5
         self.assertEqual(embedded_map, {raw: {"md_path": archived, "archived_md5": "M1"}})
 
 
@@ -145,7 +145,7 @@ class LoadVectorsTests(unittest.TestCase):
     def test_delete_then_insert_and_cas_flip(self):
         db = self._db()
         a1 = "gs://personal-vaults/archived-notes/u/r1.md"
-        # 舊 3 chunk（先刪後插應清光）；向量血緣欄為 md_path
+        # 舊 3 chunk（先刪後插應清光）；以 md_path 過濾
         db.preset(l_load_to_mongodb.VECTORS_V2, [{"md_path": a1, "chunk_index": i} for i in range(3)])
         new_docs = [{"md_path": a1, "chunk_index": 0}, {"md_path": a1, "chunk_index": 1}]  # 新 2 chunk
 
@@ -183,7 +183,7 @@ class PurgeTests(unittest.TestCase):
                 {"raw_md_path": "a1", "archived_md_path": "A_a1", "status": "archived", "embedded_status": True},
             ],
         )
-        # 向量血緣欄為 md_path（＝archived_md_path 值）
+        # 向量表以 md_path（＝archived_md_path 值）作為 data lineage 依據
         db.preset(
             l_load_to_mongodb.VECTORS_V2,
             [

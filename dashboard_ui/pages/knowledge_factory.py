@@ -78,10 +78,19 @@ st.html(render_tech_stack_diagram())
 # ─────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_dag_svg(fname: str) -> str:
-    """從 GCS personal-vaults 讀取 DAG SVG 文字並快取，避免每次 rerun／切 tab 重複下載。
+    """從 GCS 讀取一張 DAG 的 SVG 原始碼並快取，避免每次重跑或切換分頁都重新下載。
 
-    讀取失敗（回空字串）時拋 FileNotFoundError：st.cache_data 不會快取拋例外的呼叫，
-    故失敗不會被鎖進快取，下次 rerun 會自動重試。
+    讀取失敗時 GCS 工具會回傳空字串，這裡改為拋出例外。
+    st.cache_data 不會快取拋出例外的呼叫，因此失敗結果不會被鎖進快取，下次重跑即自動重試。
+
+    Args:
+        fname: SVG 檔在 personal-vaults 內的物件名稱。
+
+    Returns:
+        SVG 原始碼字串。
+
+    Raises:
+        FileNotFoundError: 檔案不存在或讀取失敗時拋出。
     """
     svg = read_text("personal-vaults", fname)
     if not svg:

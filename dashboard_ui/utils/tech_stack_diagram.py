@@ -534,15 +534,16 @@ LAYERS: list[dict] = [
 
 
 def _dark(accent: str) -> dict[str, str]:
-    """依 accent 主色推導該層深色系配色（卡片底、邊框、pill 底/邊框/文字）。
+    """依該層主色推導出深色主題下的一整組配色，涵蓋卡片底色、邊框與標籤樣式。
 
-    以 accent 疊透明度得到暗色調，文字統一用淺灰確保深底可讀；末碼為 8 位 hex alpha。
+    卡片底色由主色疊上透明度得到暗色調，色碼末兩碼即為十六進位的透明度；
+    文字統一使用淺灰，確保在深色底上維持足夠對比。
 
     Args:
-        accent: 該層主色 hex（如 "#3B82F6"）。
+        accent: 該層主色的十六進位色碼。
 
     Returns:
-        含 card / border / pill_bg / pill_border / text 五個 CSS 色值的 dict。
+        含 card、border、pill_bg、pill_border、text 五個 CSS 色值的 dict。
     """
     return {
         "card": f"linear-gradient({accent}24,{accent}24),#30394f",
@@ -554,18 +555,19 @@ def _dark(accent: str) -> dict[str, str]:
 
 
 def _pill(name: str, logo_key: str, colors: dict[str, str]) -> str:
-    """組出單一技術 pill（logo + 名稱）的 HTML 字串。
+    """組出單一技術標籤的 HTML 字串，內容為 logo 圖示加上技術名稱。
 
-    logo 以 base64 data URI 包進 <img>：st.html 的 DOMPurify（USE_PROFILES html-only）
-    會剝除裸 <svg>，但允許 <img> 與 data: 圖片，故改走 <img> 才能顯示。
+    logo 以 base64 data URI 包進 img 標籤呈現。st.html 會用 DOMPurify 消毒 HTML，
+    在僅允許 HTML 的設定下裸露的 svg 標籤會被剝除，img 標籤與 data 協定的圖片則允許通過，
+    因此改走 img 標籤才能正常顯示。
 
     Args:
-        name: 技術名稱，顯示於 logo 之後。
-        logo_key: LOGOS 的鍵；查無時 logo 留空。
-        colors: _dark() 回傳的深色配色 dict。
+        name: 技術名稱，顯示在 logo 之後。
+        logo_key: 對應 LOGOS 的鍵，查不到時 logo 留空。
+        colors: 由 _dark 產出的深色配色 dict。
 
     Returns:
-        單一 pill 的 HTML 字串。
+        單一技術標籤的 HTML 字串。
     """
     svg = LOGOS.get(logo_key, "")
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
@@ -581,13 +583,13 @@ def _pill(name: str, logo_key: str, colors: dict[str, str]) -> str:
 
 
 def _layer_card(layer: dict) -> str:
-    """組出單一 layer 卡片（左色條 + 標籤欄 + pills，深色系）的 HTML。
+    """組出單一技術層卡片的 HTML，由左側色條、分類標籤欄與技術標籤區三塊組成。
 
     Args:
-        layer: LAYERS 的一個元素，需含 accent / num / category / techs。
+        layer: LAYERS 中的一個元素，需含 accent、num、category、techs 四個鍵。
 
     Returns:
-        單一 layer 卡片的 HTML 字串。
+        單一技術層卡片的 HTML 字串。
     """
     accent = layer["accent"]
     colors = _dark(accent)
@@ -617,10 +619,10 @@ def _layer_card(layer: dict) -> str:
 
 
 def render_tech_stack_diagram() -> str:
-    """回傳 13 層技術堆疊卡片（深色系）的 HTML 字串，供 st.html() 一次渲染。
+    """組出整份技術堆疊圖的 HTML 字串，供 st.html 一次渲染。
 
     Returns:
-        13 張 layer 卡片組成的 flex 直欄 HTML 字串。
+        由 LAYERS 各層卡片依序堆疊而成的 HTML 字串，外層以垂直排列的 flex 容器包裹。
     """
     cards = "".join(_layer_card(layer) for layer in LAYERS)
     return (

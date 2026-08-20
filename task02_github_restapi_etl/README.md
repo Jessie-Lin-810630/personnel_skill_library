@@ -27,25 +27,28 @@
 
 # DataFlow
 
+task02 從 GitHub REST API 取回本人持有與協作的所有 repoistories，連同各分支的 commit 與 README 一併抓下來。抓取過程中依 GitHub response header 所帶的配額資訊控制 requests，避免觸發 rate-limit 而中斷。取得的原始資料經清洗後組成每個 repo 一筆的文檔，再聚合統計成一份當日摘要，最後以唯一鍵 upsert 寫入 MongoDB Atlas 的 `github_repos` 與 `github_summary` 兩個 collections。
+
 ```mermaid
 flowchart LR
-    A[GitHub REST API<br/>/user/repos · /branches · /commits · /readme] --> B[Extract<br/>e_request_github_api.py]
-    B --> C[Transform<br/>t_transform_github.py]
-    C --> D[Load<br/>l_load_to_mongodb.py]
-    D -. 寫入 .-> E[(MongoDB Atlas<br/>github_repos<br/>github_summary)]
+    A[GitHub REST API<br/>/user/repos · /branches · /commits · /readme] --> B[Extract<br/>分頁抓取 repo、branch、commit 與 README，<br/>並依配額標頭決定是否暫停請求]
+    B --> C[Transform<br/>判定身分、過濾出本人的 commit、<br/>組成每個 repo 一筆的文檔並彙總當日摘要]
+    C --> D[Load<br/>以唯一鍵 upsert 寫入兩張表]
+    D -. 每個 repo 一筆文檔 .-> E[(Collection<br/>`github_repos`)]
+    D -. 當日摘要 .-> F[(Collection<br/>`github_summary`)]
 ```
 
 - **Extract**：所有跟 GitHub API 溝通的邏輯都在這裡，主要含分頁、rate limit 處理與各 endpoint 的抓取函式。
     - `GET /user/repos?type=all` 一次涵蓋 owner + collaborator；逐 repo 抓 branch names；逐 repo 與 branch 呼叫 `/commits` 與 `/readme`；分頁每頁 100 筆。
-    - Rate Limit 控制：每次 response 後讀取 header 檢視`retry-after`、`x-ratelimit-remaining` 與 `x-ratelimit-reset`。暫停請求與否依序按照 `retry-after`、`x-ratelimit-remaining`、`x-ratelimit-reset` 是否達到門檻值，一有達到便進行 time.sleep() 避免頻繁觸動 429 Error。
+    - Rate Limit 控制：每次 response 後讀取 header 檢視`retry-after`、`x-ratelimit-remaining` 與 `x-ratelimit-reset`。前兩者是判斷要不要暫停的門檻，`retry-after` 只要有值就依它指定的秒數等待，沒有值才改看 `x-ratelimit-remaining` 是否低於 100 次，二者任一門檻達到便進行 `time.sleep()` 避免頻繁觸動 429 Error。`x-ratelimit-reset` 本身是配額重置的時間戳，用來算如果需要 sleep 最短要 sleep 多久。
 - **Transform**：把 API 回來的原始 dict 清洗並統計出 repository 摘要。統計項目眾多，大致羅列如下：
     - 以 `owner.login == GITHUB_USERNAME` 判斷 role（owner / collaborator）。
-    - 以 `committer.email == GITHUB_MAIL` 過濾出本人的 commit
+    - 以 `committer.email == GITHUB_MAIL` 過濾出本人的 commit，並逐筆去重，避免同一個 commit 因同時出現在多個分支而被重複計入。
     - 判別 repository 特徵 (e.g. programming language)。
     - 解析 README 與 URL。
 - **Load**： upsert 寫入 MongoDB Atlas，支援冪等重跑。
     - Collection `github_repos` 以 `repo_id` 為唯一鍵。upsert
-    - Collection `github_summary` 以 `snapshot_date` 為唯一鍵，快照日當天僅留存最後一筆。
+    - Collection `github_summary` 以 `snapshot_date` 為唯一鍵，該欄位只記到日、格式為 `YYYY-mm-dd`，因此快照日當天僅留存最後一筆。
 
 ---
 
@@ -163,7 +166,7 @@ task02_github_restapi_etl/
   ]
 }
 ```
-> Collection 1 & 2 的實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 1 & 2 的實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 ---
 

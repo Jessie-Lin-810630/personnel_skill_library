@@ -26,19 +26,26 @@
 
 # DataFlow
 
+task05 從一份 Google Sheet 取回「生技」與「資料工程」兩張技能盤點[工作表](#data-source)，每一列是一個經手過的任務，欄位則是該任務在複雜性、獨立性、影響力三個面向上勾選到哪一級。兩張工作表各自依所屬領域的權重把勾選換算成分數，再以雷達軸為單位彙整成一個 1 到 5 的層級。最後把每個任務的分數與每個雷達軸的層級分別寫進 MongoDB Atlas，供 dashboard 首頁把兩張雷達圖畫出來。
+
 ```mermaid
 flowchart LR
-    A[Google Sheet<br/>Personal Skill Radar Calculation<br/>生技 · 資料工程] --> B[Extract<br/>e_fetch_google_sheet.py]
-    B --> C[Transform<br/>t_transform_skills.py]
-    C --> D[Load<br/>l_load_to_mongodb.py]
-    D -. 寫入 .-> E[(MongoDB Atlas<br/>skill_scores_biotech<br/>skill_scores_data_eng<br/>skill_radar_summary)]
+    A[Google Sheet<br/>Personal Skill Radar Calculation<br/>生技 · 資料工程] --> B[Extract<br/>授權後把兩張工作表讀成 DataFrame]
+    B --> C[Transform<br/>依各自權重把勾選算成任務分數，<br/>再彙整成每個雷達軸的層級]
+    C --> D[Load<br/>以複合唯一鍵 upsert 寫入三張表]
+    D -. 生技的每個任務一筆分數 .-> E[(Collection<br/>`skill_scores_biotech`)]
+    D -. 資料工程的每個任務一筆分數 .-> F[(Collection<br/>`skill_scores_data_eng`)]
+    D -. 每個雷達軸一筆層級快照 .-> G[(Collection<br/>`skill_radar_summary`)]
 ```
 
 - **Extract**：透過 service account 授權開啟 Google Sheet，把兩張工作表讀成 DataFrame。
     - 以 `pygsheets` 處理授權，取得讀取 Google Sheet `Personal Skill Radar Calculation`的權限，分別讀出 `生技` 與 `資料工程` 兩張 worksheet 並轉為 pandas DataFrame。
 - **Transform**：把能力勾選算成分數，再彙整成雷達軸摘要。
-    - 標記為 `Y` 的能力旗標轉為 `1`、其餘轉 `0`；每個任務依「複雜性 / 獨立性 / 影響力」三面向各自加權計分。
-    - 生技與資料工程的複雜性欄位名稱不同，故拆成兩套各自的轉換邏輯；再算出單項任務總分、映射出雷達軸層級（level，作為雷達圖軸刻度）。共產出三個 DataFrame。
+    - 先只留下屬於該領域雷達軸的列，再把標記為 `Y` 的能力旗標轉為 `1`、其餘轉 `0`；每個任務依「複雜性 / 獨立性 / 影響力」三面向各自加權計分。
+    - 生技與資料工程各有一套轉換邏輯，不共用同一支函式，原因有兩個。其一是**本專案的兩張工作表的欄位目標語意不同**，同一個面向在兩個領域裡代表的行為是可能不一樣的，例如：複雜性最低一級在生技是「純紀錄」，在資料工程是「純紀錄與理解」；往上幾級在生技走的是執行操作、制定方向，在資料工程走的是開發測試、接手部署。欄位名稱直接反映各自領域的職能階梯，硬要統一命名反而會讓兩邊的勾選失去意義。其二是**三個面向的加權比重刻意不同**，生技是複雜性、獨立性、影響力各佔 1、1、2，資料工程則是 1、2、1，用來反映兩個領域看重的能力不同。
+    - 算出每個任務的單項任務總分後，再以雷達軸為單位彙整出層級（level，作為雷達圖軸刻度）。彙整規則是：取該軸所有任務中**最高**的單項任務總分，另把該軸的經手任務個數取以 10 為底的對數 (log) 當作任務經驗值，兩者相加即為單軸總分，最後依五個區間把單軸總分切成 1 到 5。
+        > 取最高分而非平均，是為了讓一個領域的層級由最有代表性的那件任務決定，不會被大量簡單任務拉低；任務數取對數計入，則是讓經驗的累積有貢獻但不會壓過任務本身的難度。
+    - 共產出三個 DataFrame。前兩個分別是生技與資料工程的任務分數，第三個是雷達軸層級，它由兩張雷達圖**各自彙整一次**後合併而成，合併時只是把兩份結果接在一起並依單軸總分由高到低排序，兩張圖的列互不影響。
 - **Load**： upsert 寫入 MongoDB。
     - Collection `skill_scores_biotech`、`skill_scores_data_eng`: 以 `雷達軸 + 經手任務` 為複合唯一鍵。
     - Collection `skill_radar_summary`: 以 `snapshot_date + 雷達軸 + 雷達圖名稱` 為複合唯一鍵，快照日當天僅留最後一筆快照。
@@ -164,7 +171,7 @@ task05_googlesheet_skill_etl/
 
 > **`level` 分級規則（for developer）**：`< 5` → 1、`5 ≤ score < 12` → 2、`12 ≤ score < 15` → 3、`15 ≤ score < 23` → 4、`≥ 23` → 5。各能力旗標的完整權重表見 [`doc/branch_etl_pipeline_summary.md「計分規則」`](../doc/branch_etl_pipeline_summary.md#計分規則)。
 
-> Collection 1 & 2  & 3 的實體關係圖 (Entity-Relationship Diagram) 可見 [Lucid chart](https://lucid.app/lucidchart/63122cc4-527c-4823-b570-ec85cf7452c3/edit?viewport_loc=-31618%2C-6610%2C5638%2C3022%2C0_0&invitationId=inv_318a6fdc-8972-40a9-a3ee-1de9ae651949)。
+> Collection 1 & 2  & 3 的實體關係圖 (Entity-Relationship Diagram) 可見 [根目錄 README 的 ERD 連結](../README.md#entity-relationship-diagram)。
 
 
 # Data Source

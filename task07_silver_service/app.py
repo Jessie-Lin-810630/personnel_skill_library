@@ -1,11 +1,12 @@
-"""Silver 層 enrich 端點：把 task07 lazy_loading 的 on-demand enrichment 服務本體端點化。
+"""Silver 層 enrich 端點：把 on-demand enrichment 服務本體端點化。
 
 執行流程：
-    1. 接收 POST /enrich 的 page_id + dt + trigger
-    → 呼叫 t_enrich_html_to_markdown 對該版本做 on-demand enrichment，
-    2. enrichment 內部流程為查快取 → 必要時打 LLM → 寫 md 到 GCS processed-notes
-    → upsert Collection onenote_note_metadata → 把回傳 dict JSON 化。
-    3. Streamlit 審查頁維持對 GCS 唯讀，無權呼叫 ETL 對 GCS 寫入，只能透過此端點觸發 enrich。
+    1. 接收 POST /enrich 的 page_id、dt 與 trigger，呼叫 t_enrich_html_to_markdown 對該版本做
+       on-demand enrichment。
+    2. enrichment 觸發後內部先從 Collection onenote_note_metadata 查快取，未命中快取才允許打 LLM。
+    3. 接著 LLM 輸出的 enriched markdown 寫到 GCS processed-notes/。
+    4. 再 upsert Collection onenote_note_metadata，最後回傳端點回應 (JSON 化的 python dict)。
+    5. Streamlit 審查頁維持對 GCS 唯讀，無權呼叫 ETL 對 GCS 寫入，只能透過此端點觸發 enrich。
 
 Usage:
     poetry run python -m task07_silver_service.app
@@ -21,7 +22,7 @@ Required .env keys:
     ENVIRONMENT                      Deploymeny environment. Either of local, dev or prod.
 
 Optional .env keys:
-    ONENOTE_GCS_BUCKET               GCS data lake bucket (defaults to onenote-vaults).
+    ONENOTE_GCS_BUCKET               GCS data lake bucket (default to onenote-vaults).
 """
 
 from dotenv import load_dotenv
@@ -37,12 +38,17 @@ app = Flask(__name__)
 
 @app.route("/enrich", methods=["POST"])
 def enrich():
-    """接收 page_id + dt + trigger，呼叫 Silver 服務本體做 on-demand enrichment。
+    """接收頁面代號、版本分區與觸發來源，呼叫 Silver 服務本體做 on-demand enrichment。
 
-    回傳原樣 JSON 化的服務結果 dict (status、cache_hit、md_path、circuit_open、error)。
-    HTTP 狀態碼：缺欄位 400、trigger 非法 400、查無版本 404、未預期例外 500、其餘 200
-    (cache hit / pending_review / circuit_open / enrich_failed / quota 皆屬業務結果，回 200
-    由呼叫端依 dict 欄位判讀)。
+    先驗證必要欄位與觸發來源是否合法，再把服務本體的結果原樣轉成 JSON 回覆。
+
+    Note:
+        只有查無版本與未預期例外會回非 200 的狀態碼。命中快取、進入待審、circuit breaker 冷卻中、
+        生成失敗與配額用盡都算業務結果而非傳輸失敗，一律回 200，由呼叫端依回應內容判讀。
+
+    Returns:
+        Flask 回應物件與 HTTP 狀態碼組成的 tuple。缺欄位或觸發來源非法回 400，
+        查無版本回 404，未預期例外回 500，其餘回 200。
     """
     # 解析 request body 夾帶著的 json 引數，該引數正常來說應是 json 形式的字串。
     # silent=True 代表如果不是 json 字串則回傳 None 不拋例外
@@ -66,7 +72,7 @@ def enrich():
     if result.get("status") == "not_found":
         return jsonify(result), 404
 
-    logger.info(f"[silver] enrich: page_id={page_id}, dt={dt}, trigger={trigger} → {result.get('status')}")
+    logger.info(f"[silver] enrich: page_id={page_id}, dt={dt}, trigger={trigger}, status={result.get('status')}")
     return jsonify(result), 200
 
 

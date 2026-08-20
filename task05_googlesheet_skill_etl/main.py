@@ -33,10 +33,26 @@ from .t_transform_skills import (
 def run_task05():
     """task05 總入口，依序執行 Google Sheets 技能雷達的 Extract、Transform、Load。
 
-    1. 檢查 Google Sheets 與 MongoDB 連線用的環境變數，缺任一就拋 EnvironmentError。
-    2. Extract 讀出生技與資料工程兩張工作表。
-    3. Transform 依權重把兩張工作表算成任務分數，再彙整成雷達圖摘要。
-    4. Load 以 upsert 寫入 skill_scores_biotech、skill_scores_data_eng 與 skill_radar_summary。
+    1. 檢查 Google Sheets 與 MongoDB 連線用的環境變數，缺任一就中止。
+    2. 依憑證的形式選擇授權方式，讀出生技與資料工程兩張工作表。
+    3. 依權重把兩張工作表算成任務分數，再各彙整成一張雷達圖摘要並合併。
+    4. 以 upsert 寫入 skill_scores_biotech、skill_scores_data_eng 與 skill_radar_summary。
+
+    Note:
+        - 憑證的形式以「這個值是不是一個存在的檔案路徑」判斷：是就當金鑰檔讀，
+          不是就當成憑證內容放在環境變數裡，後者適用於將此函式放到 GCP 以 secret manager 管理
+          環境變數的情境，一般來說，地端執行只需要符合前者、將金鑰檔的路徑傳入環境變數即可。
+        - 試算表與工作表名稱都寫死在這支函式裡，改名時要一併改這裡。
+        - 整條流程沒有逐張略過失敗的機制，任一步失敗就中止，這一輪不會有任何資料寫入 MongoDB。
+        - 最外層只在此印一次完整 traceback 後往外拋，避免同一個例外在各層重複記錄。
+
+    Returns:
+        None: 資料寫進 MongoDB 的 skill_scores_biotech、skill_scores_data_eng 與
+        skill_radar_summary，執行狀況只記進 log，不回傳值。
+
+    Raises:
+        EnvironmentError: GOOGLE_SHEET_KEY、MONGO_ALTAS_URI 或 MONGO_DB_NAME 任一未設定時拋出。
+        Exception: 讀取、計算或寫入失敗時，記錄 traceback 後原樣往外拋。
     """
     google_sheet_key = os.getenv("GOOGLE_SHEET_KEY")
     mongo_uri = os.getenv("MONGO_ALTAS_URI")

@@ -12,15 +12,21 @@ from loguru import logger
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
-    """把 GitHub API 回傳的 ISO 8601 字串（如 2026-04-23T02:13:17Z）轉成 datetime 物件。
+    """把 GitHub API 回傳的 ISO 8601 時間字串轉成 datetime 物件。
 
-    值為 None 或空字串時回傳 None（例如 pushed_at 可能為 None）。
+    Note:
+        - 缺值不補預設時間而是原樣回 None，因為 pushed_at 這類欄位為空代表「從未發生過」，
+          填任何時間都會讓後續統計失真。
+        - build_summary_document 的排序另有處理 None 的方式。
 
     Args:
-        value: GitHub API 回傳的 ISO 8601 時間字串，或 None。
+        value: GitHub API 回傳的 ISO 8601 時間字串，例如 2026-04-23T02:13:17Z，或 None。
 
     Returns:
-        對應的 datetime 物件；輸入為空時回傳 None。
+        對應的 datetime 物件；傳入 None 或空字串時回傳 None。
+
+    Raises:
+        ValueError: 字串非空但不符合 ISO 8601 格式時拋出。
     """
     if not value:
         return None
@@ -36,19 +42,33 @@ def build_repo_document(
 ) -> dict:
     """把單一 repo 的原始資料組裝成一份完整的 MongoDB document。
 
-    以 owner.login 是否等於本人判定 role，只保留本人 email 的 commit 並去重，
-    language 為空時填 others。
+    1. 比對 owner.login 與本人帳號，判定這個 repo 的身分是 owner 還是 collaborator。
+    2. 只留下 committer email 等於本人的 commit，逐筆去重後取短 sha、訊息與提交時間。
+    3. 把 repo 本身的屬性、commit 統計與 README 摘要組成同一份 document。
+
+    Note:
+        - commit 以整筆內容比對去重，因為同一次提交在分支與合併後會重複出現在多個 branch，
+          不去重會讓 commit_counts 灌水。
+        - 只留本人 email 的 commit，是為了讓統計反映本人的實際產出，
+          因此協作 repo 裡他人的提交不會出現在這份 document。
+        - language 為 None 或空字串時填 others，讓下游統計不必再處理缺值；
+          這個預設值寫在判斷式而非取值的預設參數，是因為 GitHub 兩種空值都可能出現。
+        - fetched_at 記的是這次執行的時間，不是 GitHub 上的任何時間。
 
     Args:
-        raw_repo: 單一 repo 的 raw dict。取自 fetch_repos 回傳列表的其中一元素。
-        github_username: 本人的 GitHub 帳號，用來判定 owner 或 collaborator。
-        github_mail: 本人的 commit email，用來篩出自己的 commit。
-        raw_commits: 該 repo 的 raw commit 清單，取自 fetch_a_repo_commits 回傳值。
-        raw_readme: 該 repo 的 README dict，含 readme_summary 與 readme_html_url。
-        取自 fetch_a_repo_readme 回傳值。
+        raw_repo: 單一 repo 的原始字典，取自 fetch_repos 回傳清單的其中一個元素。
+        github_username: 本人的 GitHub 帳號，用來判定身分。
+        github_mail: 本人的 commit email，用來篩出自己的提交。
+        raw_commits: 該 repo 的原始 commit 清單，取自 fetch_a_repo_commits 的回傳值。
+        raw_readme: 該 repo 的 README 字典，含 readme_summary 與 readme_html_url，
+            取自 fetch_a_repo_readme 的回傳值。
 
     Returns:
-        單一 repo 的 document dict。
+        單一 repo 的 document 字典，可直接寫入 github_repos。
+
+    Raises:
+        KeyError: raw_repo 缺少 id、name、full_name、private 或 created_at 任一必要欄位，
+            或 raw_commits 的某筆缺少 sha、commit.message 與 commit 作者資訊時拋出。
     """
     logger.info(f"Building document for repo: {raw_repo.get('full_name')}...")
     role = "owner" if raw_repo.get("owner", {}).get("login") == github_username else "collaborator"
@@ -92,14 +112,22 @@ def build_repo_document(
 def build_summary_document(all_repo_docs: list[dict]) -> dict:
     """把所有 repo document 統計成一份給 Streamlit 用的快照摘要。
 
-    統計各 role 與各語言的 repo 數、總 commit 數，並依 pushed_at 降序取最近三個 repo。
+    1. 逐份累計各身分與各語言的 repo 數，以及所有 repo 的 commit 總數。
+    2. 依 pushed_at 由新到舊排序，濾掉從未 push 過的 repo，取最前面三個。
+    3. 連同當日日期組成一份快照。
+
+    Note:
+        - 排序時把 pushed_at 為 None 者換成可取得的最小時間，否則 None 與 datetime 相比會拋 TypeError；
+          排完再濾掉這些 repo，所以從未 push 過的不會出現在最近清單裡。
+        - snapshot_date 只保留到日、時分秒歸零，讓 Load 層能以日為粒度 upsert，
+          同一天重跑會覆蓋當天的快照而不是新增一筆。
 
     Args:
         all_repo_docs: build_repo_document 產出的所有 repo document 清單。
 
     Returns:
         含 snapshot_date、total_repos、by_role、by_language、total_commits 與
-        recent_three_repos 的摘要 dict。
+        recent_three_repos 六個鍵的摘要字典；傳入空清單時各項統計為 0 或空值。
     """
     logger.info("Building summary documents for all repos...")
     by_role = defaultdict(int)

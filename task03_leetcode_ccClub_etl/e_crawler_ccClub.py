@@ -22,15 +22,25 @@ CCCLUB_BASE_URL = "https://judge.ccclub.io/api"
 
 
 def get_session_and_headers() -> tuple[Session, dict]:
-    """建立並登入 ccClub 的 requests.Session，回傳已認證的 session 與 headers。
+    """建立並登入 ccClub 的連線工作階段，回傳已認證的 session 與 headers。
 
-    先拜訪 /api/profile 取得初始 csrftoken，POST /api/login 登入後再更新 csrftoken。
+    1. 先確認帳號密碼兩個環境變數都有值。
+    2. 拜訪 /api/profile 取得初始 csrf token，組成後續請求共用的 headers。
+    3. 帶著 headers 登入，成功後再把 headers 裡的 csrf token 換成登入後的值。
+
+    Note:
+        - 登入後重新取一次 csrf token，是因為部分站台會在登入時換發新的，沿用舊值會讓後續請求被拒。
+        - 帳號密碼在送出請求前就先檢查，避免帶著空值登入而拿到難以判讀的錯誤。
+        - 回傳的 session 自己記著登入 cookie，後續請求都必須沿用同一個，換新的等於沒登入。
 
     Returns:
-        tuple，前者為已登入的 requests.Session，後者為帶 csrftoken 的 headers dict。
+        已登入的 requests.Session 與帶 csrf token 的 headers 字典組成的 tuple。
 
     Raises:
-        EnvironmentError: 缺少 CCCLUB_USERNAME 或 CCCLUB_PASSWORD 時拋出。
+        EnvironmentError: 環境變數 CCCLUB_USERNAME 或 CCCLUB_PASSWORD 未設定時拋出。
+        requests.HTTPError: 取得初始 token 或登入的回應為非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
     """
     # 確認環境變數可讀取再開始一連串連線準備
     username = os.getenv("CCCLUB_USERNAME")
@@ -86,16 +96,28 @@ def _fetch_solved_problem_ids(
     session: Session,
     headers: dict,
 ) -> list[dict]:
-    """從 /api/profile 取出 ACM 與 OI 兩類的已解題清單，每筆只含 problem_id、problem_type 與 score。
+    """從 /api/profile 取出 ACM 與 OI 兩類的已解題清單。
 
-    tags 與 difficulty 不在此 endpoint，留給 _fetch_problem_detail 逐題補齊。
+    讀取 profile 回應中的兩類解題狀態，各自取出題號與分數，合併成同一份清單並標上題型。
+
+    Note:
+        - 題目的標籤與難度不在這個 endpoint，留給 _fetch_problem_detail 逐題補齊。
+        - ACM 類的題目通常沒有分數，缺值時填 0。
+        - profile 回應沒有 data 欄位時回空清單而不往外拋，此時後續步驟等於沒有題目可處理。
 
     Args:
         session: 已登入的 requests.Session。
-        headers: 帶 csrftoken 的 headers。
+        headers: 帶 csrf token 的 headers。
 
     Returns:
-        raw problem list，每筆為含 problem_id、problem_type、score 的 dict。
+        已解題清單，每筆含 problem_id、problem_type 與 score；profile 沒有資料時為空清單。
+
+    Raises:
+        requests.HTTPError: 回應為非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
+        KeyError: 某題缺少題號欄位時拋出。
     """
     try:
         logger.info("Start to fetch problem list....")
@@ -158,18 +180,29 @@ def _fetch_problem_detail(
     session: Session,
     headers: dict,
 ) -> dict:
-    """從 /api/problem 取得單題的 tags 與 difficulty，difficulty 標準化後回傳。
+    """從 /api/problem 取得單題的標籤與難度，難度改寫成與 LeetCode 一致的寫法後回傳。
 
-    difficulty 原始值 Low、Mid、High 統一轉成與 LeetCode 一致的 Easy、Med.、Hard；
-    找不到資料（404 或空回應）時回傳空 dict。
+    取回單題資料後，依難度原始值中的關鍵字對應成 Easy、Med. 或 Hard。
+
+    Note:
+        - 難度改寫成與 LeetCode 相同的三個值，是為了讓兩個來源的統計能放在同一張圖上比較；
+          對應不到任何關鍵字時原樣保留，缺欄位時填 Unknown，都不會中斷流程。
+        - 查無此題會回應 404，這是正常情形，此時回空字典、不視為失敗，
+          由 fetch_all_solved_problems 補上預設值。
 
     Args:
         problem_id: 要查詢的題目 id。
         session: 已登入的 requests.Session。
-        headers: 帶 csrftoken 的 headers。
+        headers: 帶 csrf token 的 headers。
 
     Returns:
-        含 topic 與 difficulty 兩鍵的 dict；查無資料時為空 dict。
+        含 topic 與 difficulty 兩個鍵的字典；查無此題時為空字典。
+
+    Raises:
+        requests.HTTPError: 回應為 404 以外的非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
     """
     try:
         resp = session.get(
@@ -218,17 +251,31 @@ def fetch_all_solved_problems(
     headers: dict,
     throttle_sec: float = 0.3,
 ) -> list[dict]:
-    """整合 _fetch_solved_problem_ids 與 _fetch_problem_detail，回傳補齊細節的完整 raw problem list。
+    """取得已解題清單，並逐題補上標籤與難度。
 
-    先取已解題清單，再逐題查 detail 補上 topic 與 difficulty。
+    先取回已解題清單，再對每一題各查一次細節，把標籤與難度補進原本那筆資料。
+
+    Note:
+        - 這是就地修改，補上的欄位直接寫進 _fetch_solved_problem_ids 回傳的那些字典。
+        - 查不到細節的題目填 Unknown 而不是略過，因為題目本身確實已解，
+          只是細節查不到，略過會讓總題數少算。
+        - 每題之間刻意停一小段時間，避免短時間內對 ccClub 送出大量請求；
+          題數多時整輪耗時主要花在這裡。
 
     Args:
         session: 已登入的 requests.Session。
-        headers: 帶 csrftoken 的 headers。
-        throttle_sec: 每次請求之間的間隔秒數，避免對 ccClub server 造成太大壓力，預設 0.3。
+        headers: 帶 csrf token 的 headers。
+        throttle_sec: 每次請求之間的間隔秒數，預設 0.3。
 
     Returns:
-        完整的 raw problem list，每筆含 problem_id、problem_type、score、topic 與 difficulty。
+        補齊細節的已解題清單，每筆含 problem_id、problem_type、score、topic 與 difficulty；
+        這是就地修改後的同一份清單，不是另一份複本。
+
+    Raises:
+        requests.HTTPError: 取清單或查任一題細節的回應為非 2xx 時拋出。
+        requests.ConnectionError: 連線失敗或中斷時拋出。
+        requests.Timeout: 請求逾時時拋出。
+        ValueError: 回應內容不是合法 JSON 時拋出。
     """
     raw_solved_problems = _fetch_solved_problem_ids(session, headers)
     total = len(raw_solved_problems)

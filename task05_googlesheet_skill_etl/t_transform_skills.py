@@ -40,12 +40,23 @@ def build_biotech_task_docs(
 ) -> pd.DataFrame:
     """把生技工作表的原始列依權重算成帶分數的任務 document。
 
-    1. 只留下 task_type 指定的雷達軸。
-    2. 把複雜性、獨立性、影響力欄位的 Y 轉 1、其餘轉 0。
-    3. 依三組權重分別算出複雜性、獨立性、影響力總分，再依 score_weight 加權成單項任務總分。
+    1. 只留下指定雷達軸的列。
+    2. 把複雜性、獨立性、影響力三類欄位裡的 Y 換成 1、其餘換成 0。
+    3. 依三組權重分別算出三個面向的總分，再加權成每列的單項任務總分。
+
+    Note:
+        - 生技與資料工程各有一支函式而不是共用同一支，因為兩張工作表的欄位名稱不同，
+          例如複雜性最低一級在生技是純紀錄、在資料工程是純紀錄與理解。
+          改動這裡的權重時要留意另一支是否也要跟著改。
+        - 複雜性後三級的預設權重相同，因此那三級目前無法互相區分，
+          差異全靠獨立性與影響力兩個面向拉開。
+        - 影響力最低一級的權重為 0，代表沒有教學經驗的任務在這個面向不計分。
+        - 三個面向的加權比重預設為複雜性、獨立性、影響力各佔 1、1、2，
+          與資料工程那支的 1、2、1 不同，是刻意反映兩個領域看重的能力不同。
+        - 傳入的 DataFrame 會先複製一份再計算，原本那份不受影響。
 
     Args:
-        df: 從生技工作表 extract 出的原始 DataFrame。
+        df: 從生技工作表讀出的原始 DataFrame。
         task_type: 要保留的雷達軸標籤清單，為 BIOTECH_RADAR_LABELS 的子集。
         weight_complexity: 複雜性四級（純紀錄、執行操作、制定方向、優化與故障排除）的權重。
         weight_independence: 獨立性三級（需要指導、不需指導、自訂架構）的權重。
@@ -53,7 +64,10 @@ def build_biotech_task_docs(
         score_weight: 單項任務總分中複雜性、獨立性、影響力三面向的權重。
 
     Returns:
-        每列多出複雜性總分、獨立性總分、影響力總分與單項任務總分欄位的 DataFrame。
+        篩選後的 DataFrame 複本，每列多出複雜性總分、獨立性總分、影響力總分與單項任務總分四個欄位。
+
+    Raises:
+        KeyError: 工作表缺少雷達軸欄位，或缺少三個面向裡任一評分欄位時拋出。
     """
     logger.info(f"Building biotech task docs for axes: {task_type}...")
 
@@ -109,12 +123,23 @@ def build_de_task_docs(
 ) -> pd.DataFrame:
     """把資料工程工作表的原始列依權重算成帶分數的任務 document。
 
-    1. 只留下 task_type 指定的雷達軸。
-    2. 把複雜性、獨立性、影響力欄位的 Y 轉 1、其餘轉 0。
-    3. 依三組權重分別算出複雜性、獨立性、影響力總分，再依 score_weight 加權成單項任務總分。
+    1. 只留下指定雷達軸的列。
+    2. 把複雜性、獨立性、影響力三類欄位裡的 Y 換成 1、其餘換成 0。
+    3. 依三組權重分別算出三個面向的總分，再加權成每列的單項任務總分。
+
+    Note:
+        - 資料工程與生技各有一支函式而不是共用同一支，因為兩張工作表的欄位名稱不同，
+          例如複雜性最低一級在資料工程是純紀錄與理解、在生技是純紀錄。
+          改動這裡的權重時要留意另一支是否也要跟著改。
+        - 複雜性後三級的預設權重相同，因此那三級目前無法互相區分，
+          差異全靠獨立性與影響力兩個面向拉開。
+        - 影響力最低一級的權重為 0，代表沒有教學經驗的任務在這個面向不計分。
+        - 三個面向的加權比重預設為複雜性、獨立性、影響力各佔 1、2、1，
+          與生技那支的 1、1、2 不同，是刻意反映兩個領域看重的能力不同。
+        - 傳入的 DataFrame 會先複製一份再計算，原本那份不受影響。
 
     Args:
-        df: 從資料工程工作表 extract 出的原始 DataFrame。
+        df: 從資料工程工作表讀出的原始 DataFrame。
         task_type: 要保留的雷達軸標籤清單，為 DE_RADER_LABELS 的子集。
         weight_complexity: 複雜性四級（純紀錄與理解、開發測試、接手部署、優化與故障排除）的權重。
         weight_independence: 獨立性三級（需要指導、不需指導、自訂架構）的權重。
@@ -122,7 +147,10 @@ def build_de_task_docs(
         score_weight: 單項任務總分中複雜性、獨立性、影響力三面向的權重。
 
     Returns:
-        每列多出複雜性總分、獨立性總分、影響力總分與單項任務總分欄位的 DataFrame。
+        篩選後的 DataFrame 複本，每列多出複雜性總分、獨立性總分、影響力總分與單項任務總分四個欄位。
+
+    Raises:
+        KeyError: 工作表缺少雷達軸欄位，或缺少三個面向裡任一評分欄位時拋出。
     """
     logger.info(f"Building data engineering task docs for axes: {task_type}...")
 
@@ -168,17 +196,30 @@ def build_de_task_docs(
 
 
 def build_summary_for_radar(df: pd.DataFrame, radar_plot_name) -> pd.DataFrame:
-    """把每個任務的分數彙整成各雷達軸一列的摘要，並分級成 level。
+    """把每個任務的分數彙整成各雷達軸一列的摘要，並換算成 1 到 5 的等級。
 
-    以雷達軸 groupby 統計經手任務個數與各軸最高分，換算任務經驗值與單軸總分後，
-    依邊界分成 1 到 5 級，最後附上雷達圖名稱與 snapshot_date。
+    1. 依雷達軸分組，統計每軸的經手任務個數與該軸的最高任務分數。
+    2. 把任務個數取對數當成任務經驗值，與最高分相加得到單軸總分。
+    3. 依五個區間把單軸總分換算成 1 到 5 的等級，附上雷達圖名稱與當日日期後依總分排序。
+
+    Note:
+        - 任務個數取對數而非直接相加，是為了讓「多做同類任務」的效果遞減，
+          避免軸的高低變成單純比誰的任務筆數多；也因此每軸至少要有一筆任務，
+          個數為 0 的軸根本不會出現在分組結果裡，取對數不會遇到零。
+        - 分級的區間邊界含左不含右，是憑目前的分數分布訂出來的固定值，
+          任務累積到一定程度後整體會往高分擠，屆時邊界要重訂。
+        - snapshot_date 只保留到日、時分秒歸零，讓 Load 層能以日為粒度 upsert。
 
     Args:
-        df: build_biotech_task_docs 或 build_de_task_docs 的輸出 DataFrame。
-        radar_plot_name: 此雷達圖的名稱，例如「雷達圖1生技」。
+        df: build_biotech_task_docs 或 build_de_task_docs 產出的 DataFrame。
+        radar_plot_name: 這張雷達圖的名稱，例如「雷達圖1生技」。
 
     Returns:
-        每個雷達軸一列、含 level 與 snapshot_date 的摘要 DataFrame。
+        每個雷達軸一列的摘要 DataFrame，依單軸總分由高到低排序，含雷達圖名稱、雷達軸、
+        經手任務個數、任務經驗值、各軸向任務最高分、單軸總分、level 與 snapshot_date 八個欄位。
+
+    Raises:
+        KeyError: 傳入的 DataFrame 缺少雷達軸、經手任務或單項任務總分任一欄位時拋出。
     """
     logger.info(f"Building radar summary for: {radar_plot_name}...")
 
@@ -222,11 +263,17 @@ def build_summary_for_radar(df: pd.DataFrame, radar_plot_name) -> pd.DataFrame:
 def build_combined_summaries(dfs: list[pd.DataFrame]) -> pd.DataFrame:
     """把生技與資料工程兩張雷達摘要合併成一張 DataFrame。
 
+    以列為單位串接傳入的每一張摘要，並重新編號索引。
+
+    Note:
+        - 傳入空清單時不回傳 DataFrame 而是回 None，呼叫端若直接把結果往 Load 層送會拿到
+          AttributeError；目前呼叫端固定傳入兩張摘要，不會走到這條路。
+
     Args:
         dfs: 要合併的雷達摘要 DataFrame 清單。
 
     Returns:
-        合併後的 DataFrame。
+        合併後的 DataFrame，欄位與各張摘要相同、索引重新編號；傳入空清單時回傳 None。
     """
     logger.info("Combining biotech and DE radar summaries.")
     if dfs:
