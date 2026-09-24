@@ -28,7 +28,7 @@
 
 ### 併發安全
 
-- `task07_silver_service/t_enrich_html_to_markdown.py:96` 的 `_LLMServiceGuard` 補 `threading.Lock`，鎖住 `record_failure` 與 `record_success`，`is_open` 維持不鎖。目前 `_consecutive += 1` 在多執行緒下是沒有保護的讀取後寫入，失敗次數可能漏算，斷路器會比設定值晚跳脫。
+- `task07_silver_service/t_enrich_html_to_markdown.py:97` 的 `_LLMServiceGuard` 補 `threading.Lock`，鎖住 `record_failure` 與 `record_success`，`is_open` 維持不鎖。這是防範性的，不是在修一個現存的錯誤：實測在 CPython 3.14（GIL 啟用）上，`_consecutive += 1` 的累加不會漏算，因為直譯器只在迴圈回跳與函式呼叫邊界檢查是否換執行緒。但 Python 3.14 已正式提供沒有 GIL 的 free-threaded 直譯器，在那種環境下累加會真的漏算，而斷路器的狀態只存在 process 記憶體、出錯不會有任何徵兆。加鎖的成本趨近於零，因為 `record_failure` 只在 LLM 呼叫失敗時執行。
 
 ### 不在本次範圍
 

@@ -65,8 +65,10 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 - 注入 Secret Manager 時的格式是 JSON 字串：
 
 ```
-USER_ALLOWLIST='{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer"}'
+{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer"}
 ```
+
+存進 Secret Manager 的內容就是上面這一行，前後不加引號。在 shell 裡用引號包住是為了讓大括號與空格不被 shell 解讀，那組引號不屬於值本身；連同引號一起存進去會讓 `json.loads` 在第一個字元就失敗，服務啟動後每個請求都回 500。
 
 - 另需 `TOKEN_ISSUER_SA`，值為 dashboard runtime service account 的 email。Silver 與 Gold 靠它決定要向哪一個 service account 的 JWK 端點取公開金鑰，並用同一個值比對 JWT 的 payload 裡的 `iss`。它不是機密，但仍隨其他設定一起由部署注入，避免寫死在程式碼裡。
 
@@ -95,6 +97,8 @@ USER_ALLOWLIST='{"me@example.com": "Note Owner", "other@example.com": "ML/DL Eng
 - 後端仍然實作「驗簽通過但不在允許清單內就回 403」，理由是後端不該假設前端一定會擋下，不過正常流程下後端的這條實作路徑不會被觸發。
 
 ### 6. `_LLMServiceGuard` 只鎖兩個寫入方法
+
+- 這個決策是防範性的，不是在修一個現存的錯誤。實測在 CPython 3.14（GIL 啟用、`sys.setswitchinterval` 調到 1e-9）上，以 8 條執行緒累加 40 萬次不會漏算任何一次，因為直譯器只在迴圈回跳與函式呼叫邊界檢查是否換執行緒，方法本體一旦進入就會跑完。加鎖是為了在沒有 GIL 的 free-threaded 直譯器（Python 3.14 已正式提供）上仍然正確；在那種環境下累加會真的漏算，而斷路器狀態只存在 process 記憶體，出錯不會留下任何徵兆。`record_failure` 只在 LLM 呼叫失敗時執行，取鎖的成本相對於一次 LLM 呼叫可以忽略。
 
 - `record_failure` 與 `record_success` 各自以 `threading.Lock` 包住整個方法本體。`is_open` 不加 `threading.Lock`。三者判斷分別如下：
 

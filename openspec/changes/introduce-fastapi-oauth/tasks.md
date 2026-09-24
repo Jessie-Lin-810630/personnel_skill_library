@@ -5,7 +5,7 @@
 - [x] 1.1 設定 OAuth 同意畫面：User type 選 External、Publishing status 維持 Testing、把允許登入的 email 加進測試使用者名單。驗證：在 Google Auth Platform 的 Audience 頁看得到該 email 列在 Test users
 - [x] 1.2 建立 OAuth Web client，Authorized redirect URIs 填入地端與 Cloud Run 兩筆 `<base-url>/oauth2callback`。驗證：取得 client id 與 client secret，且 Credentials 頁列得出這兩筆 URI
 - [x] 1.3 授予 dashboard runtime service account 對自己的 `roles/iam.serviceAccountTokenCreator`，驗證：`gcloud iam service-accounts get-iam-policy <dashboard SA>` 列得出該 binding
-- [ ] 1.4 在 Secret Manager 建立 `USER_ALLOWLIST`（JSON 字串，email 對應角色）、`TOKEN_ISSUER_SA`（dashboard runtime SA 的 email）、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`。驗證：`gcloud secrets versions access latest --secret=USER_ALLOWLIST` 取得的內容可被 `json.loads` 解析，另外四個 secret 讀得到值
+- [ ] 1.4 在 Secret Manager 建立 `USER_ALLOWLIST`（JSON 字串，email 對應角色）、`TOKEN_ISSUER_SA`（dashboard runtime SA 的 email）、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`。驗證：`gcloud secrets versions access latest --secret=USER_ALLOWLIST` 取得的內容可被 `json.loads` 直接解析（內容前後不可有 shell 用的引號，否則解析在第一個字元就失敗），另外四個 secret 讀得到值
 - [x] 1.5 `pyproject.toml` 加入 `fastapi`、`uvicorn`、`pyjwt`，執行 `poetry install` 後驗證：`poetry run python -c "import fastapi, uvicorn, jwt"` 不報錯（`flask` 與 `gunicorn` 本次不移除）
 
 ## 2. 共用驗證模組 `task07_common/auth.py`
@@ -31,8 +31,8 @@
 
 ## 5. 斷路器加鎖
 
-- [ ] 5.1 `t_enrich_html_to_markdown.py` 的 `_LLMServiceGuard` 加 `threading.Lock`，包住 `record_failure` 與 `record_success` 整個方法本體，`is_open` 不加。驗證：新增測試以多執行緒同時呼叫 `record_failure`，累計次數等於呼叫次數
-- [ ] 5.2 驗證跳脫只發生一次：多執行緒同時把計數推過門檻時，冷卻時間只被設定一次。驗證：新增測試斷言 `_open_until` 在門檻達成後不被重複延後
+- [x] 5.1 `t_enrich_html_to_markdown.py` 的 `_LLMServiceGuard` 加 `threading.Lock`，包住 `record_failure` 與 `record_success` 整個方法本體，`is_open` 不加。驗證：`tests/test_silver_service_circuit_guard.py` 的門檻、歸零與並行案例全綠
+- [x] 5.2 記錄實測結果並改寫理由：GIL 版本不會漏算，加鎖是為了 free-threaded 直譯器。驗證：proposal、design 與 spec 不再宣稱存在現行漏算，測試不宣稱能重現競態
 
 ## 6. Dashboard 登入流程
 

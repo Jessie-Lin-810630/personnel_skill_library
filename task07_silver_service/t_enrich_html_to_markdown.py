@@ -15,6 +15,7 @@
 
 import os
 import re
+import threading
 import time
 from pathlib import PurePosixPath
 
@@ -90,7 +91,7 @@ gemini_response_schema = {
 }
 
 
-# ── 服務級守門 (當 LLM API 連續失敗則暫停 on-demand) ──────────────────────────────
+# ── 簡易版斷路器 (當 LLM API 連續失敗則暫停 on-demand) ──────────────────────────────
 
 
 class _LLMServiceGuard:
@@ -118,6 +119,7 @@ class _LLMServiceGuard:
         self.cooldown = cooldown_seconds
         self._consecutive = 0  # 實際連續失敗次數
         self._open_until = 0.0  # 暫停到何時
+        self._lock = threading.Lock()  # 保護上面兩個狀態的變更，見 record_failure 與 record_success
 
     def is_open(self) -> bool:
         """查詢目前是否處於 open 狀態，也就是還在冷卻期間內。
@@ -130,25 +132,36 @@ class _LLMServiceGuard:
     def record_success(self) -> None:
         """記錄一次成功，把連續失敗次數歸零並回到 closed 狀態。
 
+        Note:
+            兩行賦值仍以鎖保護，目的是與 record_failure 互斥。否則可能出現
+            record_failure 跳脫到一半、這支把次數歸零、record_failure 接著設下冷卻的矛盾狀態。
+
         Returns:
             None: 只更新這個物件的內部狀態，不回傳值。
         """
-        self._consecutive = 0
-        self._open_until = 0.0
+        with self._lock:
+            self._consecutive = 0
+            self._open_until = 0.0
 
     def record_failure(self) -> None:
         """記錄一次失敗，連續次數達門檻就跳脫成 open 狀態。
 
         跳脫時記一筆 error，並把連續次數歸零，讓冷卻結束後重新計算。
 
+        Note:
+            鎖的範圍涵蓋累加、門檻判斷與跳脫三個步驟，不能只鎖累加。三者必須是一個不可分割的
+            動作，否則同時失敗的兩條執行緒可能都讀到同一個次數而少算一次，或都判定達到門檻而
+            各設一次冷卻時間。
+
         Returns:
             None: 只更新這個物件的內部狀態，不回傳值。
         """
-        self._consecutive += 1
-        if self._consecutive >= self.max:
-            self._open_until = time.time() + self.cooldown
-            self._consecutive = 0
-            logger.error(f"[circuit] LLM 連續失敗達 {self.max} 次，暫停 on-demand {self.cooldown}s")
+        with self._lock:
+            self._consecutive += 1
+            if self._consecutive >= self.max:
+                self._open_until = time.time() + self.cooldown
+                self._consecutive = 0
+                logger.error(f"[circuit] LLM 連續失敗達 {self.max} 次，暫停 on-demand {self.cooldown}s")
 
 
 _guard = _LLMServiceGuard()
@@ -356,9 +369,9 @@ def t_enrich_html_to_markdown(
     6. 把模型輸出組成含 frontmatter 的 md 寫進 GCS，並更新 metadata。
 
     Note:
-        三道守門的用意各不相同：配額擋的是單篇筆記反覆重生的成本，
+        - 2.、3.、4.這三道守門的用意各不相同：配額擋的是單篇筆記反覆重生的成本，
         快取擋的是不同版本或不同頁面之間內容重複的成本，circuit breaker 擋的是模型端整體異常時的連續損失。
-        命中快取時只更新 metadata 讓該版本進入待審狀態，不重新寫 md，該次 token 記為 0。
+        - 命中快取時只更新 metadata 讓該版本進入待審狀態，不重新寫 md，該次 token 記為 0。
         模型呼叫失敗不往外拋，改把版本狀態記成 enrich_failed 並在回傳值帶錯誤訊息，
         因此呼叫端要看回傳的 status 而不是有沒有收到例外。
 
@@ -438,7 +451,7 @@ def t_enrich_html_to_markdown(
             }
 
     # 若 cache miss:
-    # 4. 服務級斷路：開啟期間不打 LLM
+    # 4. 打開斷路器：開啟期間不打 LLM
     if _guard.is_open():
         logger.warning("[circuit] on-demand enrich 暫停中，資料流動進度保持在 bronze_stored")
         return {
