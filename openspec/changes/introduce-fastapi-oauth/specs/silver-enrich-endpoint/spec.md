@@ -8,11 +8,11 @@
 - 端點自身不可 (MUST NOT) 主動刪除任何 bronze 版本或既有 md。
 - `trigger` 的合法值為 `on_demand` 與 `regenerate`；未提供時預設 `on_demand`。
 - 請求欄位 SHALL 由 Pydantic model 驗證，驗證失敗回 `400`，與既有行為一致。
-- 端點 SHALL 在處理請求之前先驗證 `X-Reviewer-Token`，驗證規則見 `reviewer-identity-verification`。
+- 端點 SHALL 在處理請求之前先驗證 `X-User-Token`，驗證規則見 `user-identity-verification`。
 - 未通過驗證者不可 (MUST NOT) 進入 enrichment 流程。
 
 #### Scenario: cache miss 首次生成
-- **WHEN** 呼叫端 `POST /enrich`，body 為 `{page_id, dt, trigger: "on_demand"}`，帶有通過驗證的 `X-Reviewer-Token`，且該版本 `md_path=null`、無同 `html_hash` 快取
+- **WHEN** 呼叫端 `POST /enrich`，body 為 `{page_id, dt, trigger: "on_demand"}`，帶有通過驗證的 `X-User-Token`，且該版本 `md_path=null`、無同 `html_hash` 快取
 - **THEN** 端點呼叫 Silver 服務實際打 LLM，將 md 寫入 GCS `processed-notes/<user>/<notebook>/<section>/dt=<dt>/`，upsert `onenote_note_metadata`（`md_path`、`md_md5`、`status=pending_review`），回傳 `200` 與 `{status: "pending_review", cache_hit: false, md_path: "gs://..."}`
 
 #### Scenario: cache hit 重用既有 md
@@ -32,8 +32,12 @@
 - **THEN** Pydantic 驗證失敗，端點回傳 `400`，不呼叫 Silver 服務
 
 #### Scenario: 身分驗證未通過
-- **WHEN** 請求未帶 `X-Reviewer-Token`、token 驗簽失敗，或 email 不在允許清單內
-- **THEN** 端點回 `401` 或 `403`（依 `reviewer-identity-verification` 的規則），不呼叫 Silver 服務，不寫入 GCS 與 MongoDB
+- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在允許清單內
+- **THEN** 端點回 `401` 或 `403`（依 `user-identity-verification` 的規則），不呼叫 Silver 服務，不寫入 GCS 與 MongoDB
+
+#### Scenario: 取不到驗簽金鑰
+- **WHEN** `X-User-Token` 合法，但端點連不上 Google 的 JWK 端點
+- **THEN** 端點回 `503`，不呼叫 Silver 服務，不寫入 GCS 與 MongoDB
 
 #### Scenario: 找不到版本
 - **WHEN** `page_id`+`dt` 在 `onenote_note_metadata` 查無對應版本

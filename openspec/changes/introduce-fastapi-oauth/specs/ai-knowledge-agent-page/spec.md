@@ -6,7 +6,7 @@
 
 - AI agent 頁 SHALL 在頁面頂部加入登入 gate，使用 Streamlit 內建的 OIDC 登入（`st.login()`），以 Google 為 OIDC provider。
 - 未登入的使用者不可 (MUST NOT) 看到對話介面，也不可 (MUST NOT) 觸發任何 LLM 呼叫或 MongoDB 查詢。
-- 本頁不呼叫 Silver 或 Gold 端點，因此不可 (MUST NOT) 轉傳 `X-Reviewer-Token`。
+- 本頁不呼叫 Silver 或 Gold 端點，因此不可 (MUST NOT) 轉傳 `X-User-Token`。
 - 本頁不依角色區分功能，凡通過登入者皆可使用完整對話功能。
 
 #### Scenario: 未登入不得進入

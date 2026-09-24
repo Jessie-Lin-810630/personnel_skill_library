@@ -32,7 +32,7 @@
 
 - 原本的想法是把登入者的 ID token 原樣轉傳給後端，但 Streamlit 的 `st.user` 拿不到原始 token，這條路走不通。
 
-- 所以改成：dashboard 從 `st.user.email` 取得已驗證的 email，呼叫 GCP IAM Credentials 的 `signJwt`，用 dashboard 自己的 Cloud Run runtime service account 私鑰簽一個短效 JWT，放進 `X-Reviewer-Token`。下游服務 Silver 與 Gold 會取該 service account 的公開憑證 (由 Google 公開的) 來針對 `X-Reviewer-Token` 驗簽，確認此 Token 的確是在 dashboard 內部簽發出來的且內容沒被動過。
+- 所以改成：dashboard 從 `st.user.email` 取得已驗證的 email，呼叫 GCP IAM Credentials 的 `signJwt`，用 dashboard 自己的 Cloud Run runtime service account 私鑰簽一個短效 JWT，放進 `X-User-Token`。下游服務 Silver 與 Gold 會取該 service account 的公開憑證 (由 Google 公開的) 來針對 `X-User-Token` 驗簽，確認此 Token 的確是在 dashboard 內部簽發出來的且內容沒被動過。
 
 - 選 `signJwt` 而不是自己拿一把密鑰簽，理由是私鑰就不會出現在容器裡，也不必放進 Secret Manager 再輪替。dashboard 只要有自己 service account 的 `roles/iam.serviceAccountTokenCreator`，簽章動作在 GCP 上自動完成。
 > 設計思維是 dashboard 呼叫 signJwt 時，是透過 IAM Credentials API 請 Google 用這個 SA 的私鑰簽名，私鑰由 Google 保管，dashboard 自己拿不到。而 IAM 收到請求後會依序檢查：
@@ -47,7 +47,7 @@
                                     signJwt(email, exp)     │
                                     ↓                       │
 Authorization:    <runtime SA ID token>   ← Cloud Run IAM 檢查「哪個服務」
-X-Reviewer-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
+X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
                                                             │
                                                             ▼
                                                     Silver / Gold
@@ -65,22 +65,27 @@ X-Reviewer-Token: <短效 JWT>              ← 應用程式檢查「哪個人�
 - 注入 Secret Manager 時的格式是 JSON 字串：
 
 ```
-REVIEWER_ALLOWLIST='{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer"}'
+USER_ALLOWLIST='{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer"}'
 ```
+
+- 另需 `TOKEN_ISSUER_SA`，值為 dashboard runtime service account 的 email。Silver 與 Gold 靠它決定要向哪一個 service account 的 JWK 端點取公開金鑰，並用同一個值比對 JWT 的 payload 裡的 `iss`。它不是機密，但仍隨其他設定一起由部署注入，避免寫死在程式碼裡。
+
+- JWT 的 payload 裡的 `aud` 固定為 `task07-user`，定義在 `task07_common/auth.py` 的常數 `USER_TOKEN_AUDIENCE`。簽發端與驗證端引用同一個常數，避免兩邊各寫一份字串而不一致。
 
 - **其他替代方案**：把角色寫進登入 token 的 claims，後端不必再查對照表。但 Google 發的 ID token claims 內容由 Google 決定，應用程式無法在其中加入自訂的角色欄位；要做到這件事得改用能設定 custom claims 的身分服務，連帶放棄 `st.login()`（理由見決策 8）。為了三筆資料不划算。
 
 ### 3. 驗證邏輯放 `task07_common/auth.py`，不合併服務
 
-- `task07_common/` 已經是三個服務共用模組的所在（`gcs`、`audit_log`、`hashing`、`topic`），兩支 Dockerfile 也都已經 `COPY task07_common/`。新增一個 `auth.py` 沿用同一套做法，兩個服務各自 `Depends(verify_reviewer)` 掛上。
+- `task07_common/` 已經是三個服務共用模組的所在（`gcs`、`audit_log`、`hashing`、`topic`），兩支 Dockerfile 也都已經 `COPY task07_common/`。新增一個 `auth.py` 沿用同一套做法，兩個服務各自 `Depends(verify_user)` 掛上。
 
 - 不合併服務的理由見 `proposal.md` 的「不在本次範圍」。
 
 ### 4. 驗證失敗回 401 與 403，與業務錯誤分開
 
-- 沒帶 `X-Reviewer-Token`、驗簽失敗、過期，回 `401`。
+- 沒帶 `X-User-Token`、驗簽失敗、過期，回 `401`。
 - 驗簽通過但 email 不在允許清單內，回 `403`。
 - 欄位不合法回 `400`。
+- 連不上 Google 的 JWK 端點回 `503`。PyJWT 把 `PyJWKClientConnectionError` 也掛在 `PyJWTError` 底下，一個 `except` 會把它和驗簽失敗混為一談，因此要先單獨攔下。這是本服務對外連線的問題，token 可能完全正常，回 `401` 會讓使用者以為要重新登入，重試多少次都一樣失敗。
 - `422` 保留給 Gold 既有的業務錯誤（該版本尚未生成 md、複製失敗）。FastAPI 預設把 Pydantic 驗證失敗回 `422`，會跟這個語意撞在一起，所以要覆寫 `RequestValidationError` 的 handler 改回 `400`。這件事兩個服務都要做，放在 `task07_common` 裡一併提供。
 
 ### 5. Guest 的攔截維持在前端，後端只做兜底
@@ -130,7 +135,7 @@ uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-k
 - **Dashboard 仍在信任鏈上。** 信任鏈變成「Google 驗人，dashboard 轉述並簽名」。dashboard 的程式碼理論上可以為任何 email 簽 JWT。但這仍比現況 (變更前) 好，因為現況是任何知道 demo 帳密的人都能宣稱自己是 Note Owner 去呼叫 Silver 與 Gold 服務；改完之後，能宣稱身分的只剩我們自己部署的那份程式碼。要完全移除這層信任得自己實作 OAuth code flow 以取得原始 ID token，代價是登入流程的 cookie、session 與 refresh 都要自己維護，因超出目前專案管理人的知識範圍之外，故本次不做。
 - **JWT 到期時間要拿捏。** 太短會讓使用者在審查頁停留久了之後操作失敗，太長則延長被盜用的時間窗。初步取五分鐘，並在每次呼叫端點前重新簽發，而不是登入時簽一次存起來。
 - **允許清單改動要重新部署。** 清單在環境變數裡，加一個 email 要改 Secret Manager 並重新部署三個服務。以預期的異動頻率（幾乎不變）來說可以接受。
-- **測試使用者名單要手動維護。** 要讓新的人登入，必須到 OAuth 同意畫面加入測試使用者，上限 100 人。若日後把同意畫面改成 Published 狀態，這道關卡會消失，屆時擋人就只剩應用程式端的 `REVIEWER_ALLOWLIST`。
+- **測試使用者名單要手動維護。** 要讓新的人登入，必須到 OAuth 同意畫面加入測試使用者，上限 100 人。若日後把同意畫面改成 Published 狀態，這道關卡會消失，屆時擋人就只剩應用程式端的 `USER_ALLOWLIST`。
 - **登入依賴 Streamlit 的內建 OIDC 功能。** 它在 1.42 版才加入，升版時若行為改變會直接影響登入流程。`requirements.txt` 目前釘在 `streamlit==1.59.1`。
 - **本地開發流程會變。** 現在只要填四組帳密就能跑起來，改完之後地端要設定 OIDC 的 `redirect_uri` 與 `cookie_secret`，`.streamlit/secrets.toml` 要另外準備且不可進版控。
-- **既有測試會失效。** 任何直接對 Flask test client 送請求的測試都要改寫成 FastAPI 的 `TestClient`，並補上 `X-Reviewer-Token`。
+- **既有測試會失效。** 任何直接對 Flask test client 送請求的測試都要改寫成 FastAPI 的 `TestClient`，並補上 `X-User-Token`。

@@ -30,21 +30,21 @@
 - Approve/Reject 以 `POST {GOLD_ENDPOINT_URL}` 帶 `{page_id, dt, action}`（approve 歸檔、reject 標記 review_closed 並回寫 md_frontmatter）。
 - Regenerate 以 `POST {SILVER_ENDPOINT_URL}` 帶 `trigger=regenerate`（受 quota）。
 - 三個呼叫成功後 SHALL 清版本清單快取並重載。
-- 三個呼叫 SHALL 在 `X-Reviewer-Token` header 帶入 dashboard 為登入者簽發的短效 JWT。
+- 三個呼叫 SHALL 在 `X-User-Token` header 帶入 dashboard 為登入者簽發的短效 JWT。
 - `Authorization` header 維持帶 dashboard runtime service account 的 ID token。
 - `role` 不再放進 request body，改由端點自 token 推導。
 
 #### Scenario: Approve triggers gold endpoint
 - **WHEN** 使用者對已生成 md 的版本按下 Approve
-- **THEN** 送出 `POST /archive` 帶 `action="approved"` 與 `X-Reviewer-Token`，成功後該版翻為已歸檔
+- **THEN** 送出 `POST /archive` 帶 `action="approved"` 與 `X-User-Token`，成功後該版翻為已歸檔
 
 #### Scenario: Reject triggers gold endpoint
 - **WHEN** 使用者按下 Reject
-- **THEN** 送出 `POST /archive` 帶 `action="rejected"` 與 `X-Reviewer-Token`，該版標記 review_closed 並從版本清單消失
+- **THEN** 送出 `POST /archive` 帶 `action="rejected"` 與 `X-User-Token`，該版標記 review_closed 並從版本清單消失
 
 #### Scenario: Regenerate triggers silver endpoint
 - **WHEN** 使用者對品質不佳的版本按下 Regenerate
-- **THEN** 送出 `POST /enrich` 帶 `trigger="regenerate"` 與 `X-Reviewer-Token`，未達 quota 上限時重生 md 並重渲染
+- **THEN** 送出 `POST /enrich` 帶 `trigger="regenerate"` 與 `X-User-Token`，未達 quota 上限時重生 md 並重渲染
 
 #### Scenario: Guest 按下按鈕不呼叫端點
 - **WHEN** `Guest` 角色的使用者按下 Approve 或 Reject

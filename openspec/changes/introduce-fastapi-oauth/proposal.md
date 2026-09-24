@@ -16,8 +16,8 @@
 - 第一道防線用 OAuth 同意畫面的測試使用者名單：同意畫面維持 External 與 Testing 狀態，只有列在名單內的 Google 帳號能完成登入流程。
 - 第二道防線在應用程式端以 email 允許清單決定角色。清單內的帳號取得完整審查權限，清單外的帳號一律落到既有的 Guest 角色。
 - Guest 的行為維持現狀：只呈現操作成功的畫面，不呼叫 Gold 端點，MongoDB 不寫入。作品集的試玩流程因此不受影響。
-- dashboard 呼叫 Silver 與 Gold 時多帶一個 header `X-Reviewer-Token`，內容是 dashboard 以自己的 runtime SA 私鑰（透過 IAM Credentials 的 `signJwt`）為登入者簽發的短效 JWT。Streamlit 的 `st.user` 只給解碼後的 claims、拿不到原始 ID token，所以改用這個方式傳遞身分。`Authorization` header 不能用，它已經被 Cloud Run IAM 用來放 dashboard runtime SA 的 token。
-- Silver 與 Gold 驗證 `X-Reviewer-Token` 的簽章與 email，角色改由驗證結果推導，不再讀 request body 的 `role` 欄位。驗證邏輯放在 `task07_common/auth.py`，兩個服務以 FastAPI dependency 掛載。
+- dashboard 呼叫 Silver 與 Gold 時多帶一個 header `X-User-Token`，內容是 dashboard 以自己的 runtime SA 私鑰（透過 IAM Credentials 的 `signJwt`）為登入者簽發的短效 JWT。Streamlit 的 `st.user` 只給解碼後的 claims、拿不到原始 ID token，所以改用這個方式傳遞身分。`Authorization` header 不能用，它已經被 Cloud Run IAM 用來放 dashboard runtime SA 的 token。
+- Silver 與 Gold 驗證 `X-User-Token` 的簽章與 email，角色改由驗證結果推導，不再讀 request body 的 `role` 欄位。驗證邏輯放在 `task07_common/auth.py`，兩個服務以 FastAPI dependency 掛載。
 - AI agent 頁只加登入 gate，不涉及 token 轉傳，因為它不呼叫 Silver 或 Gold。
 
 ### Web 框架
@@ -41,13 +41,13 @@
 
 ### New Capabilities
 
-- `reviewer-identity-verification`：審查者身分從登入到後端驗證的完整規則。涵蓋 dashboard 如何取得並簽發身分憑證、以哪個 header 轉傳、Silver 與 Gold 如何驗證簽章與 email、角色如何從驗證結果推導、驗證失敗回什麼狀態碼，以及允許清單外的帳號落到 Guest 的規則。
+- `user-identity-verification`：審查者身分從登入到後端驗證的完整規則。涵蓋 dashboard 如何取得並簽發身分憑證、以哪個 header 轉傳、Silver 與 Gold 如何驗證簽章與 email、角色如何從驗證結果推導、驗證失敗回什麼狀態碼，以及允許清單外的帳號落到 Guest 的規則。
 
 ### Modified Capabilities
 
-- `onenote-review-page`：`Requirement: Demo login gate` 的登入方式從 env 帳密比對改為以 Google 為 provider 的 OIDC 登入；新增允許清單外帳號落到 Guest 的情境；approve／reject／regenerate 三個呼叫都要帶 `X-Reviewer-Token`。
+- `onenote-review-page`：`Requirement: Demo login gate` 的登入方式從 env 帳密比對改為以 Google 為 provider 的 OIDC 登入；新增允許清單外帳號落到 Guest 的情境；approve／reject／regenerate 三個呼叫都要帶 `X-User-Token`。
 - `ai-knowledge-agent-page`：`Requirement: Auth placeholder for future st.login()` 從佔位符改為實際的登入 gate，未登入不得進入頁面。
-- `silver-enrich-endpoint`：新增身分驗證前置條件，`X-Reviewer-Token` 缺漏或驗證失敗時拒絕請求；`Scenario: 缺少必要欄位` 的檢查改由 Pydantic model 執行，回應狀態碼維持 400。
+- `silver-enrich-endpoint`：新增身分驗證前置條件，`X-User-Token` 缺漏或驗證失敗時拒絕請求；`Scenario: 缺少必要欄位` 的檢查改由 Pydantic model 執行，回應狀態碼維持 400。
 - `gold-archive-endpoint`：新增身分驗證前置條件；`Requirement: 請求驗證` 的 `role` 欄位從 request body 移除，改由驗證後的身分推導，`Scenario: 缺欄位` 與 `Scenario: 非法 action` 改由 Pydantic model 執行且維持 400，與既有的業務錯誤 422 區隔。
 
 ## Impact
@@ -66,5 +66,7 @@
 - **GCP 資源**：需要設定 OAuth 同意畫面（External、Testing、加入測試使用者）、建立 OAuth Web client（兩個 redirect URI：地端與 Cloud Run）、授予 dashboard runtime SA 對自己的 `roles/iam.serviceAccountTokenCreator`。`identitytoolkit.googleapis.com` 與 `iamcredentials.googleapis.com` 已啟用，不需另外開通。
 - **環境變數**：
     - `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*` 共六個 demo 帳密變數退場
-    - 新增 OIDC 設定所需變數與允許清單。退場與新增都要更新 `.env.example` 與 Secret Manager。
+    - 新增 `USER_ALLOWLIST`（email 對應角色的 JSON object）與 `TOKEN_ISSUER_SA`（dashboard runtime service account 的 email），dashboard、Silver、Gold 三者都要。
+    - 新增 dashboard 專用的 OIDC 設定：`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`。
+    - 退場與新增都要更新 `.env.example` 與 Secret Manager。
 - **不影響**：MongoDB collection 與欄位、GCS 目錄結構、Bronze ETL、task08 向量化、其他 dashboard 頁面。
