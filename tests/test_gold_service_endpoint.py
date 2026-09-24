@@ -1,84 +1,144 @@
 """tests/test_gold_service_endpoint.py
 
 Unit tests for gold_service.app 的 /archive 端點與 l_archive_note 的 frontmatter 萃取 /
-型別正規化。全部 mock，不連 GCS / MongoDB。
+型別正規化。全部 mock，不連 GCS / MongoDB / Google 公鑰端點。
 """
 
 import os
 import unittest
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
+
+import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
 
 # ── Inject env vars BEFORE importing gold_service.app ─────────────────────────
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
+os.environ.setdefault("TOKEN_ISSUER_SA", "dashboard-sa@example.iam.gserviceaccount.com")
+os.environ.setdefault("USER_ALLOWLIST", '{"owner@example.com": "Note Owner"}')
 
+from task07_common import auth  # noqa: E402
 from task07_gold_service import app as gold_app  # noqa: E402
 from task07_gold_service import l_archive_note as la  # noqa: E402
+
+ISSUER = "dashboard-sa@example.iam.gserviceaccount.com"
+_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def make_token(email="owner@example.com"):
+    """簽一張合法的測試用 JWT。"""
+    now = datetime.now(UTC)
+    payload = {
+        "iss": ISSUER,
+        "aud": auth.USER_TOKEN_AUDIENCE,
+        "email": email,
+        "iat": now,
+        "exp": now + timedelta(minutes=5),
+    }
+    return jwt.encode(payload, _PRIVATE_KEY, algorithm="RS256")
+
+
+class _FakeSigningKey:
+    def __init__(self, key):
+        self.key = key
+
+
+class _FakeJWKClient:
+    """模擬 PyJWKClient，直接回傳測試公鑰，不對外連線。"""
+
+    def __init__(self, public_key):
+        self._public_key = public_key
+
+    def get_signing_key_from_jwt(self, token):
+        return _FakeSigningKey(self._public_key)
 
 
 class TestArchiveEndpoint(unittest.TestCase):
     def setUp(self):
-        gold_app.app.config["TESTING"] = True
-        self.client = gold_app.app.test_client()
+        auth._jwk_client = _FakeJWKClient(_PRIVATE_KEY.public_key())
+        self.client = TestClient(gold_app.app, raise_server_exceptions=False)
+        self.headers = {"X-User-Token": make_token()}
+
+    def post(self, body, headers=None):
+        return self.client.post("/archive", json=body, headers=self.headers if headers is None else headers)
 
     # ── 400 ──────────────────────────────────────────────────────────────────
     def test_missing_fields_returns_400(self):
-        resp = self.client.post("/archive", json={"page_id": "p1", "dt": "2026-07-01"})
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.post({"page_id": "p1", "dt": "2026-07-01"}).status_code, 400)
 
     def test_invalid_action_returns_400(self):
-        resp = self.client.post("/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "bogus"})
+        resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "bogus"})
         self.assertEqual(resp.status_code, 400)
+
+    # ── 401 / 403：身分驗證 ──────────────────────────────────────────────────
+    def test_missing_token_returns_401(self):
+        resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"}, headers={})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_email_not_in_allowlist_returns_403(self):
+        headers = {"X-User-Token": make_token(email="stranger@example.com")}
+        resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"}, headers=headers)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_missing_token_does_not_call_gold_load(self):
+        with patch.object(gold_app, "archive_note") as m:
+            self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"}, headers={})
+        m.assert_not_called()
 
     # ── approved 分支 ─────────────────────────────────────────────────────────
     def test_approved_success_returns_200(self):
         result = {"status": "archived", "md_archive_path": "gs://b/archived-notes/x.md", "img_archive_path": []}
         with patch.object(gold_app, "archive_note", return_value=result) as m:
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "approved"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["status"], "archived")
-        m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="ML")
+        self.assertEqual(resp.json()["status"], "archived")
+        # 角色取自 token 對照允許清單的結果，不是呼叫端指定的
+        m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="Note Owner")
+
+    def test_role_in_body_is_ignored(self):
+        result = {"status": "archived", "md_archive_path": "gs://b/x.md", "img_archive_path": []}
+        with patch.object(gold_app, "archive_note", return_value=result) as m:
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved", "role": "Fake Admin"})
+        self.assertEqual(resp.status_code, 200)
+        # body 帶的假角色被忽略，仍以 token 推導的角色寫入
+        m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="Note Owner")
 
     def test_approved_not_found_returns_404(self):
         with patch.object(gold_app, "archive_note", return_value={"status": "not_found", "error": "x"}):
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "approved"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
         self.assertEqual(resp.status_code, 404)
 
     def test_approved_conflict_returns_409(self):
         with patch.object(gold_app, "archive_note", return_value={"status": "archived_conflict", "error": "dup"}):
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "approved"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
         self.assertEqual(resp.status_code, 409)
 
     def test_approved_no_md_returns_422(self):
         with patch.object(gold_app, "archive_note", return_value={"status": "pending_review", "error": "no md"}):
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "approved"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
         self.assertEqual(resp.status_code, 422)
+
+    def test_validation_400_and_business_422_are_distinguishable(self):
+        bad_field = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "bogus"})
+        with patch.object(gold_app, "archive_note", return_value={"status": "pending_review", "error": "no md"}):
+            no_md = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
+        self.assertEqual(bad_field.status_code, 400)
+        self.assertEqual(no_md.status_code, 422)
 
     # ── rejected 分支（端點薄包 reject_note）────────────────────────────────
     def test_rejected_success_returns_200(self):
         result = {"status": "review_closed", "review_result": "rejected"}
         with patch.object(gold_app, "reject_note", return_value=result) as m:
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "rejected"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "rejected"})
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["review_result"], "rejected")
-        m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="ML")
+        self.assertEqual(resp.json()["review_result"], "rejected")
+        m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="Note Owner")
 
     def test_rejected_not_found_returns_404(self):
         with patch.object(gold_app, "reject_note", return_value={"status": "not_found", "error": "x"}):
-            resp = self.client.post(
-                "/archive", json={"page_id": "p1", "dt": "2026-07-01", "role": "ML", "action": "rejected"}
-            )
+            resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "rejected"})
         self.assertEqual(resp.status_code, 404)
 
 

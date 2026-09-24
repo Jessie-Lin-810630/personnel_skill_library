@@ -55,7 +55,7 @@
 - **修改程式**：
     - `task07_silver_service/app.py` & `task07_gold_service/app.py`（框架與驗證）
     - `task07_silver_service/t_enrich_html_to_markdown.py`（斷路器加鎖）
-    - `task07_gold_service/l_archive_note.py`（`role` 來源改變）
+    - （`task07_gold_service/l_archive_note.py` 不需修改：`archive_note` 與 `reject_note` 的 `role` 參數維持原樣，改變的只是端點傳進去的值從 body 換成 token 推導的結果）
     - `dashboard_ui/pages/onenote_review.py`（登入流程與 header）
     - `dashboard_ui/pages/ai_knowledge_agent.py`（登入 gate）
 - **新增程式**：`task07_common/auth.py`。

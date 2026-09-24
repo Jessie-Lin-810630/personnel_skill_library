@@ -24,10 +24,10 @@
 
 ## 4. Gold 服務改寫
 
-- [ ] 4.1 `task07_gold_service/app.py` 從 Flask 改為 FastAPI，掛上 `Depends(verify_user)` 與 2.4 的 handler。驗證：`poetry run python -m unittest tests.test_gold_service_endpoint -v` 全綠
-- [ ] 4.2 `role` 從 request body 移除，改用 `verify_user` 回傳的角色傳給 `archive_note` 與 `reject_note`；body 若帶 `role` 予以忽略。驗證：測試斷言 `archive_note` 收到的 `role` 來自 token 而非 body，且 body 帶假 `role` 時不影響結果
-- [ ] 4.3 確認 400 與 422 不混用：欄位不合法回 400，md 未生成或複製失敗回 422。驗證：`tests/test_gold_service_endpoint.py` 的 `test_missing_fields_returns_400` 與 `test_approved_no_md_returns_422` 同時通過
-- [ ] 4.4 `tests/test_gold_service_endpoint.py` 改用 FastAPI `TestClient`，移除請求裡的 `role` 欄位並補上 `X-User-Token`。驗證：該測試檔全綠
+- [x] 4.1 `task07_gold_service/app.py` 從 Flask 改為 FastAPI，掛上 `Depends(verify_user)` 與 2.4 的 handler。驗證：`poetry run python -m unittest tests.test_gold_service_endpoint -v` 全綠
+- [x] 4.2 `role` 從 request body 移除，改用 `verify_user` 回傳的角色傳給 `archive_note` 與 `reject_note`；body 若帶 `role` 予以忽略。驗證：測試斷言 `archive_note` 收到的 `role` 來自 token 而非 body，且 body 帶假 `role` 時不影響結果
+- [x] 4.3 確認 400 與 422 不混用：欄位不合法回 400，md 未生成或複製失敗回 422。驗證：`tests/test_gold_service_endpoint.py` 的 `test_missing_fields_returns_400` 與 `test_approved_no_md_returns_422` 同時通過
+- [x] 4.4 `tests/test_gold_service_endpoint.py` 改用 FastAPI `TestClient`，移除請求裡的 `role` 欄位並補上 `X-User-Token`。驗證：該測試檔全綠
 
 ## 5. 斷路器加鎖
 
