@@ -17,10 +17,10 @@
 
 ## 3. Silver 服務改寫
 
-- [ ] 3.1 `task07_silver_service/app.py` 從 Flask 改為 FastAPI，路由用 `def` 不用 `async def`，掛上 `Depends(verify_user)` 與 2.4 的 handler。驗證：`poetry run python -m unittest tests.test_silver_service_endpoint -v` 全綠
-- [ ] 3.2 請求欄位改用 Pydantic model，`trigger` 以 `Literal["on_demand", "regenerate"]` 限制。驗證：測試檔補上「缺 page_id」「trigger 非法」兩案例，皆回 400
-- [ ] 3.3 `tests/test_silver_service_endpoint.py` 從 `app.test_client()` 改為 FastAPI `TestClient`，所有請求補上合法的 `X-User-Token`。驗證：該測試檔全綠，且移除 token 後的案例回 401
-- [ ] 3.4 既有狀態碼語意不變（快取命中、斷路器冷卻、quota 用盡回 200，查無版本回 404）。驗證：測試檔既有案例不需修改斷言即可通過
+- [x] 3.1 `task07_silver_service/app.py` 從 Flask 改為 FastAPI，路由用 `def` 不用 `async def`，掛上 `Depends(verify_user)` 與 2.4 的 handler。驗證：`poetry run python -m unittest tests.test_silver_service_endpoint -v` 全綠
+- [x] 3.2 請求欄位改用 Pydantic model，`trigger` 以 `Literal["on_demand", "regenerate"]` 限制。驗證：測試檔補上「缺 page_id」「trigger 非法」兩案例，皆回 400
+- [x] 3.3 `tests/test_silver_service_endpoint.py` 從 `app.test_client()` 改為 FastAPI `TestClient`，所有請求補上合法的 `X-User-Token`。驗證：該測試檔全綠，且移除 token 後的案例回 401
+- [x] 3.4 既有狀態碼語意不變（快取命中、斷路器冷卻、quota 用盡回 200，查無版本回 404）。驗證：測試檔既有案例不需修改斷言即可通過
 
 ## 4. Gold 服務改寫
 
