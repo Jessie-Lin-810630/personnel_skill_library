@@ -15,23 +15,9 @@ from agents import planning_agent, rag_agent
 from agents.intent_router_agent import route
 from dotenv import load_dotenv
 from loguru import logger
+from utils.auth_gate import GUEST_ROLE, render_agent_login_page, render_logout_button, require_login
 from utils.interact_with_mongodb import get_db_atlas
 from utils.ui_elements import color_map, render_side_bar
-
-# TODO: st.login() Google OAuth
-# 當 GCP Console 上建立好 OAuth 2.0 Client ID 與 Client Secret 後：
-# 1. 在 .streamlit/secrets.toml 設定 [auth] 區塊：
-#    [auth]
-#    redirect_uri = "http://localhost:8501/oauth2callback"
-#    cookie_secret = "<random-secret>"
-#    [auth.google]
-#    client_id = "<CLIENT_ID>"
-#    client_secret = "<CLIENT_SECRET>"
-# 2. 在此處取消注解以下三行：
-#    if not st.experimental_user.is_logged_in:
-#        st.login("google")
-#        st.stop()
-# 官方文件: https://docs.streamlit.io/develop/api-reference/user/st.login
 
 load_dotenv()
 
@@ -43,89 +29,9 @@ st.set_page_config(
 )
 render_side_bar()
 
-# ─────────────────────────────────────────
-# Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）
-# 暫時方案：待上方 TODO（第 19-33 行）的 Google OAuth（st.login）設定完成後，
-# 即可移除本區塊、改回 st.login("google") 流程。
-# ─────────────────────────────────────────
-CREDENTIALS = [
-    (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
-    (os.getenv("ROLE_OWNER_USERNAME", ""), os.getenv("ROLE_OWNER_PASSWORD", ""), "Note Owner"),
-    (os.getenv("ROLE_SENIOR_USERNAME", ""), os.getenv("ROLE_SENIOR_PASSWORD", ""), "Dept. Senior Specialist"),
-    (os.getenv("ROLE_GUEST_USERNAME", ""), os.getenv("ROLE_GUEST_PASSWORD", ""), "Guest"),
-]
 
-# Guest 角色只看得到來源清單，看不到 vector/rerank 分數（見 _render_sources）
-GUEST_ROLE = "Guest"
-
-if not st.session_state.get("authenticated"):
-    st.markdown(
-        f"""
-<div style="
-    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
-    border-radius: 16px;
-    padding: 2rem 3rem;
-    margin-bottom: 1.8rem;
-    border: 1px solid #2a3550;
-    text-align: center;
-">
-    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; margin:0 0 0.6rem 0; font-weight:800;">
-        🤖 AI Knowledge Agent
-    </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:1px;">
-        筆記語意查詢 · 摘要 · 個人化學習路徑規劃
-    </p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    _, form_col, _ = st.columns([1, 2, 1])
-    with form_col:
-        st.markdown(
-            f"""
-<div style="
-    background: rgba(200,100,0,0.03);
-    border: 1px solid #2a3550;
-    border-radius: 16px;
-    padding: 2rem 2rem 1.5rem;
-">
-    <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
-        🔐 授權人員登入
-    </p>
-""",
-            unsafe_allow_html=True,
-        )
-
-        username = st.text_input("帳號", key="login_user", placeholder="輸入您的帳號")
-        password = st.text_input("密碼", type="password", key="login_pwd", placeholder="輸入您的密碼")
-
-        if st.button("登入", width="stretch", type="primary"):
-            if not username or not password:
-                st.warning("請輸入帳號與密碼。")
-            else:
-                matched_role = next(
-                    (role for u, p, role in CREDENTIALS if u and p and u == username and p == password),
-                    None,
-                )
-                if matched_role:
-                    st.session_state.authenticated = True
-                    st.session_state.role = matched_role
-                    st.rerun()
-                else:
-                    st.error("帳號或密碼錯誤，請重試。")
-
-        st.markdown(
-            """
-    <p style="color:#e0e8f8; font-size:0.78rem; text-align:center; margin-top:1rem;">
-        此平台僅供授權人員使用<br>登入即代表您同意以指定角色進行操作
-    </p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    st.stop()
+# ── 登入 gate ─────────────────────────────
+_user_email, _role = require_login(render_login_page=render_agent_login_page)
 
 # ── Rate limit（環境變數可覆蓋，fallback = 20）──────────────────────────────
 RATE_LIMIT = int(os.getenv("AI_AGENT_RATE_LIMIT", "20"))
@@ -213,14 +119,11 @@ st.markdown(
 _spacer, role_col, logout_col = st.columns([7, 2, 1], vertical_alignment="center")
 with role_col:
     st.markdown(
-        f"<div style='text-align:right;'>目前角色：<b>{st.session_state.role}</b></div>",
+        f"<div style='text-align:right;'>{_user_email}<br>目前角色：<b>{_role}</b></div>",
         unsafe_allow_html=True,
     )
 with logout_col:
-    if st.button("登出", width="stretch"):
-        st.session_state.pop("authenticated", None)
-        st.session_state.pop("role", None)
-        st.rerun()
+    render_logout_button("messages", "session_id", "api_call_count", "planning_map_generated")
 
 
 # ── Helper：來源清單渲染 ──────────────────────────────────────────────────────

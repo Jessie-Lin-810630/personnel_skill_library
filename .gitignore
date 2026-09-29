@@ -225,3 +225,6 @@ doc/*.jsonl
 # some stuff should personal-use or learning local
 dashboard_ui/images/
 doc_personal_use/
+
+# Streamlit OIDC 登入設定，含 client secret 與 cookie_secret，一律不進版控
+.streamlit/secrets.toml

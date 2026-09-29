@@ -1,20 +1,20 @@
-"""OneNote 審查頁：登入 hero + 多版本對照 + on-demand Silver enrichment + Gold 歸檔/退件。
+"""OneNote 審查頁：登入 gate + 多版本對照 + on-demand Silver enrichment + Gold 歸檔/退件。
 
-登入沿用原 onenote_review 的 hero 版面（帳密→角色）；登入後採 task07 lazy_loading 變體的多版本審查。
+登入畫面與角色推導由 utils.auth_gate 提供；登入後採 task07 lazy_loading 變體的多版本審查。
 執行流程：讀 onenote_note_metadata（唯讀）依 page_id 分組 → 三層下拉選頁 →
 以 dt= 圓鈕切換同名筆記多版本 → 左渲染 bronze html、右渲染 silver md（皆自 gs:// URI）→
 選到 md_path=null 版本時 POST 呼叫 Silver enrich 端點即時生成 md、已生成則直接讀 GCS（cache hit）。
-含 regenerate（trigger=regenerate、受 quota）與 approve/reject 佔位按鈕（Gold 後端下一階段接）。
+含 regenerate（trigger=regenerate、受 quota）與 approve/reject（POST 呼叫 Gold archive 端點）。
 
 Required .env keys:
     MONGO_ALTAS_URI        MongoDB Atlas connection URI.
     MONGO_DB_NAME          MongoDB database name.
-    SILVER_ENDPOINT_URL    Silver enrich Flask endpoint URL (e.g. http://localhost:8002/enrich).
+    SILVER_ENDPOINT_URL    Silver enrich FastAPI endpoint URL (e.g. http://localhost:8002/enrich).
+    GOLD_ENDPOINT_URL      Gold archive FastAPI endpoint URL (e.g. http://localhost:8003/archive).
+    USER_ALLOWLIST         JSON object mapping user email to role name; user mail not in this list falls back to Guest.
 
-Optional .env keys:
-    ROLE_ML_USERNAME / ROLE_ML_PASSWORD          Demo login credential for ML/DL Engineer.
-    ROLE_OWNER_USERNAME / ROLE_OWNER_PASSWORD    Demo login credential for Note Owner.
-    ROLE_SENIOR_USERNAME / ROLE_SENIOR_PASSWORD  Demo login credential for Dept. Senior Specialist.
+Login is handled by Streamlit's built-in OIDC (st.login) with Google as the provider.
+Must store App's client id, client secret and cookie secret live in .streamlit/secrets.toml, not in .env.
 """
 
 import os
@@ -26,6 +26,7 @@ import markdown as md_lib
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+from utils.auth_gate import GUEST_ROLE, render_logout_button, render_review_login_page, require_login
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
 from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages, to_tpe_time_text
 from utils.ui_elements import color_map, render_side_bar
@@ -36,8 +37,7 @@ PLACEHOLDER = "請選擇"
 SILVER_URL = os.getenv("SILVER_ENDPOINT_URL", "")
 GOLD_URL = os.getenv("GOLD_ENDPOINT_URL", "")
 
-# Guest 為示範帳號：僅能瀏覽下列筆記本／章節，且 approve/reject 只呈現表象、後端不寫入
-GUEST_ROLE = "Guest"
+# Guest 為示範角色：僅能瀏覽下方預設的筆記本與章節，且 approve/reject 只呈現表象、後端沒有實際寫入動作
 GUEST_ALLOWED_NOTEBOOK = "生物製藥相關"
 GUEST_ALLOWED_SECTION = ["General technical knowledge", "法規"]
 
@@ -49,204 +49,12 @@ st.set_page_config(
 )
 render_side_bar()
 
-# ─────────────────────────────────────────
-# Demo 登入 gate（帳密決定角色；與 onenote_review 共用 session_state）
-# ─────────────────────────────────────────
-CREDENTIALS = [
-    (os.getenv("ROLE_ML_USERNAME", ""), os.getenv("ROLE_ML_PASSWORD", ""), "ML/DL Engineer"),
-    (os.getenv("ROLE_OWNER_USERNAME", ""), os.getenv("ROLE_OWNER_PASSWORD", ""), "Note Owner"),
-    (os.getenv("ROLE_SENIOR_USERNAME", ""), os.getenv("ROLE_SENIOR_PASSWORD", ""), "Dept. Senior Specialist"),
-    (os.getenv("ROLE_GUEST_USERNAME", ""), os.getenv("ROLE_GUEST_PASSWORD", ""), "Guest"),
-]
 
-if not st.session_state.get("authenticated"):
-    # ── Hero banner ──
-    st.markdown(
-        f"""
-<div style="
-    background: linear-gradient(135deg, #0f2040 50%, #0d1526 0%, #0f2040 50%, #1a1040 100%);
-    border-radius: 16px;
-    padding: 2rem 3rem;
-    margin-bottom: 1.8rem;
-    border: 1px solid #2a3550;
-    text-align: center;
-">
-    <h1 style="color:{color_map["FONT_CLR"]}; font-size:2.2rem; font-weight:800;
-        margin:0 0 0.6rem 0; line-height:1.1;">
-        🧠 企業知識資料庫協作平台
-    </h1>
-    <p style="color:{color_map["TEAL"]}; font-size:1rem; margin:0; letter-spacing:0.5px; font-weight:500;">
-        從日常工作筆記到企業智慧的關鍵一步
-    </p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    # ── 引言（獨立一區，全寬）──
-    st.markdown(
-        f"""
-<div style="color:{color_map["FONT_CLR"]}; line-height:1.85; font-size:0.95rem;">
-
-<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 0.6rem 0;">
-    這個頁面在做什麼？
-</p>
-
-<p>多數人在日常工作中會使用公司購買的企業版帳號，登入筆記簿來記載工作歷程、會議記錄、案例經驗，例如 Microsoft OneNote，
-而這些經常蘊藏了部門歷經無數專案累積下來的珍貴實力之結晶，然而，
-部分筆記軟體的存放文本與圖片的格式，並非對 AI 工具的模型友善，
-<strong style="color:{color_map["ORANGE"]};">您或許不知道 OneNote 背後採用的是 HTML 標記式語言排版，
-雖然對人類視覺上來說負擔較輕鬆，但對 AI 模型輸入時卻充滿「雜訊」。</strong>
-直接倒入企業共用知識庫，讓模型去檢索時，可能產生誤解、遺漏甚至幻覺、雜訊也浪費上下文空間，推高組織的金錢成本。
-或退一步來說，人類隨手記錄的文本也可能因為原始語意不全，而不適合直接餵給模型去檢索。<br><br>
-<strong>—— 因此需要在整合 AI 工具、打破數據孤島前，透過一條穩健的數據管道來強壯您的資料，
-不因資料的品質而衝擊未來對系統的信任度。</strong><br><br>
-管道採用獎章架構（Medallion Architecture)，透過銅、銀、金三層：<br>
-🥉 自動把筆記從 OneNote 萃取下來。<br>
-🥈 擴寫語意，補強人類在忙碌之中來不及表達完善的上下文，讓原始資料要呈現的故事更健壯。<br>
-<strong style="color:{color_map["ORANGE"]};">🏅 轉換為對模型負擔最小的的純文字結構 (Markdown)</strong>，
-<strong>但 LLM 生成的內容不會直接進入企業知識庫，它必須先通過這裡的人工審核，核可後才會歸檔，
-自動被引入企業檢索系統，成為系統背後的 Grounding Truth，
-<strong style="color:{color_map["ORANGE"]};">以透明可見的 human-in-loop 協作，避免衍生對 AI 工具的不信任。</strong><br>
-—— 這個頁面，就是負責把關的金牌閘門。</p>
-
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-    st.divider()
-    # ── 兩欄：左下說明＋卡片 / 右下登入表單 ──
-    content_col, form_col = st.columns([3, 2], gap="large")
-
-    with content_col:
-        st.markdown(
-            f"""
-<div style="color:{color_map["FONT_CLR"]}; line-height:1.85; font-size:0.95rem;">
-
-<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 0.6rem 0;">
-    登入後，您會做什麼？
-</p>
-
-<p>依序選擇 <strong>筆記本 → 章節 → 頁面</strong> 叫出待審筆記，左側是原始 OneNote 內容、右側是
-LLM 擴寫後的版本，逐頁比對。滿意就點 <strong>核可（Approve）</strong> 送進知識庫；擴寫得不理想可點
-<strong>重新生成（Regenerate）</strong> 讓模型再試一次（有次數上限）；內容不適合收錄則
-<strong>退件（Reject）</strong>。同一頁的舊版本也可切換回看，方便追溯。</p>
-
-<p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin-top:1.4rem;">
-    審核時，建議守住這三條原則
-</p>
-
-<p>模型運算輸出高速，但不懂您部門的真實業務邏輯。與其擔心被 AI 取代，不如成為
-<strong>「督導 AI 的決策者」</strong>—— 每次核可，都請對照以下三個眼光把關，這不只是形式，
-而是知識庫品質與資訊安全的最後一道防線：</p>
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-        # 三個評估面向卡片
-        c1, c2, c3 = st.columns(3)
-        card_style = """
-            border-radius:12px;
-            padding:1rem 1rem 1.2rem;
-            height:100%;
-            border:1px solid {border};
-            background:{bg};
-        """
-        with c1:
-            st.markdown(
-                f"""
-<div style="{card_style.format(border=color_map["TEAL"], bg="rgba(0,212,200,0.07)")}">
-    <div style="font-size:1.6rem; margin-bottom:0.4rem;">🎯</div>
-    <div style="color:{color_map["TEAL"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
-        準確性 Accuracy
-    </div>
-    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
-        AI 真的讀懂業務痛點了嗎？確認摘要是否精準捕捉核心重點，有無遺漏關鍵步驟或報錯邏輯。
-    </div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-        with c2:
-            st.markdown(
-                f"""
-<div style="{card_style.format(border=color_map["PURPLE"], bg="rgba(155,109,255,0.07)")}">
-    <div style="font-size:1.6rem; margin-bottom:0.4rem;">⚖️</div>
-    <div style="color:{color_map["PURPLE"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
-        可靠性 Reliability
-    </div>
-    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
-        在雜訊中，AI 是否依然清醒？檢視它面對口語化文字與不完美輸入時，是否仍穩定輸出清晰結構。
-    </div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-        with c3:
-            st.markdown(
-                f"""
-<div style="{card_style.format(border=color_map["ORANGE"], bg="rgba(249,115,22,0.07)")}">
-    <div style="font-size:1.6rem; margin-bottom:0.4rem;">🛡️</div>
-    <div style="color:{color_map["ORANGE"]}; font-weight:700; font-size:0.9rem; margin-bottom:0.5rem;">
-        隱私與資安 Privacy
-    </div>
-    <div style="color:{color_map["FONT_CLR"]}; font-size:0.82rem; line-height:1.6;">
-        敏感資料是否被妥善阻擋？確認 AI 未外洩個資或客戶機密，且能防禦 Prompt Injection 攻擊。
-    </div>
-</div>
-""",
-                unsafe_allow_html=True,
-            )
-
-    with form_col:
-        st.markdown(
-            f"""
-<div style="
-    background: rgba(200,100,0,0.03);
-    border: 1px solid #2a3550;
-    border-radius: 16px;
-    padding: 2rem 2rem 1.5rem;
-">
-    <p style="color:{color_map["TEAL"]}; font-weight:700; font-size:1rem; margin:0 0 1.2rem 0; text-align:center;">
-        🔐 治理人員登入
-    </p>
-""",
-            unsafe_allow_html=True,
-        )
-
-        username = st.text_input("帳號", key="login_user", placeholder="輸入您的帳號")
-        password = st.text_input("密碼", type="password", key="login_pwd", placeholder="輸入您的密碼")
-
-        if st.button("登入", width="stretch", type="primary"):
-            if not username or not password:
-                st.warning("請輸入帳號與密碼。")
-            else:
-                matched_role = next(
-                    (role for u, p, role in CREDENTIALS if u and p and u == username and p == password),
-                    None,
-                )
-                if matched_role:
-                    st.session_state.authenticated = True
-                    st.session_state.role = matched_role
-                    # 每次登入都重置 Guest 已操作紀錄，回到可再次點選的假象狀態
-                    st.session_state.guest_reviewed = set()
-                    st.rerun()
-                else:
-                    st.error("帳號或密碼錯誤，請重試。")
-
-        st.markdown(
-            """
-    <p style="color:#e0e8f8; font-size:0.78rem; text-align:center; margin-top:1rem;">
-        此平台僅供授權人員使用<br>登入即代表您同意以指定角色進行審核操作
-    </p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    st.stop()
+# ── 登入 gate ─────────────────────────────
+# 未登入者在此停住，只看得到登入畫面；已登入者會成功取得 email 與角色
+_user_email, _role = require_login(render_login_page=render_review_login_page)
+# 每次進頁都重置 Guest 已操作紀錄，回到可再次點選的假象狀態
+st.session_state.setdefault("guest_reviewed", set())
 
 # ─────────────────────────────────────────
 # 標題 + 角色 + 登出
@@ -283,14 +91,11 @@ st.markdown(
 _spacer, role_col, logout_col = st.columns([7, 2, 1], vertical_alignment="center")
 with role_col:
     st.markdown(
-        f"<div style='text-align:right;'>目前角色：<b>{st.session_state.role}</b></div>",
+        f"<div style='text-align:right;'>{_user_email}<br>目前角色：<b>{_role}</b></div>",
         unsafe_allow_html=True,
     )
 with logout_col:
-    if st.button("登出", width="stretch"):
-        st.session_state.pop("authenticated", None)
-        st.session_state.pop("role", None)
-        st.rerun()
+    render_logout_button("guest_reviewed", "enrich_attempted")
 
 st.divider()
 
