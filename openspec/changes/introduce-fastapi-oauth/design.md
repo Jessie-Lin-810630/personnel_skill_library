@@ -140,6 +140,7 @@ uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-k
 - **JWT 到期時間要拿捏。** 太短會讓使用者在審查頁停留久了之後操作失敗，太長則延長被盜用的時間窗。初步取五分鐘，並在每次呼叫端點前重新簽發，而不是登入時簽一次存起來。
 - **允許清單改動要重新部署。** 清單在環境變數裡，加一個 email 要改 Secret Manager 並重新部署三個服務。以預期的異動頻率（幾乎不變）來說可以接受。
 - **測試使用者名單要手動維護。** 要讓新的人登入，必須到 OAuth 同意畫面加入測試使用者，上限 100 人。若日後把同意畫面改成 Published 狀態，這道關卡會消失，屆時擋人就只剩應用程式端的 `USER_ALLOWLIST`。
-- **登入依賴 Streamlit 的內建 OIDC 功能。** 它在 1.42 版才加入，升版時若行為改變會直接影響登入流程。`requirements.txt` 目前釘在 `streamlit==1.59.1`。
+- **登入依賴 Streamlit 的內建 OIDC 功能。** 它在 1.42 版才加入，升版時若行為改變會直接影響登入流程。`requirements.txt` 目前釘在 `streamlit==1.64.0`。
+- **`st.login` 需要 `auth` 這個 extra。** 依賴要寫成 `streamlit[auth]`，它會帶進 `authlib` 與 `joserfc`；只裝 `streamlit` 的話登入會在執行期才失敗。改動依賴之後必須重新產生 `requirements.txt`，否則 Docker 映像仍會裝到沒有 extra 的版本，地端能跑但雲端登入不了。
 - **本地開發流程會變。** 現在只要填四組帳密就能跑起來，改完之後地端要設定 OIDC 的 `redirect_uri` 與 `cookie_secret`，`.streamlit/secrets.toml` 要另外準備且不可進版控。
 - **既有測試會失效。** 任何直接對 Flask test client 送請求的測試都要改寫成 FastAPI 的 `TestClient`，並補上 `X-User-Token`。

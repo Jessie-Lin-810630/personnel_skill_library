@@ -37,9 +37,9 @@
 ## 6. Dashboard 登入流程
 
 - [ ] 6.1 建立 `.streamlit/secrets.toml` 的範本（`redirect_uri`、`cookie_secret`，以及 `[auth.google]` 底下的 `client_id`、`client_secret`、`server_metadata_url`），加入 `.gitignore` 並更新 `.env.example` 說明。驗證：`git status` 不出現 `secrets.toml`，且地端 `poetry run streamlit run dashboard_ui/app.py` 可跳轉到 Google 登入頁
-- [ ] 6.2 `dashboard_ui/pages/onenote_review.py` 以 `st.login()` 取代 `CREDENTIALS` 帳密比對，登入後以 `st.user.email` 對照允許清單決定 `st.session_state.role`，清單外落 `Guest`。驗證：地端以清單內帳號登入取得審查角色，以清單外帳號登入取得 Guest
-- [ ] 6.3 `dashboard_ui/pages/ai_knowledge_agent.py` 加登入 gate，移除檔案頂部的 `# TODO: st.login()` 注解區塊。驗證：未登入時頁面只顯示登入入口，`session_id` 不初始化
-- [ ] 6.4 移除 `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*`／`ROLE_GUEST_*` 八個環境變數與相關程式碼（`Guest` 角色本身保留，改由允許清單推導），更新 `.env.example`。驗證：`grep -rn "ROLE_ML_USERNAME\|ROLE_GUEST_USERNAME" dashboard_ui/ .env.example` 無結果
+- [x] 6.2 `dashboard_ui/pages/onenote_review.py` 以 `st.login()` 取代 `CREDENTIALS` 帳密比對，登入後以 `st.user.email` 對照允許清單決定 `st.session_state.role`，清單外落 `Guest`。驗證：地端以清單內帳號登入取得審查角色，以清單外帳號登入取得 Guest
+- [x] 6.3 `dashboard_ui/pages/ai_knowledge_agent.py` 加登入 gate，移除檔案頂部的 `# TODO: st.login()` 注解區塊。驗證：未登入時頁面只顯示登入入口，`session_id` 不初始化
+- [x] 6.4 移除 `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*`／`ROLE_GUEST_*` 八個環境變數與相關程式碼（`Guest` 角色本身保留，改由允許清單推導），更新 `.env.example`。驗證：`grep -rn "ROLE_ML_USERNAME\|ROLE_GUEST_USERNAME" dashboard_ui/ .env.example` 無結果
 
 ## 7. Dashboard 簽發與轉傳 token
 

@@ -58,7 +58,7 @@
     - （`task07_gold_service/l_archive_note.py` 不需修改：`archive_note` 與 `reject_note` 的 `role` 參數維持原樣，改變的只是端點傳進去的值從 body 換成 token 推導的結果）
     - `dashboard_ui/pages/onenote_review.py`（登入流程與 header）
     - `dashboard_ui/pages/ai_knowledge_agent.py`（登入 gate）
-- **新增程式**：`task07_common/auth.py`。
+- **新增程式**：`task07_common/auth.py`（端點驗簽）、`dashboard_ui/utils/auth_gate.py`（前端登入 gate 與角色推導，兩個頁面共用）、`.streamlit/secrets.toml.example`（OIDC 設定範本）。
 - **Docker 與部署**：`docker/Dockerfile.task07_silver_service`、`docker/Dockerfile.task07_gold_service` 的啟動指令改用 uvicorn。兩支 workflow 的 Cloud Run 參數不變，SA 與 secrets 不變。
 - **依賴**：
     - 新增 `fastapi`、`uvicorn`、JWT 驗簽用的 `pyjwt`
