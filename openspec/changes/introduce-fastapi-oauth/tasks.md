@@ -49,11 +49,12 @@
 
 ## 8. 部署設定
 
-- [ ] 8.1 兩支 Dockerfile 的啟動指令從 gunicorn 換成 uvicorn，維持 `--workers 1`。驗證：本機 `docker build` 後 `docker run` 起得來，`curl` 打端點得到 401（因為沒帶 token）
-- [ ] 8.2 兩支 workflow 加上 `USER_ALLOWLIST` 的 secret 注入，Cloud Run 的 SA、記憶體、concurrency 參數維持不變。驗證：workflow 的 `--set-secrets` 含新變數，`--service-account` 與 `--concurrency` 與變更前一致
-- [ ] 8.3 dashboard 的 workflow 加上 `OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`、`USER_ALLOWLIST` 的 secret 注入，並移除八個 `ROLE_*` 的注入。驗證：部署後以測試使用者名單內的 Google 帳號登入成功
-- [ ] 8.4 部署完成後，把 Cloud Run 實際的服務網址補進 OAuth Web client 的 Authorized redirect URIs。驗證：雲端登入不再出現 `redirect_uri_mismatch`
-- [ ] 8.5 確認測試使用者名單外的帳號登入被 Google 擋下。驗證：以名單外帳號嘗試登入，停在 Google 的錯誤頁，不進到應用程式
+- [x] 8.1 兩支 Dockerfile 的啟動指令從 gunicorn 換成 uvicorn，維持 `--workers 1`，不搬 `--threads` 與 `--timeout`（uvicorn 無對應項，語意不同）。驗證：以 uvicorn 實際啟動 Gold 服務，未帶憑證的請求得到 401、`/openapi.json` 得到 200
+- [x] 8.2 兩支 workflow 加上 `USER_ALLOWLIST` 與 `TOKEN_ISSUER_SA` 的 secret 注入，Cloud Run 的 SA、記憶體、concurrency 參數維持不變。驗證：三支 workflow 的 YAML 可被 `yaml.safe_load` 解析，且 `--service-account` 與 `--concurrency` 與變更前一致
+- [x] 8.3 dashboard 的 workflow 加上 `USER_ALLOWLIST`、`TOKEN_ISSUER_SA` 的環境變數注入，並把整份 `secrets.toml` 以檔案形式掛到 `/root/.streamlit/secrets.toml`（Streamlit 的 `[auth]` 只讀檔案，環境變數讀不到；掛家目錄以免蓋住 `/app/.streamlit/config.toml`），同時移除八個 `ROLE_*` 的注入。驗證：部署後以測試使用者名單內的 Google 帳號登入成功
+- [x] 8.3.1 在 Secret Manager 建立 `STREAMLIT_AUTH_TOML_DEV` 與 `STREAMLIT_AUTH_TOML_PROD`，內容各為一份完整的 `secrets.toml`，`redirect_uri` 分別指向該環境的 Cloud Run 服務網址。驗證：`gcloud secrets versions access latest` 取得的內容可被 `tomllib.loads` 解析且含 `[auth.google]`
+- [x] 8.4 部署完成後，把 Cloud Run 實際的服務網址補進 OAuth Web client 的 Authorized redirect URIs。驗證：雲端登入不再出現 `redirect_uri_mismatch`
+- [x] 8.5 確認測試使用者名單外的帳號登入被 Google 擋下。驗證：以名單外帳號嘗試登入，停在 Google 的錯誤頁，不進到應用程式
 
 ## 9. 文件與收尾
 
