@@ -38,7 +38,8 @@
 ### Requirement: 審查者身分以獨立 header 轉傳
 
 - Dashboard 呼叫 Silver 與 Gold 端點時 SHALL 在 `X-User-Token` header 帶入一個短效 JWT。
-- 該 JWT SHALL 由 dashboard 以自己的 Cloud Run runtime service account 私鑰簽發，內容至少包含登入者 email 與到期時間。
+- 該 JWT SHALL 由 dashboard 以自己的 Cloud Run runtime service account 私鑰簽發，內容包含簽發者、接收者、登入者 email 與到期時間。
+- 該 JWT 不可 (MUST NOT) 夾帶角色。角色一律由端點自行對照允許清單推導，簽進 token 會變成沒人讀的欄位，也會讓人誤以為端點採用呼叫端指定的角色。
 - 簽發 SHALL 透過 GCP IAM Credentials 的 `signJwt`，私鑰不可 (MUST NOT) 以檔案或環境變數形式存在於 dashboard 容器內。
 - `Authorization` header 務必 (MUST) 維持給 dashboard runtime service account 的 ID token 使用。
 - 該 header 由 Cloud Run 的 IAM 檢查，不會傳到應用程式，因此不可 (MUST NOT) 用來傳遞使用者身分。

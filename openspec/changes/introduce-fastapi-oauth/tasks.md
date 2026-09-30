@@ -36,16 +36,16 @@
 
 ## 6. Dashboard 登入流程
 
-- [ ] 6.1 建立 `.streamlit/secrets.toml` 的範本（`redirect_uri`、`cookie_secret`，以及 `[auth.google]` 底下的 `client_id`、`client_secret`、`server_metadata_url`），加入 `.gitignore` 並更新 `.env.example` 說明。驗證：`git status` 不出現 `secrets.toml`，且地端 `poetry run streamlit run dashboard_ui/app.py` 可跳轉到 Google 登入頁
+- [x] 6.1 建立 `.streamlit/secrets.toml` 的範本（`redirect_uri`、`cookie_secret`，以及 `[auth.google]` 底下的 `client_id`、`client_secret`、`server_metadata_url`），加入 `.gitignore` 並更新 `.env.example` 說明。驗證：`git status` 不出現 `secrets.toml`，且地端 `poetry run streamlit run dashboard_ui/app.py` 可跳轉到 Google 登入頁
 - [x] 6.2 `dashboard_ui/pages/onenote_review.py` 以 `st.login()` 取代 `CREDENTIALS` 帳密比對，登入後以 `st.user.email` 對照允許清單決定 `st.session_state.role`，清單外落 `Guest`。驗證：地端以清單內帳號登入取得審查角色，以清單外帳號登入取得 Guest
 - [x] 6.3 `dashboard_ui/pages/ai_knowledge_agent.py` 加登入 gate，移除檔案頂部的 `# TODO: st.login()` 注解區塊。驗證：未登入時頁面只顯示登入入口，`session_id` 不初始化
 - [x] 6.4 移除 `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*`／`ROLE_GUEST_*` 八個環境變數與相關程式碼（`Guest` 角色本身保留，改由允許清單推導），更新 `.env.example`。驗證：`grep -rn "ROLE_ML_USERNAME\|ROLE_GUEST_USERNAME" dashboard_ui/ .env.example` 無結果
 
 ## 7. Dashboard 簽發與轉傳 token
 
-- [ ] 7.1 新增簽發函式：呼叫 IAM Credentials 的 `signJwt`，以 dashboard runtime SA 私鑰簽出含 email 與五分鐘 `exp` 的 JWT。驗證：地端執行後可用 `task07_common/auth.py` 的驗證函式成功驗簽
-- [ ] 7.2 approve、reject、regenerate 三個呼叫都在 `X-User-Token` 帶上新簽的 JWT，且每次呼叫前重新簽發。驗證：地端同時啟動 Silver（8002）與 Gold（8003），三個按鈕都能成功走完並在服務日誌看到驗證通過
-- [ ] 7.3 Guest 分支維持不送請求。驗證：以 Guest 角色按 approve，Silver 與 Gold 的日誌沒有任何請求進來
+- [x] 7.1 新增 `dashboard_ui/utils/user_token_for_silver_and_gold.py` 的 `mint_user_token`：呼叫 IAM Credentials 的 `signJwt`，以 dashboard runtime SA 私鑰簽出含 email 與五分鐘 `exp` 的 JWT，不夾帶角色。驗證：`tests/test_user_token_audience_matches.py` 斷言簽發端與驗證端的 audience 常數一致
+- [x] 7.2 approve、reject、regenerate 三個呼叫都在 `X-User-Token` 帶上新簽的 JWT，且每次呼叫前重新簽發；Gold 的 body 移除 `role`。驗證：地端同時啟動 Silver（8002）與 Gold（8003），三個按鈕都能成功走完並在服務日誌看到驗證通過
+- [x] 7.3 Guest 一律不送請求：Gold 維持既有的假象分支，Silver 新增四道攔截（自動生成、審查列重試按鈕停用、生成失敗重試按鈕停用、`_call_silver` 開頭兜底）。驗證：以 Guest 角色瀏覽與按鈕操作，Silver 與 Gold 的日誌沒有任何請求進來
 
 ## 8. 部署設定
 

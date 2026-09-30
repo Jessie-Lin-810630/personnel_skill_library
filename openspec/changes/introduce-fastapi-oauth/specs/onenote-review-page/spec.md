@@ -50,6 +50,18 @@
 - **WHEN** `Guest` 角色的使用者按下 Approve 或 Reject
 - **THEN** 頁面只呈現操作成功的畫面並停用該版本的按鈕，不送出請求，MongoDB 與 GCS 皆無寫入
 
+#### Scenario: Guest 不觸發語意擴充生成
+- **WHEN** `Guest` 角色的使用者選到一個尚未生成 md 的版本
+- **THEN** 頁面顯示尚未生成的提示，不呼叫 Silver 端點，不消耗模型配額
+
+#### Scenario: Guest 的重試生成按鈕停用
+- **WHEN** `Guest` 角色的使用者檢視任一版本
+- **THEN** 審查按鈕列的重試生成按鈕為停用狀態並附說明，按不下去也不會送出請求
+
+#### Scenario: Guest 的生成失敗重試按鈕停用
+- **WHEN** `Guest` 角色的使用者檢視一個曾經生成失敗的版本，右欄出現失敗訊息與重試按鈕
+- **THEN** 該重試按鈕亦為停用狀態並附說明，不會清掉失敗記號也不會重新觸發生成
+
 ## REMOVED Requirements
 
 ### Requirement: Demo login gate
