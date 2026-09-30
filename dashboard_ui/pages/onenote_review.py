@@ -225,7 +225,13 @@ if is_version_archived:
 st.divider()
 
 # ─────────────────────────────────────────
-# on-demand 觸發 Silver 端點
+# 呼叫端點：session 狀態、Silver enrich、Gold archive
+#
+# 三支函式放在一起，因為它們共用同一組前提（page_id、dt、is_guest）與同一套錯誤處理方式：
+#   _call_silver → 送出 enrich 請求，把結果與錯誤訊息回傳給呼叫端
+#   _trigger     → 包住 _call_silver，依結果決定記錯誤、顯示提示或清快取重載
+#   _call_gold   → 送出 approve／reject 請求，Guest 走畫面假象不呼叫端點
+# 函式只定義不執行。實際呼叫的地方在下方三處，各自以「觸發點一／二／三」標題標出。
 # ─────────────────────────────────────────
 if "enrich_attempted" not in st.session_state:
     st.session_state.enrich_attempted = {}  # {(page_id, dt): error_msg or None}
@@ -328,6 +334,76 @@ def _trigger(trigger: str) -> None:
     st.rerun()
 
 
+def _call_gold(action: str) -> None:
+    """呼叫 Gold 端點送出審核結果，核可即歸檔，退件則標記為已退回。
+
+    訪客帳號僅供展示，這裡直接以提示訊息呈現操作成功的樣子，完全不呼叫端點，資料庫也不做任何寫入。
+    正式角色的請求會帶上 ID token 與當前登入角色，逾時上限設為 180 秒，因複製檔案到資料湖耗時較長。
+    各類錯誤一律直接顯示給使用者，不向上拋出例外。成功時清空版本清單快取並重跑整頁，
+    讓已處理的版本立即退出待審清單。
+
+    Args:
+        action: 審核結果，approved 代表核可歸檔，rejected 代表退件。
+
+    Returns:
+        None: 只更新畫面與遠端狀態，不回傳值。
+    """
+    # Guest 為示範帳號：只呈現操作成功的表象，完全不呼叫 Gold 端點、後端 MongoDB 不做任何寫入
+    if is_guest:
+        # 記住此版本已操作 → 下方按鈕禁用；toast 可跨 rerun 顯示成功假象
+        st.session_state.guest_reviewed.add((page_id, dt))
+        st.toast("✅ 歸檔成功" if action == "approved" else "✅ 退件成功", icon="✅")
+        st.rerun()
+        return
+    if not GOLD_URL:
+        st.error("找不到GOLD URL！")
+        return
+    with st.spinner(f"{action} 任務執行中..."):
+        # Cloud Run Service 相互溝通是透過在 request headers `Authorization` 夾帶 ID token 做身份驗證
+        auth_req = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(auth_req, GOLD_URL)
+
+        try:
+            # 把登入成功的使用者之 mail address 與角色包成一張短效 token。
+            user_token = mint_user_token(_user_email)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"無法簽發身分憑證：{e}")
+            return
+
+        try:
+            # role 不放進 body，端點一律採用 X-User-Token 驗證後推導的角色
+            resp = requests.post(
+                GOLD_URL,
+                json={"page_id": page_id, "dt": dt, "action": action},
+                timeout=180,
+                headers={
+                    # Cloud Run IAM 負責用這個檢查是「哪個服務」送出請求
+                    "Authorization": f"Bearer {token}",
+                    # 後端程式用這個檢查是「哪個使用者」下指令要送請求
+                    "X-User-Token": user_token,
+                },
+            )
+        except requests.exceptions.ReadTimeout:
+            st.error("回應逾時 (GCS 複製耗時，請聯繫客服，重新整理確認是否已歸檔)。")
+            return
+        except requests.exceptions.ConnectionError:
+            st.error("無法連線至端點，請確認服務是否啟動。")
+            return
+        except Exception as e:  # noqa: BLE001
+            st.error(f"呼叫端點時發生錯誤：{e}")
+            return
+
+    data = resp.json() if resp.content else {}
+    if not resp.ok:
+        st.error(data.get("error", f"端點回應錯誤：{resp.status_code}"))
+        return
+    _load_versions.clear()
+    st.rerun()
+
+
+# ─────────────────────────────────────────
+# 觸發點一：選定版本後自動觸發 Silver（另兩個觸發點在渲染區與頁尾，各自有同樣的標題）
+# ─────────────────────────────────────────
 # 由前端依登入者的角色決定他能不能看到「選到一個還沒生成 md 的版本」時，系統自動觸發 Silver 服務。
 #
 # Guest 視角：一律不觸發。選到還沒生成 md 的版本時走 if，只顯示提示要他改看已生成的版本；
@@ -472,6 +548,7 @@ with col_md:
             # 有路徑但讀不到
             st.warning("找不到擴寫版。")
     else:
+        # ── 觸發點二：生成失敗時才出現的重試按鈕，手動觸發 Silver ──
         attempted_err = st.session_state.enrich_attempted.get((page_id, dt))
         if attempted_err:
             st.error(f"此版本尚未生成 LLM 擴寫版：{attempted_err}")
@@ -489,78 +566,11 @@ with col_md:
         else:
             st.info("此版本沒有記錄對應的筆記路徑。")
 
+
 # ─────────────────────────────────────────
-# 審查操作按鈕（regenerate 走 Silver；approve/reject 走 Gold 端點）
+# 觸發點三：審查按鈕列（🔁 重試生成打 Silver；✅ 核可與 ❌ 退件打 Gold）
+# 函式本體在上方「呼叫端點」區塊，這裡只決定按鈕的停用條件與擺放位置。
 # ─────────────────────────────────────────
-
-
-def _call_gold(action: str) -> None:
-    """呼叫 Gold 端點送出審核結果，核可即歸檔，退件則標記為已退回。
-
-    訪客帳號僅供展示，這裡直接以提示訊息呈現操作成功的樣子，完全不呼叫端點，資料庫也不做任何寫入。
-    正式角色的請求會帶上 ID token 與當前登入角色，逾時上限設為 180 秒，因複製檔案到資料湖耗時較長。
-    各類錯誤一律直接顯示給使用者，不向上拋出例外。成功時清空版本清單快取並重跑整頁，
-    讓已處理的版本立即退出待審清單。
-
-    Args:
-        action: 審核結果，approved 代表核可歸檔，rejected 代表退件。
-
-    Returns:
-        None: 只更新畫面與遠端狀態，不回傳值。
-    """
-    # Guest 為示範帳號：只呈現操作成功的表象，完全不呼叫 Gold 端點、後端 MongoDB 不做任何寫入
-    if is_guest:
-        # 記住此版本已操作 → 下方按鈕禁用；toast 可跨 rerun 顯示成功假象
-        st.session_state.guest_reviewed.add((page_id, dt))
-        st.toast("✅ 歸檔成功" if action == "approved" else "✅ 退件成功", icon="✅")
-        st.rerun()
-        return
-    if not GOLD_URL:
-        st.error("找不到GOLD URL！")
-        return
-    with st.spinner(f"{action} 任務執行中..."):
-        # Cloud Run Service 相互溝通是透過在 request headers `Authorization` 夾帶 ID token 做身份驗證
-        auth_req = google.auth.transport.requests.Request()
-        token = google.oauth2.id_token.fetch_id_token(auth_req, GOLD_URL)
-
-        try:
-            # 把登入成功的使用者之 mail address 與角色包成一張短效 token。
-            user_token = mint_user_token(_user_email)
-        except Exception as e:  # noqa: BLE001
-            st.error(f"無法簽發身分憑證：{e}")
-            return
-
-        try:
-            # role 不放進 body，端點一律採用 X-User-Token 驗證後推導的角色
-            resp = requests.post(
-                GOLD_URL,
-                json={"page_id": page_id, "dt": dt, "action": action},
-                timeout=180,
-                headers={
-                    # Cloud Run IAM 負責用這個檢查是「哪個服務」送出請求
-                    "Authorization": f"Bearer {token}",
-                    # 後端程式用這個檢查是「哪個使用者」下指令要送請求
-                    "X-User-Token": user_token,
-                },
-            )
-        except requests.exceptions.ReadTimeout:
-            st.error("回應逾時 (GCS 複製耗時，請聯繫客服，重新整理確認是否已歸檔)。")
-            return
-        except requests.exceptions.ConnectionError:
-            st.error("無法連線至端點，請確認服務是否啟動。")
-            return
-        except Exception as e:  # noqa: BLE001
-            st.error(f"呼叫端點時發生錯誤：{e}")
-            return
-
-    data = resp.json() if resp.content else {}
-    if not resp.ok:
-        st.error(data.get("error", f"端點回應錯誤：{resp.status_code}"))
-        return
-    _load_versions.clear()
-    st.rerun()
-
-
 st.markdown("#### 針對語義增強筆記 (右側筆記)，請點選審核結果：", text_alignment="center")
 # 行為要求：
 # 打 Silver 的按鈕（重試生成）：Guest 一律停用，按不下去。
