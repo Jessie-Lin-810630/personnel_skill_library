@@ -117,7 +117,7 @@ Optional .env keys:
 | task07 Bronze | `task07_onenote_to_markdown_lazy_loading/` | 下載 OneNote html 存 Bronze，不呼叫 LLM | `feature/html-to-markdown` |
 | task07 Silver | `task07_silver_service/` | on-demand enrich 端點（8002），html → md | 見下方「分支職責」 |
 | task07 Gold | `task07_gold_service/` | approve／reject 歸檔端點（8003） | 見下方「分支職責」 |
-| task07 共用 | `task07_common/` | 三服務共用的 `gcs`／`audit_log`／`hashing`／`topic` | 同上 |
+| task07 共用 | `task07_common/` | 三服務共用的 `gcs`／`audit_log`／`hashing`／`topic`／`auth` | 同上 |
 | task08 | `task08_onenote_embed_etl/` | 把 OneNote 歸檔筆記向量化 | `feature/html-to-markdown` |
 
 **漸進式揭露**：要動哪個 task，就照下列順序讀，資訊夠了就停，不要一開始就翻腳本。
@@ -147,7 +147,7 @@ Optional .env keys:
 
 - `app.py` — 首頁（HOME）：讀取所有 MongoDB collections，繪製雷達圖（plotly）、KPI 卡片、GitHub 最近專案、刷題三相 donut chart
 - `pages/knowledge_factory.py` — 第二頁「Chasing Data Engineering」：Tech Stack Overview（13 層技術堆疊卡片，見 `utils/tech_stack_diagram.py`）＋ Data Lineage（9 張 DAG SVG，從 GCS `personal-vaults` 讀取並以 `st.cache_data` 快取、失敗顯示 Image Not Found）。此頁為原 `knowledge_factory2.py` 扶正而來，舊版 `knowledge_factory.py`（ETL 架構圖／里程碑）已除役
-- `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）、Tech Stack 技術堆疊圖（`tech_stack_diagram.py`，純 inline style + base64 SVG，供 `st.html`）、GCS 讀取（`gcs_reader.py`，`read_text` / `read_bytes_as_base64`）
+- `utils/` — MongoDB 查詢封裝（`interact_with_mongodb.py`）、資料預處理（`precomputing.py`）、UI 元件（`ui_elements.py`）、Tech Stack 技術堆疊圖（`tech_stack_diagram.py`，純 inline style + base64 SVG，供 `st.html`）、GCS 讀取（`gcs_reader.py`，`read_text` / `read_bytes_as_base64`）、登入 gate 與角色推導（`auth_gate.py`，兩頁共用的登入畫面也在此）、簽發呼叫 Silver／Gold 用的 `X-User-Token`（`user_token_for_silver_and_gold.py`）
 - `agents/` / `agent_tools/` — Phase III AI Agent（使用 Google Agent Platform Gemini + MongoDB Atlas Vector Search）
 
 ## 環境變數
@@ -160,8 +160,9 @@ Optional .env keys:
 - `GCP_PROJECT_ID` — 呼叫 Agent Platform 用，雲端與地端都要。
 - `ENVIRONMENT` — task07 Bronze／Silver 必填，只能是 `local`／`dev`／`prod`，未知值會 raise；task07 Gold 不讀。Silver 在雲端由 workflow 依分支寫入，地端才需自己填。
 - 資料湖 bucket：task07／08 可用 `ONENOTE_GCS_BUCKET` 覆寫，未宣告則預設 `onenote-vaults`；task01／06 的 `personal-vaults` 寫死在程式常數裡，**沒有對應變數**。
+- `USER_ALLOWLIST`、`TOKEN_ISSUER_SA` — dashboard、Silver、Gold 三者都要。
 
-各來源系統的憑證（`GITHUB_*`、`LEETCODE_*`、`CCCLUB_*`、`GOOGLE_SHEET_KEY`、`ONENOTE_CLIENT_ID`）與 dashboard 專用變數（兩個端點 URL、`COHERE_API_KEY`、`ERD_LINK`、四種角色帳密、`AI_AGENT_RATE_LIMIT`）見各自 README 的 `Configuration`。
+各來源系統的憑證（`GITHUB_*`、`LEETCODE_*`、`CCCLUB_*`、`GOOGLE_SHEET_KEY`、`ONENOTE_CLIENT_ID`）與 dashboard 專用變數（兩個端點 URL、`COHERE_API_KEY`、`ERD_LINK`、`AI_AGENT_RATE_LIMIT`、OIDC 登入設定）見各自 README 的 `Configuration`。
 
 ## 部署架構（Phase II+）
 
@@ -173,5 +174,5 @@ image tag 規則、Artifact Registry 位置、Secret 對應、workflow 觸發條
 
 - **環境由分支決定**：push 到 `main` → `prod`，其餘分支（含 `develop`）→ `dev`；Cloud Run 資源以 `-prod`／`-dev` 後綴區分，兩環境共用同一組 secrets。
 - **資源型態**：task01–06、task08 是 Cloud Run **Job**（Cloud Scheduler 觸發）；`dashboard_ui`、task07 Silver／Gold 是 Cloud Run **Service**（8080）。
-- **Silver／Gold 不對外**：需 ID token 驗證，由 dashboard 的 runtime SA 以 Cloud Run Invoker 呼叫；端點 URL 由 workflow 部署時動態帶入，**不可寫死**。
+- **Silver／Gold 不對外**：由 `dashboard_ui` 的 runtime SA 以 Cloud Run Invoker 呼叫並用 ID token 驗證 `dashboard_ui`；端點自身 URL 由 github workflow 部署時動態帶入，**不可寫死**。
 - **task07 Bronze ETL 不納入部署**：互動式裝置流程授權，僅地端執行。

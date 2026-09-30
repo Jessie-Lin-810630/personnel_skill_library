@@ -9,7 +9,7 @@
 
 # Purpose
 
-- 提供一個 Flask 端點，接收審查頁對某一頁筆記某一版本的「文本語意擴寫增強 enrich 請求」。
+- 提供一個 FastAPI 端點，接收審查頁對某一頁筆記某一版本的「文本語意擴寫增強 enrich 請求」，並驗證請求來自哪一位登入者。
 - 把筆記的的 HTML 原始碼解析後，連同內嵌圖片送多模態LLM 判讀，生成 enriched 且冠上 frontmatter 的 Markdown 文檔，存到 GCS 資料湖。
 - 更新該版本的文件生命週期狀態為「待審查 (pending_review)」，寫入 MongoDB Atlas。
 - 此外，每次 LLM call logs 也會寫入 MongoDB Atlas。
@@ -59,12 +59,18 @@ flowchart LR
 
 ```plaintext
 task07_silver_service/
-├── app.py                       # Flask 端點：POST /enrich（localhost:8002）
+├── app.py                       # FastAPI 端點：POST /enrich（localhost:8002）
 ├── t_enrich_html_to_markdown.py # Transform：查快取、呼叫多模態 LLM 生成 markdown
 ├── l_save_markdown.py           # Load：markdown 寫入 GCS 並更新 metadata
 └── README.md                    # 本文件
 
-# 共用套件（見 ../task07_common/）：gcs.py / audit_log.py / hashing.py / topic.py
+# 共用套件（見 ../task07_common/）
+task07_common/
+├── gcs.py         # GCS 資料湖讀寫、blob 路徑解析
+├── audit_log.py   # MongoDB 稽核紀錄與筆記中繼資料讀寫
+├── hashing.py     # HTML sha256
+├── topic.py       # 以頁面標題初判 topic
+└── auth.py        # 驗證 header X-User-Token，推導登入者的角色
 ```
 
 
@@ -80,9 +86,19 @@ task07_silver_service/
 | `MONGO_DB_NAME`                   | 目標 database 名稱                                                  | skill_dashboard | ✅  |
 | `GCP_PROJECT_ID`                  | Agent Platform 專案 ID                      | 無，需自訂         | ✅  |
 | `ENVIRONMENT`              | 執行環境名稱                                              |  無，需自訂<br>([只能賦值為 local、dev、或 prod 其中之一](../task07_common/audit_log.py))  |  ✅  |
+| `USER_ALLOWLIST`                  | 判斷請求由誰發出的清單，內容為 email 對應角色名稱的 JSON object，不在清單內者一律拒絕 | 無，需自訂 | ✅ |
+| `TOKEN_ISSUER_SA`                 | 簽發 `X-User-Token` 的 service account email，本服務向它的公開金鑰端點取金鑰驗簽 | 無，需自訂 | ✅ |
 | `AGENT_PLATFORM_USER_CREDENTIALS` | **地端執行時**才需要：呼叫 Agent Platform Gemini 用的 service account JSON key 檔路徑。雲端執行不需要此變數 | 無，地端需自訂 | 地端 ✅ |
 | `GCS_USER_CREDENTIALS`            | **地端執行時**才需要：讀 `raw-notes/` html、寫 `processed-notes/` md 用的 GCS service account JSON key 檔路徑。雲端執行不需要此變數。 | 無，地端需自訂 | 地端 ✅ |
 | `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  | onenote-vaults  | 選填 (若未宣告此環境變數，腳本函式內亦預設使用 onenote-vaults，程式不會拋例外) |
+
+> **關於 USER_ALLOWLIST 的範例**：連同 `{}` 一起設定為 Secret Managers 的 Secrets。
+```json
+{
+    "abc1234@gmail.com": "Data-Engineer",
+    "other@gmail.com": "ML/DL Engineer"
+ }
+```
 
 > **如何備妥 service account JSON key**：GCP Console → IAM & Admin → Service Accounts → 建立 SA（GCS 讀寫授予 `Storage Object User`；Agent Platform 授予 `Agent Platform User`）→ Keys → Add Key → JSON，下載後存到專案內（例如 `./env/`），在 `.env` 填入 JSON key 檔的路徑。
 
@@ -160,7 +176,7 @@ curl -X POST http://localhost:8002/enrich \
 
 1. 建立兩個 GCP service account：一個授予 `Storage Object User`（讀 html／寫 processed md），一個授予 `Agent Platform User`（呼叫 LLM）；各下載 JSON key 存到專案內（例如 `./env/`），並在 `.env` 分別把 `GCS_USER_CREDENTIALS`、`AGENT_PLATFORM_USER_CREDENTIALS` 設為對應路徑。
 2. 依 [Configuration](#configuration) 的「地端執行的憑證接線」指示解除腳本中的註解。
-3. 在專案根目錄啟動 Flask 服務（監聽 8002）：
+3. 在專案根目錄啟動 FastAPI 服務（監聽 8002）：
 
     ```bash
     poetry run python -m task07_silver_service.app
@@ -193,7 +209,7 @@ docker run --rm --env-file ./.env \
 ## (Option 3) Run as Cloud Run Service
 
 1. **Service Account**：使用 `psd-enrich-task`，授予 `Agent Platform User`、`Storage Object User`、`Secret Manager Secret Accessor`。
-2. **Secret Manager**：把 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`（及選填 `ONENOTE_GCS_BUCKET`）存為 secrets。憑證接線的兩處註解維持原狀（不做 Option 1 步驟 2 的解除），GCS 與 Agent Platform 皆改由 `psd-enrich-task` 的 ADC 供給。
+2. **Secret Manager**：- 把[前述已經設定在 .env file](#get-started) 的 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`、`USER_ALLOWLIST`、`TOKEN_ISSUER_SA` 改存為獨立的 secrets。憑證接線的兩處註解維持原狀（不做 Option 1 步驟 2 的解除），GCS 與 Agent Platform 皆改由 `psd-enrich-task` 的 ADC 供給。
 3. **Build image**（Cloud Run 監聽的 port 需在容器內對齊，通常改對外 8080）：
 
     ```bash
@@ -205,4 +221,4 @@ docker run --rm --env-file ./.env \
 > 建議加上 `--platform=linux/amd64`：Cloud Run 執行環境通常是 linux/amd64，若您在非 amd64 機器（如 Apple Silicon arm64）build image，不指定平台會導致 Cloud Run 無法啟動 container。
 
 4. **Push 到 Artifact Registry**、**建立 Cloud Run Service**、掛載 secrets、指定 `psd-enrich-task`。
-5. 取得服務 URL 後，把它設給 dashboard 的 `SILVER_ENDPOINT_URL`（本機預設 `http://localhost:8002/enrich`），審查頁即可呼叫。
+5. 取得服務 URL 後，把它設給 [前端頁面所需要打的 API SILVER_ENDPOINT_URL](../dashboard_ui/README.md#configuration)（本機測試則預設 `http://localhost:8002/enrich`），審查頁即可呼叫。

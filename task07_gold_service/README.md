@@ -9,7 +9,7 @@
 
 # Purpose
 
-- 提供一個 Flask 端點，接收審查頁對某一頁筆記某一版本的核可（approve）或退件（reject）決定。
+- 提供一個 FastAPI 端點，接收審查頁對某一頁筆記某一版本的核可（approve）或退件（reject）決定，並驗證請求來自哪一位登入者。
 - 核可時，把 Silver 生成的 enriched 文本 (md 檔) 與引用的圖片檔複製到 GCS 資料湖的歸檔層。
 - 退件時，只在 MongoDB Atlas 標記文件生命週期狀態為退件。
 - 無論核可或退件，都重新驗算筆記內文的資料治理品質欄位（有效圖片數、失效圖片數、字數等），並回寫 MongoDB Atlas。
@@ -61,11 +61,17 @@ flowchart LR
 
 ```plaintext
 task07_gold_service/
-├── app.py            # Flask 端點：POST /archive（approved / rejected，localhost:8003）
-├── l_archive_note.py # Load：核可歸檔與退件標記，並回寫品質欄位
-└── README.md         # 本文件
+├── app.py               # FastAPI 端點：POST /archive（approved / rejected，localhost:8003）
+├── l_archive_note.py    # Load：核可歸檔與退件標記，並回寫品質欄位
+└── README.md            # 本文件
 
-# 共用套件（見 ../task07_common/）：gcs.py / audit_log.py / hashing.py / topic.py
+# 共用套件
+task07_common/
+├── gcs.py         # GCS 資料湖讀寫、blob 路徑解析
+├── audit_log.py   # MongoDB 稽核紀錄與筆記中繼資料讀寫
+├── hashing.py     # HTML sha256
+├── topic.py       # 以頁面標題初判 topic
+└── auth.py        # 驗證 header X-User-Token，推導登入者的角色
 ```
 
 ---
@@ -80,8 +86,18 @@ task07_gold_service/
 | ---------------------- | ------------------------------------------------------------------- | ----------------- | --- |
 | `MONGO_ALTAS_URI`      | MongoDB Atlas 連線字串                                              | 無，需自訂         | ✅  |
 | `MONGO_DB_NAME`        | 目標 database 名稱                                                  | skill_dashboard | ✅  |
+| `USER_ALLOWLIST`       | 判斷請求由誰發出的清單，內容為 email 對應角色名稱的 JSON object，該角色會寫進 `reviewed_by_role`，不在清單內者一律拒絕 | 無，需自訂 | ✅ |
+| `TOKEN_ISSUER_SA`      | 簽發 `X-User-Token` 的 service account email，本服務向它的公開金鑰端點取金鑰驗簽 | 無，需自訂 | ✅ |
 | `GCS_USER_CREDENTIALS` | **地端執行時**才需要，負責讀寫 GCS 上的物件。雲端執行時不虛此變數。 | 無，地端需自訂 | 地端 ✅ |
 | `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  |  onenote-vaults  | 選填 (若不定義此環境變數，腳本函式內亦預設傳入 onenote-vaults) |
+
+> **關於 USER_ALLOWLIST 的範例**：連同 `{}` 一起設定為 Secret Managers 的 Secrets。
+```json
+{
+    "abc1234@gmail.com": "Data-Engineer",
+    "other@gmail.com": "ML/DL Engineer"
+ }
+```
 
 > **如何取得 `GCS_USER_CREDENTIALS`**：GCP Console → IAM & Admin → Service Accounts → 建立 SA、授予 `Storage Object User`（寫入 raw-notes）→ Keys → Add Key → JSON，下載後存到專案內（例如 `./env/gcs-user.json`），在 `.env` 設為此檔路徑。設好後，`task07_common/gcs.py` 會直接讀這個路徑連上 GCS。
 
@@ -154,7 +170,7 @@ task07_gold_service/
 ## (Option 1) Run on-premise without Docker Container
 
 1. 建立 GCP service account、授予 `Storage Object User`，下載 JSON key 存到專案內（例如 `./env/gcs-user.json`），並在 `.env` 把 `GCS_USER_CREDENTIALS` 設為此檔路徑。
-2. 在專案根目錄啟動 Flask 服務（監聽 8003）：
+2. 在專案根目錄啟動 FastAPI 服務（監聽 8003）：
 
     ```bash
     poetry run python -m task07_gold_service.app
@@ -187,7 +203,7 @@ task07_gold_service/
 ## (Option 3) Run as Cloud Run Service
 
 1. **Service Account**：使用 `psd-archive-task`，授予 `Storage Object Viewer`、`Storage Object Creator`、`Secret Manager Secret Accessor` 三種角色。
-2. **Secret Manager**：把 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、及選填的 `ONENOTE_GCS_BUCKET` 三者存為 secrets。
+2. **Secret Manager**：- 把[前述已經設定在 .env file](#get-started) 的 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`USER_ALLOWLIST`、`TOKEN_ISSUER_SA`（及選填的 `ONENOTE_GCS_BUCKET`）改存為獨立的 secrets。
 3. **Build image**：
 
     ```bash
@@ -200,4 +216,4 @@ task07_gold_service/
 
 4. **Push 到 Artifact Registry**、**建立 Cloud Run Service**、掛載 secret manager 設定好的 secrets，並且指定該 service 帶有 step 1 設好的 service account `psd-archive-task`。
 
-5. 取得 service URL 後，把它指派給[前端頁面所需要打的 API   `GOLD_ENDPOINT_URL`](../dashboard_ui/README.md#configuration)。
+5. 取得 service URL 後，把它指派給[前端頁面所需要打的 API `GOLD_ENDPOINT_URL`](../dashboard_ui/README.md#configuration) （本機測試則預設 `http://localhost:8003/archive`）。

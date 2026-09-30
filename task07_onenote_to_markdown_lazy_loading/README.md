@@ -57,7 +57,8 @@ task07_common/
 ├── gcs.py         # GCS 資料湖讀寫、blob 路徑解析
 ├── audit_log.py   # MongoDB 稽核紀錄與筆記中繼資料讀寫
 ├── hashing.py     # HTML sha256
-└── topic.py       # 以頁面標題初判 topic
+├── topic.py       # 以頁面標題初判 topic
+└── auth.py        # Bronze 未使用，Silver／Gold 專用
 ```
 
 

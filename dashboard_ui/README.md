@@ -55,16 +55,16 @@
 
 ## OneNote 審查頁（`pages/onenote_review.py`）
 
-- **能看到**：登入後檢視與比對原始筆記與LLM enriched 筆記。
-- **能互動**：生成、歸檔或是退件。
-- **登入控管**：**有**。
+- **能看到**：登入後檢視與比對原始筆記與 LLM enriched 筆記。
+- **能互動**：生成、歸檔或是退件。訪客身分只看得到已生成的內容，生成類按鈕停用，歸檔與退件只更新畫面不寫入系統。
+- **登入控管**：**有**。以 Google 帳號登入且根據 Google Auth Platform 登記的核可 email 清單來允許特定使用者登入，登入後具有什麼角色係另外依照登入者的 email 與內建權限清單決定，若不在清單內一律視為訪客 (Guest)。訪客與非訪客具備不同層級的審查權限。
 - **關聯**：task07 Silver、task07 Gold。
 
 ## AI Knowledge Agent — 知識 Agent（`pages/ai_knowledge_agent.py`）
 
 - **能看到**：對話式介面，回答筆記語意查詢、摘要。
 - **能互動**：開新對話 → 輸入問題 → intent router 分流到 RAG agent → 回覆並記錄對話。
-- **登入控管**：無。
+- **登入控管**：**有**。以 Google 帳號登入且根據 Google Auth Platform 登記的核可 email 清單來允許特定使用者登入，但不會區分登入者的角色權限，凡授權合法的登入者皆可使用完整對話功能。
 - **關聯**：agents/、agent_tools/、task06、task08。
 
 
@@ -90,14 +90,15 @@ dashboard_ui/
 │   ├── chat_history.py             # 對話紀錄讀寫
 │   ├── connect_to_google_genai.py  # 建立 Agent Platform client
 │   └── types_and_constants.py      # 型別與常數定義
-└── utils/                          # UI／查詢／繪圖工具
+└── utils/                          # UI／查詢／繪圖／登入工具
     ├── interact_with_mongodb.py    # MongoDB 查詢封裝
     ├── precomputing.py             # 資料預處理
     ├── ui_elements.py              # UI 元件（側欄、雷達、表格）
     ├── tech_stack_diagram.py       # Tech Stack 堆疊圖
-    └── gcs_reader.py               # GCS 讀取
+    ├── gcs_reader.py               # GCS 讀取
+    ├── auth_gate.py                # 登入 gate、角色推導、兩頁的登入畫面
+    └── user_token_for_silver_and_gold.py  # 簽發呼叫 Silver／Gold 用的 X-User-Token
 ```
-
 
 # Configuration
 
@@ -105,24 +106,31 @@ dashboard_ui/
 - **地端開發**：把 key/value 寫進專案根目錄 `.env`（複製 `.env.example` 後填入）。
 - **雲端部署**：改存 GCP Secret Manager，容器啟動時注入為環境變數（見 [(Option 3)](#option-3-run-as-cloud-run-service)）。
 
-| 變數名稱                          | 說明                                                                | .env.example 預設值             | 必填 |
-| --------------------------------- | ------------------------------------------------------------------- | ----------------- | --- |
-| `MONGO_ALTAS_URI`                 | MongoDB Atlas 連線字串                                              | 無，需自訂         | ✅  |
-| `MONGO_DB_NAME`                   | 目標 database 名稱                                                  | skill_dashboard | ✅  |
-| `GCP_PROJECT_ID`                  | Agent Platform 專案 ID            | 無，需自訂         | ✅ |
-| `AGENT_PLATFORM_USER_CREDENTIALS` | 頁面 'ai_knowledge_agent' & 'OneNote_review' 呼叫 Agent Platform 用的 service account JSON key 檔路徑。| 無，地端需自訂 | **地端執行時** |
-| `COHERE_API_KEY`                  | 頁面 'ai_knowledge_agent' 使用 reranker model 時所需要的 API key | 無，需自申請 | ✅ |
-| `AI_AGENT_RATE_LIMIT` | 頁面 'ai_knowledge_agent' 單次對話中，能呼叫 LLM 的次數上限 | 預設 20 | 選填 |
-| `GOOGLE_APPLICATION_CREDENTIALS`  | 用於從 GCS 讀取圖像讓頁面 'knowledge_factory'&'OneNote_review' 渲染。 | 無，地端需自訂 | **地端執行時** |
-| `SILVER_ENDPOINT_URL`             | 頁面 'OneNote_review' 呼叫 Silver enrichment service URL                          | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8002/enrich` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8002/enrich`<br>**雲端環境執行時**: 部署實際 URL |
-| `GOLD_ENDPOINT_URL`               | 頁面 'OneNote_review' 呼叫 Gold archive service URL                 | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8003/archive` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8003/archive`<br>**雲端環境執行時**: 部署實際 URL|
-| `ERD_LINK`                        | 頁面'knowledge_factory'的 ERD 連結                                     | 無，需自訂                | 選填 |
-| `ROLE_ML_USERNAME` / `ROLE_ML_PASSWORD` | 頁面 'OneNote_review' ML/DL Engineer 角色的示範登入帳密              | 無，需自訂                | 選填 |
-| `ROLE_OWNER_USERNAME` / `ROLE_OWNER_PASSWORD` | 頁面 'OneNote_review' Note Owner 角色的示範登入帳密           | 無，需自訂                | ✅ |
-| `ROLE_SENIOR_USERNAME` / `ROLE_SENIOR_PASSWORD` | 頁面 'OneNote_review' Dept. Senior Specialist 角色的示範登入帳密 | 無，需自訂              | 選填 |
-| `ROLE_GUEST_USERNAME` / `ROLE_GUEST_PASSWORD` | 頁面 'OneNote_review'訪客角色的示範登入帳密 | 無，需自訂              | 選填 |
+| 變數名稱 | HOME | Knowledge Factory | Ingestion & Data Quality | Retrieval & Search Quality | OneNote 審查頁 | AI Knowledge Agent | 說明 | .env.example 設定檔預設值 | 必填 |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | --- | --- | --- |
+| `MONGO_ALTAS_URI` | ✅ |  | ✅ | ✅ | ✅ | ✅ | 連線 MongoDB Atlas | 無，需自訂 | ✅ |
+| `MONGO_DB_NAME` | ✅ |  | ✅ | ✅ | ✅ | ✅ | 指定目標 database | skill_dashboard | ✅ |
+| `GCP_PROJECT_ID` |  |  |  |  |  | ✅ | 呼叫 Agent Platform | 無，需自訂 | ✅ |
+| `AGENT_PLATFORM_USER_CREDENTIALS` |  |  |  |  |  | ✅ | 以金鑰檔取得呼叫 Agent Platform 的憑證 | 無，地端需自訂 | **地端執行時** |
+| `COHERE_API_KEY` |  |  |  |  |  | ✅ | 呼叫 reranker model | 無，需自申請 | ✅ |
+| `AI_AGENT_RATE_LIMIT` |  |  |  |  |  | ✅ | 限制單次對話呼叫 LLM 的次數 | 預設 20 | 選填 |
+| `GOOGLE_APPLICATION_CREDENTIALS` |  | ✅ |  |  | ✅ |  | 以金鑰檔取得讀取 GCS 圖像的憑證 | 無，地端需自訂 | **地端執行時** |
+| `SILVER_ENDPOINT_URL` |  |  |  |  | ✅ |  | 指向 Silver enrich 端點 | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8002/enrich` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8002/enrich`<br>**雲端環境執行時**: 部署實際 URL |
+| `GOLD_ENDPOINT_URL` |  |  |  |  | ✅ |  | 指向 Gold archive 端點 | **此預設值只適用於[地端無容器狀態下](#option-1-run-on-premise-without-docker-container)執行時**: `http://localhost:8003/archive` | ✅，且因應執行環境，應作調整：<br>**在地端以 Docker 容器執行時**: `http://host.docker.internal:8003/archive`<br>**雲端環境執行時**: 部署實際 URL |
+| `ERD_LINK` |  | ✅ |  |  |  |  | 提供 ERD 連結 | 無，需自訂 | 選填 |
+| `USER_ALLOWLIST` |  |  |  |  | ✅ | ✅ | 以 email 對照出登入者的角色 | 無，需自訂 | ✅ |
+| `TOKEN_ISSUER_SA` |  |  |  |  | ✅ |  | 指定簽發 `X-User-Token` 的 service account | 無，需自訂 | ✅ |
+| `DASHBOARD_SIGNER_CREDENTIALS` |  |  |  |  | ✅ |  | 以金鑰檔取得簽發 `X-User-Token` 的憑證 | 無，地端需自訂 | **地端執行時** |
 
 > **地端執行時，關於 AGENT_PLATFORM_USER_CREDENTIALS 使用方式**：憑證被使用於 `agent_tools/connect_to_google_genai.py` 與 `agent_tools/query_with_vector_search.py` 的 client 建立。當您在地端執行時，請記得解除這兩份檔案中「地端測試跑下面區塊」的註解，程式即會知道要從環境變數 AGENT_PLATFORM_USER_CREDENTIALS 取得憑證。
+
+> **關於 USER_ALLOWLIST 的範例**：連同 `{}` 一起設定為 Secret Managers 的 Secrets。
+```json
+{
+    "abc1234@gmail.com": "Data-Engineer",
+    "other@gmail.com": "ML/DL Engineer"
+ }
+```
 
 
 # Schema — `chat_history`
@@ -256,11 +264,19 @@ dashboard_ui/
 
 # Get Started
 
-1. 準備 MongoDB Atlas（見根目錄 [`README.md`](../README.md)），並確認各 task 已把資料寫入對應 collection（否則圖表為空）。
+1. 準備 MongoDB Atlas（見根目錄 [`README.md`](../README.md)），並確認各 task 已把資料寫入對應 collection（否則圖表無法成功繪製完成）。
 
 2. 依 [Configuration](#configuration) 把**所有**環境變數填進 `.env`、各 service account 的 JSON key 放進 `./env/`。一次備齊，六頁才都能正常運作。service account 的 IAM 角色設定建議後文[option 1](#option-1-run-on-premise-without-docker-container)、[option 2](#option-2-run-on-premise-with-docker-container)、[option 3](#option-3-run-as-cloud-run-service)。
 
-3. 以下三種方式擇一啟動。
+3. 建立 Streamlit 的 OIDC 登入設定檔。因為 Streamlit 只會從 secrets.toml 設定檔讀取 OIDC 協定必須的 client id、client secret 與 cookie secret，所以這些設定不會放在 `.env`，以下描述怎麼填寫出 secrets.toml 設定檔：
+
+    ```bash
+    cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+    ```
+
+    接著依該檔內的註解逐項填入實際值。此檔已列入 `.gitignore`，不會進版控。而在雲端環境部署時，也改由 Secret Manager 以 toml 檔案形式掛載，不會在建立 docker image 時打包到 secrets.toml（見 [(Option 3)](#option-3-run-as-cloud-run-service)）。
+
+4. 以下三種方式擇一啟動。
 
 ## (Option 1) Run on-premise without Docker Container
 
@@ -302,12 +318,12 @@ dashboard_ui/
     ```bash
     cd 06_personnel_skill_library
 
-    # Silver Service（容器內 gunicorn 監聽 8080，映射到主機 8002）
+    # Silver Service（容器內 uvicorn 監聽 8080，映射到主機 8002）
     docker build -f docker/Dockerfile.task07_silver_service -t task07-silver-service:latest .
     docker run --rm -d --env-file ./.env -v "$(pwd)/env:/app/env:ro" \
         -p 8002:8080 --name task07-silver-service task07-silver-service:latest
 
-    # Gold（容器內 gunicorn 監聽 8080，映射到主機 8003）
+    # Gold（容器內 uvicorn 監聽 8080，映射到主機 8003）
     docker build -f docker/Dockerfile.task07_gold_service -t task07-gold-service:latest .
     docker run --rm -d --env-file ./.env -v "$(pwd)/env:/app/env:ro" \
         -p 8003:8080 --name task07-gold-service task07-gold-service:latest
@@ -329,9 +345,11 @@ dashboard_ui/
 
 1. 按照[task07 silver service README.md 章節 option 3](../task07_silver_service/README.md#option-3-run-as-cloud-run-service) 與 [task07 gold service README.md 章節 option 3](../task07_gold_service/README.md#option-3-run-as-cloud-run-service) 完成 cloud run services 部署，取得兩個 endpoint URL。
 
-2. **建立 1 支 Service Account**：命名為 `person-skill-dashboard`，授予 `Agent Platform User`、`Cloud Run Invoker`、`Storage Object Viewer`、`Secret Manager Secret Accessor` 四個角色。
+2. **建立 1 支 Service Account**：命名為 `person-skill-dashboard`，授予 `Agent Platform User`、`Cloud Run Invoker`、`Storage Object Viewer`、`Secret Manager Secret Accessor`、`Service Account Token Creator` 五個角色。其中，`Service Account Token Creator` 必須在 Service Account Level 下由 `person-skill-dashboard` 授予*自己* `Service Account Token Creator` 這個角色。
 
-3. **Secret Manager**：把 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`、`SILVER_ENDPOINT_URL`、`GOLD_ENDPOINT_URL`（及選填的 `ERD_LINK`、各 `ROLE_*`）存為 secrets。
+3. **Secret Manager**：
+    - 把[前述已經設定在 .env file](#get-started) 的 `MONGO_ALTAS_URI`、`MONGO_DB_NAME`、`GCP_PROJECT_ID`、`SILVER_ENDPOINT_URL`、`GOLD_ENDPOINT_URL`、`USER_ALLOWLIST`、`TOKEN_ISSUER_SA`（及選填的 `ERD_LINK`）改存為獨立的 secrets。
+    - 把前述提過的 [Streamlit OIDC 設定檔 secrets.toml](#get-started) 的內容，改存成 `STREAMLIT_AUTH_TOML_DEV` 與 `STREAMLIT_AUTH_TOML_PROD` 兩個 secrets，部署時這兩個 secrets 將會再以檔案形式掛到建好的 Cloud Run Service 容器環境中的 `/etc/streamlit-auth/`。`STREAMLIT_AUTH_TOML_DEV` 是給測試環境；`STREAMLIT_AUTH_TOML_PROD` 是給生產環境，兩個環境的 `redirect_uri` 不同，所以因此存成兩個 secrets。
 
 4. 再次提醒：`SILVER_ENDPOINT_URL` 與 `GOLD_ENDPOINT_URL` 應按照[前述](#configuration)提示改填在 step 1 取得的實際 URL。
 

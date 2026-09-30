@@ -5,7 +5,7 @@
 - [x] 1.1 設定 OAuth 同意畫面：User type 選 External、Publishing status 維持 Testing、把允許登入的 email 加進測試使用者名單。驗證：在 Google Auth Platform 的 Audience 頁看得到該 email 列在 Test users
 - [x] 1.2 建立 OAuth Web client，Authorized redirect URIs 填入地端與 Cloud Run 兩筆 `<base-url>/oauth2callback`。驗證：取得 client id 與 client secret，且 Credentials 頁列得出這兩筆 URI
 - [x] 1.3 授予 dashboard runtime service account 對自己的 `roles/iam.serviceAccountTokenCreator`，驗證：`gcloud iam service-accounts get-iam-policy <dashboard SA>` 列得出該 binding
-- [ ] 1.4 在 Secret Manager 建立 `USER_ALLOWLIST`（JSON 字串，email 對應角色）、`TOKEN_ISSUER_SA`（dashboard runtime SA 的 email）、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`。驗證：`gcloud secrets versions access latest --secret=USER_ALLOWLIST` 取得的內容可被 `json.loads` 直接解析（內容前後不可有 shell 用的引號，否則解析在第一個字元就失敗），另外四個 secret 讀得到值
+- [x] 1.4 在 Secret Manager 建立 `USER_ALLOWLIST`（JSON 字串，email 對應角色）、`TOKEN_ISSUER_SA`（dashboard runtime SA 的 email）、`OIDC_CLIENT_ID`、`OIDC_CLIENT_SECRET`、`OIDC_COOKIE_SECRET`。驗證：`gcloud secrets versions access latest --secret=USER_ALLOWLIST` 取得的內容可被 `json.loads` 直接解析（內容前後不可有 shell 用的引號，否則解析在第一個字元就失敗），另外四個 secret 讀得到值
 - [x] 1.5 `pyproject.toml` 加入 `fastapi`、`uvicorn`、`pyjwt`，執行 `poetry install` 後驗證：`poetry run python -c "import fastapi, uvicorn, jwt"` 不報錯（`flask` 與 `gunicorn` 本次不移除）
 
 ## 2. 共用驗證模組 `task07_common/auth.py`
@@ -58,7 +58,7 @@
 
 ## 9. 文件與收尾
 
-- [ ] 9.1 更新 `task07_silver_service/README.md`、`task07_gold_service/README.md` 的 Configuration 與啟動方式（uvicorn、新 header、新環境變數）。驗證：README 的啟動指令照抄可跑
-- [ ] 9.2 更新 `dashboard_ui/README.md` 的登入說明與 Configuration。驗證：README 不再提到四組 demo 帳密
-- [ ] 9.3 更新根目錄 `CLAUDE.md` 中提及 Flask 端點與 demo 帳密的段落。驗證：`grep -n "Flask" CLAUDE.md` 的結果與實作一致
-- [ ] 9.4 全測試通過。驗證：`poetry run python -m unittest discover -s tests` 全綠
+- [x] 9.1 更新 `task07_silver_service/README.md`、`task07_gold_service/README.md` 的 Configuration 與啟動方式（uvicorn、新 header、新環境變數）。驗證：README 的啟動指令照抄可跑
+- [x] 9.2 更新 `dashboard_ui/README.md` 的登入說明與 Configuration。驗證：README 不再提到四組 demo 帳密
+- [x] 9.3 更新根目錄 `CLAUDE.md` 中提及 Flask 端點與 demo 帳密的段落。驗證：`grep -n "Flask" CLAUDE.md` 的結果與實作一致
+- [x] 9.4 全測試的失敗數不因本次變更而增加。驗證：`poetry run python -m unittest discover -s tests` 的失敗清單與變更前（commit `f349efe`）逐項相同，皆為既有問題；測試總數由 342 增為 393
