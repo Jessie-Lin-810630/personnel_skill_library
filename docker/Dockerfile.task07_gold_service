@@ -13,10 +13,8 @@ COPY task07_gold_service/ ./task07_gold_service/
 # Cloud Run 以 $PORT 注入監聽埠（預設 8080）
 EXPOSE 8080
 
-# gunicorn 綁 $PORT；Gold 無 in-process 狀態，同樣單 worker + threads 即可（低流量審查）；
-# --timeout 600 容納 GCS 複製歸檔的長耗時。
-CMD exec gunicorn task07_gold_service.app:app \
-    --bind 0.0.0.0:${PORT:-8080} \
-    --workers 1 \
-    --threads 8 \
-    --timeout 600
+# uvicorn 綁 $PORT；與 Silver 一致採單 worker。
+CMD exec uvicorn task07_gold_service.app:app \
+    --host 0.0.0.0 \
+    --port ${PORT:-8080} \
+    --workers 1

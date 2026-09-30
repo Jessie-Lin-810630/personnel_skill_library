@@ -77,4 +77,4 @@ jobs:
             --concurrency 2 \
             --no-allow-unauthenticated \
             --set-env-vars "ENVIRONMENT=${ENV_NAME}" \
-            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,USER_ALLOWLIST=USER_ALLOWLIST:latest,TOKEN_ISSUER_SA=TOKEN_ISSUER_SA:latest

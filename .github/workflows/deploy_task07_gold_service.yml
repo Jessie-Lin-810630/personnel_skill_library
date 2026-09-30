@@ -74,4 +74,4 @@ jobs:
             --service-account psd-archive-task@${GCP_PROJECT}.iam.gserviceaccount.com \
             --port 8080 \
             --no-allow-unauthenticated \
-            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,USER_ALLOWLIST=USER_ALLOWLIST:latest,TOKEN_ISSUER_SA=TOKEN_ISSUER_SA:latest
