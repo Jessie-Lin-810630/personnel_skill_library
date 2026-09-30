@@ -122,7 +122,7 @@ def verify_user(
         claims = jwt.decode(
             token,
             signing_key.key,  # 第一關: 公鑰驗證 token 的簽章是否確實由 signing_key.key 蓋上
-            algorithms=["RS256"],  # 第二關: 只接受 RS256 演算法
+            algorithms=["RS256"],  # 第二關: 此專案設定後端服務只接受 RS256 演算法
             audience=USER_TOKEN_AUDIENCE,  # 第三關: token payload 的 aud 是否為 USER_TOKEN_AUDIENCE
             issuer=os.getenv("TOKEN_ISSUER_SA", "").strip(),  # 第四關: token payload 的 iss 是否為 dashboard SA
         )  # 第五關 (不用特別寫): 檢查 token payload 的 exp 是否過期。

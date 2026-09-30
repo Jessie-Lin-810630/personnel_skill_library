@@ -12,6 +12,7 @@ Required .env keys:
     SILVER_ENDPOINT_URL    Silver enrich FastAPI endpoint URL (e.g. http://localhost:8002/enrich).
     GOLD_ENDPOINT_URL      Gold archive FastAPI endpoint URL (e.g. http://localhost:8003/archive).
     USER_ALLOWLIST         JSON object mapping user email to role name; user mail not in this list falls back to Guest.
+    TOKEN_ISSUER_SA        Email of the dashboard runtime service account that signs the X-User-Token.
 
 Login is handled by Streamlit's built-in OIDC (st.login) with Google as the provider.
 Must store App's client id, client secret and cookie secret live in .streamlit/secrets.toml, not in .env.
@@ -30,6 +31,7 @@ from utils.auth_gate import GUEST_ROLE, render_logout_button, render_review_logi
 from utils.gcs_reader import read_image_base64_by_uri, read_text_by_uri
 from utils.interact_with_mongodb import get_db_atlas, get_onenote_versioned_pages, to_tpe_time_text
 from utils.ui_elements import color_map, render_side_bar
+from utils.user_token_for_silver_and_gold import mint_user_token
 
 load_dotenv()
 
@@ -53,8 +55,6 @@ render_side_bar()
 # ── 登入 gate ─────────────────────────────
 # 未登入者在此停住，只看得到登入畫面；已登入者會成功取得 email 與角色
 _user_email, _role = require_login(render_login_page=render_review_login_page)
-# 每次進頁都重置 Guest 已操作紀錄，回到可再次點選的假象狀態
-st.session_state.setdefault("guest_reviewed", set())
 
 # ─────────────────────────────────────────
 # 標題 + 角色 + 登出
@@ -230,7 +230,8 @@ st.divider()
 if "enrich_attempted" not in st.session_state:
     st.session_state.enrich_attempted = {}  # {(page_id, dt): error_msg or None}
 
-# Guest 於本 session 已操作過 approve/reject 的版本（(page_id, dt) 集合），用來禁用按鈕；重新登入時清空
+# Guest 於本 session 已操作過 approve/reject 的版本（(page_id, dt) 集合），用來禁用按鈕；
+# 登出時由 render_logout_button 清空，下次登入即可再操作一次
 if "guest_reviewed" not in st.session_state:
     st.session_state.guest_reviewed = set()
 
@@ -248,18 +249,36 @@ def _call_silver(trigger: str) -> tuple[dict | None, str | None]:
         端點回應內容與錯誤訊息組成的 tuple。成功時錯誤訊息為 None，
         失敗時回應內容為 None、錯誤訊息說明失敗原因。
     """
+    # Guest 不能呼叫 Silver
+    # 上游已在自動觸發與重試按鈕兩處擋下，這裡再擋一次，避免日後新增觸發點時漏掉。
+    if is_guest:
+        return None, "訪客身分無法觸發語意擴充生成。"
+
     if not SILVER_URL:
         return None, "SILVER_ENDPOINT_URL 未設定，無法呼叫 Silver 端點。"
 
+    # Cloud Run Service 相互溝通是透過在 request headers `Authorization` 夾帶 ID token 做身份驗證
     auth_req = google.auth.transport.requests.Request()
     token = google.oauth2.id_token.fetch_id_token(auth_req, SILVER_URL)
 
     try:
+        # 把登入成功的使用者之 mail address 與角色包成一張短效 token。
+        user_token = mint_user_token(_user_email)
+    except Exception as e:  # noqa: BLE001
+        return None, f"無法簽發身分憑證：{e}"
+
+    try:
+        # 隨前端發送請求給後端時，夾帶 token 在 header 'X-User-Token' 裡面
         resp = requests.post(
             SILVER_URL,
             json={"page_id": page_id, "dt": dt, "trigger": trigger},
             timeout=180,
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                # Cloud Run IAM 負責用這個檢查是「哪個服務」送出請求
+                "Authorization": f"Bearer {token}",
+                # 後端程式用這個檢查是「哪個使用者」下指令要送請求
+                "X-User-Token": user_token,
+            },
         )
     except requests.exceptions.ReadTimeout:
         return None, "端點回應逾時（LLM 生成耗時，請稍後重新整理確認）。"
@@ -309,9 +328,21 @@ def _trigger(trigger: str) -> None:
     st.rerun()
 
 
-# md_path 為 null 且本 session 尚未嘗試過 → 首次點到即 on-demand 觸發
-# （選中版本自己已歸檔則不燒 LLM；新內容版本仍可正常生成）
-if not md_uri and not is_version_archived and (page_id, dt) not in st.session_state.enrich_attempted:
+# 由前端依登入者的角色決定他能不能看到「選到一個還沒生成 md 的版本」時，系統自動觸發 Silver 服務。
+#
+# Guest 視角：一律不觸發。選到還沒生成 md 的版本時走 if，只顯示提示要他改看已生成的版本；
+# 選到已生成 md 的版本時，if 的 not md_uri 不成立、elif 的 not md_uri 也不成立，兩支都不進，
+# 直接往下渲染既有的 md。所以 Guest 在任何情況下都到不了 _trigger。
+# 後端 Silver 服務還會再檢查一次登入者角色，所以即使前端開放 Guest 送請求過去仍會被回 403。
+#
+# 非 Guest 視角：if 的 is_guest 不成立，判斷全靠 elif 三個條件上。
+# 他看到的文件還沒生成 md、該文件版本自己尚未歸檔、且在本 session 還沒有任何觸發 Silver 失敗過的紀錄，
+# 三者同時成立才自動觸發一次 Silver 服務；
+# 已歸檔的版本不再燒觸發 Silver 服務；或是嘗試觸發過但是 Silver 失敗就記在 enrich_attempted 裡，
+# 來避免同一版本又被自動觸發。
+if is_guest and not md_uri:
+    st.info("此版本尚未生成語意擴充後的筆記。訪客身分不觸發生成，請改看已生成的版本。")
+elif not md_uri and not is_version_archived and (page_id, dt) not in st.session_state.enrich_attempted:
     _trigger("on_demand")
 
 # ─────────────────────────────────────────
@@ -444,7 +475,15 @@ with col_md:
         attempted_err = st.session_state.enrich_attempted.get((page_id, dt))
         if attempted_err:
             st.error(f"此版本尚未生成 LLM 擴寫版：{attempted_err}")
-            if st.button("🔄 重試生成", key="vr_retry"):
+            # 這顆按鈕不直接呼叫 Silver，只負責清掉 session 中的 enrich_attempted 後重跑整頁，
+            # 讓自動觸發那段（本檔呼叫 _trigger("on_demand") 的 elif）的條件重新成立。
+            # 對 Guest 更是無感，因爲他在自動觸發那段被就會被擋下，無法觸發生成按鈕。
+            if st.button(
+                "🔄 重試生成",
+                key="vr_retry",
+                disabled=is_guest,
+                help="訪客身分無法觸發生成" if is_guest else None,
+            ):
                 st.session_state.enrich_attempted.pop((page_id, dt), None)
                 st.rerun()
         else:
@@ -480,15 +519,29 @@ def _call_gold(action: str) -> None:
         st.error("找不到GOLD URL！")
         return
     with st.spinner(f"{action} 任務執行中..."):
+        # Cloud Run Service 相互溝通是透過在 request headers `Authorization` 夾帶 ID token 做身份驗證
         auth_req = google.auth.transport.requests.Request()
         token = google.oauth2.id_token.fetch_id_token(auth_req, GOLD_URL)
 
         try:
+            # 把登入成功的使用者之 mail address 與角色包成一張短效 token。
+            user_token = mint_user_token(_user_email)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"無法簽發身分憑證：{e}")
+            return
+
+        try:
+            # role 不放進 body，端點一律採用 X-User-Token 驗證後推導的角色
             resp = requests.post(
                 GOLD_URL,
-                json={"page_id": page_id, "dt": dt, "role": st.session_state.role, "action": action},
+                json={"page_id": page_id, "dt": dt, "action": action},
                 timeout=180,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={
+                    # Cloud Run IAM 負責用這個檢查是「哪個服務」送出請求
+                    "Authorization": f"Bearer {token}",
+                    # 後端程式用這個檢查是「哪個使用者」下指令要送請求
+                    "X-User-Token": user_token,
+                },
             )
         except requests.exceptions.ReadTimeout:
             st.error("回應逾時 (GCS 複製耗時，請聯繫客服，重新整理確認是否已歸檔)。")
@@ -509,19 +562,38 @@ def _call_gold(action: str) -> None:
 
 
 st.markdown("#### 針對語義增強筆記 (右側筆記)，請點選審核結果：", text_alignment="center")
-# Guest 已對此版本操作過 approve/reject → 禁用按鈕（重新登入會清空 guest_reviewed 而復原）
+# 行為要求：
+# 打 Silver 的按鈕（重試生成）：Guest 一律停用，按不下去。
+# 打 Gold 的按鈕（核可、退件）：Guest 按得下去，但只更新畫面做示意，不送出真實請求。
+
+# Guest 已經按過核可或退件鈕時，為 True (但登出會清空 guest_reviewed，再登入仍可按核可或退件)
 _guest_done = is_guest and (page_id, dt) in st.session_state.guest_reviewed
-_btns_disabled = (not md_uri) or is_version_archived or _guest_done
+
+# Guest 已經按過核可或退件鈕、非 Guest 已將文件觸發過歸檔或退件、文件未先經過 Silver 生成 md
+# 三者之一符合就要 disable Gold 服務按鈕
+_gold_btns_disabled = (not md_uri) or is_version_archived or _guest_done
+
+# 沒有 md、該版本已歸檔、或使用者是 Guest
+# 三者之一符合就要 disable Silver 服務按鈕
+_silver_btn_disabled = _gold_btns_disabled or is_guest
+
+
 _, b1, b2, b3, _ = st.columns([1, 2, 2, 2, 1])
 
 with b1:
-    if st.button("重試生成 (Regenerate)", icon="🔁", width="stretch", disabled=_btns_disabled):
+    if st.button(
+        "重試生成 (Regenerate)",
+        icon="🔁",
+        width="stretch",
+        disabled=_silver_btn_disabled,
+        help="訪客身分無法重試生成" if is_guest else None,
+    ):
         _trigger("regenerate")
 
 with b2:
-    if st.button("核可 (Approve)", icon="✅", width="stretch", disabled=_btns_disabled):
+    if st.button("核可 (Approve)", icon="✅", width="stretch", disabled=_gold_btns_disabled):
         _call_gold("approved")
 
 with b3:
-    if st.button("退件 (Reject)", icon="❌", width="stretch", disabled=_btns_disabled):
+    if st.button("退件 (Reject)", icon="❌", width="stretch", disabled=_gold_btns_disabled):
         _call_gold("rejected")
