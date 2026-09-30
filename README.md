@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=plastic&logo=python&logoColor=white)
 ![Poetry](https://img.shields.io/badge/deps-Poetry-60A5FA?style=plastic&logo=poetry&logoColor=white)
 ![MongoDB Atlas](https://img.shields.io/badge/DB-MongoDB%20Atlas-47A248?style=plastic&logo=mongodb&logoColor=white)
-![Flask](https://img.shields.io/badge/backend-flask-%23000.svg?style=plastic&logo=flask&logoColor=white)
+![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=plastic&logo=fastapi&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?style=plastic&logo=streamlit&logoColor=white)
 ![Plotly](https://img.shields.io/badge/analytics-Plotly-%233F4F75.svg?style=plastic&logo=plotly&logoColor=white)
 ![SSD](https://img.shields.io/badge/SSD-OpenSpec-%23015A69.svg?style=plastic&logo=WCAG&logoColor=white)
@@ -47,7 +47,7 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 | Skill Radar ETL | [task05_googlesheet_skill_etl](./task05_googlesheet_skill_etl/README.md) | 從 Google Sheet 讀「生技」「資料工程」兩張技能盤點表，把能力勾選依複雜性／獨立性／影響力加權算成分數與雷達軸層級。<br>寫入 MongoDB Atlas，供看板首頁繪製技能雷達圖。 |
 | Obsidian 向量化 | [task06_obsidian_embed_etl_v2](./task06_obsidian_embed_etl_v2/README.md) | 挑出 task01 已歸檔但尚未向量化的筆記，從 GCS 下載歸檔內文與圖片後切塊、多模態向量化。<br>向量寫入 MongoDB Atlas 並清除軟刪除筆記的過期向量，供 AI 知識 Agent 做 RAG 檢索。 |
 | OneNote Bronze ETL | [task07_onenote_to_markdown_lazy_loading](./task07_onenote_to_markdown_lazy_loading/README.md) | 從 Microsoft Graph API 下載 OneNote 每頁筆記的 HTML 原文與內嵌圖片，以日期分區保留多版本存進 GCS 資料湖。<br>版本中繼資料、資料血緣與 API 稽核紀錄寫入 MongoDB Atlas，交給下游 Silver 服務做語意擴寫。 |
-| OneNote Silver 服務 | [task07_silver_service](./task07_silver_service/README.md) | 由看板審查頁 on-demand 呼叫的 Flask 端點，把指定版本的 HTML 原文連同內嵌圖片送多模態 LLM，產出冠上 frontmatter 的 enriched markdown 存回 GCS。<br>更新 Bronze 寫入 MongoDB Atlas 的中繼資料，LLM 呼叫紀錄一併寫入，交給下游 Gold 服務做人工審查與歸檔。 |
+| OneNote Silver 服務 | [task07_silver_service](./task07_silver_service/README.md) | 由看板審查頁 on-demand 呼叫的 FastAPI 端點，把指定版本的 HTML 原文連同內嵌圖片送多模態 LLM，產出冠上 frontmatter 的 enriched markdown 存回 GCS。<br>更新 Bronze 寫入 MongoDB Atlas 的中繼資料，LLM 呼叫紀錄一併寫入，交給下游 Gold 服務做人工審查與歸檔。 |
 | OneNote Gold 服務 | [task07_gold_service](./task07_gold_service/README.md) | 接收審查頁的核可／退件決定：核可時把 Silver 產出的 markdown 與引用圖片複製到 GCS 歸檔層，退件時只更新 MongoDB Atlas 的中繼資料。<br>最終，歸檔層存下的文件交給下游 task08 向量化。 |
 | OneNote 向量化 | [task08_onenote_embed_etl](./task08_onenote_embed_etl/README.md) | 挑出 task07 已歸檔但尚未向量化的 OneNote 筆記，從 GCS 下載歸檔內文與圖片後切塊、多模態向量化。<br>與 task06 共寫 MongoDB Atlas 的同一張向量表，供 AI 知識 Agent 做 RAG 檢索。 |
 | Dashboard UI | [dashboard_ui](./dashboard_ui/README.md) | 六頁 Streamlit 看板：讀取各 task 寫入 MongoDB／GCS 的成果，呈現技能雷達、專案架構、攝取與檢索品質等圖表。<br>另提供 OneNote 人工審查頁，從這裡請求 Silver／Gold 服務做語意擴寫與歸檔，以及 AI 知識 Agent 的向量檢索問答入口。 |
@@ -58,7 +58,7 @@ RAG 檢索系統是透過 Python-Streamlit 製成的介面來與使用者互動�
 | Layer | 技術 | 目的 |
 | ----- | ---- | ---- |
 | 01 Frontend | Streamlit、Plotly、Pandas、CSS (`st.markdown`) | 多頁看板、互動圖表與版面 |
-| 02 APIs & Backend Logic | Flask、GitHub REST／LeetCode GraphQL／Microsoft Graph／Google Sheets API、BeautifulSoup4、Requests、RapidFuzz | Silver/Gold 服務端點與各來源資料抓取／解析 |
+| 02 APIs & Backend Logic | FastAPI、GitHub REST／LeetCode GraphQL／Microsoft Graph／Google Sheets API、BeautifulSoup4、Requests、RapidFuzz | Silver/Gold 服務端點與各來源資料抓取／解析 |
 | 03 Database & Storage | MongoDB Atlas、GCS、Atlas Vector Search、PyMongo | 文檔資料庫、資料湖、向量檢索索引 |
 | 04 Auth & Permissions | GCP Workload Identity Federation、Service Account、MSAL (Azure OAuth)、Google OAuth、GitHub PAT、Cookie 驗證 | CI/CD 與各服務／來源的身分驗證 |
 | 05 Hosting & Deployment | Cloud Run Service／Job、Artifact Registry、Docker | 容器化與雲端執行 |
@@ -100,7 +100,8 @@ personnel_skill_library/                      # 專案根目錄
 │   ├── pages/                                  # 六頁看板（HOME 為 app.py）
 │   ├── agents/                                 # AI 知識 Agent
 │   ├── agent_tools/                            # 向量檢索與重排序
-│   └── utils/                                  # MongoDB／GCS 讀取、繪圖
+│   └── utils/                                  # MongoDB／GCS 讀取、繪圖、登入與身分憑證
+├── .streamlit/                               # Streamlit 主題設定與 OIDC 登入設定
 ├── .github/workflows/                        # 各 task 與 dashboard 的部署 workflow
 ├── docker/                                   # 各 task 與 dashboard 的 Dockerfile
 ├── doc/                                      # 分支摘要、schema 定義、README 模板
@@ -183,6 +184,11 @@ cp .env.example .env      # cp 後於 .env 填入真實值
     - **雲端 JSON 憑證**：若您在*地端*運行任一 task，建議將 task 所需要的雲端服務帳戶 (各 service account) 的 JSON key 放在 `./env/`（如 `env/gcs-user.json`、`env/agent-platform-user.json`），並在 `.env` 以獨立變數指向憑證檔案路徑。
     - 其餘專屬單一 task 的環境變數，建議直接詳見各自 [README.md](#feature) 的 Configuration 節。
 
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml  # 於 secrets.toml 填入真實值
+```
+- secrets.toml.example 裡的變數專門處理 dashboard 部分頁面需要的 Google 帳號登入設定，見 [`dashboard_ui/README.md`](./dashboard_ui/README.md) 的 Get Started。
+
 ### 3. 執行
 
 ```bash
@@ -192,7 +198,7 @@ poetry run python -m task02_github_restapi_etl.main
 # 啟動 streamlit app
 poetry run streamlit run dashboard_ui/app.py
 
-# flask service called by OneNote review page of streamlit app
+# FastAPI services called by OneNote review page of streamlit app
 poetry run python -m task07_silver_service.app
 poetry run python -m task07_gold_service.app
 
@@ -225,6 +231,6 @@ openspec init
 
 ## What's Next?
 
-- [ ] **AI Knowledge Agent 的 OAuth2 驗證**：`dashboard_ui/pages/ai_knowledge_agent.py` 目前登入控管僅粗分4層帳號，可計畫加入 OAuth2（Google）驗證，區分可查詢個人知識庫的身分。
+- [x] **AI Knowledge Agent 的 OAuth2 驗證**：已改為 Google 帳號登入（`st.login()`），取代原本粗分四層的帳密。角色由 email 允許清單推導，審查頁的操作另以 `X-User-Token` 讓後端端點自行驗證是哪一位使用者下的指令。
 - [ ] **告警機制**：Cloud Run Job 執行 ETL 遇 4xx/5xx 時捕捉例外並發送通知（Email／Pub/Sub）。
 - [ ] **淘汰 v1 過渡並寫**：task01 v2 過渡期同時並寫 v1 `obsidian_summary`，待 backfill 到 `notes_summary` 後淘汰。
