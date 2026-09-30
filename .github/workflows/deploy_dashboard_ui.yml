@@ -74,7 +74,7 @@ jobs:
           echo "GOLD_ENDPOINT_URL=${GOLD_BASE}/archive" >> "$GITHUB_ENV"
 
       # 部署一律指定完整不可變 tag；前端對外開放，登入由 Google OIDC 控管。
-      # OIDC 設定以檔案掛載進家目錄，掛載點與 dev/prod 各一份的理由見 design 決策 7.1。
+      # OIDC 設定以檔案掛載進 /etc/streamlit-auth/，掛載點與 dev/prod 各一份的理由見 design 決策 7.1。
       - name: Deploy to Cloud Run Service
         run: |
           gcloud run deploy "${SERVICE_NAME}-${ENV_NAME}" \
@@ -87,4 +87,4 @@ jobs:
             --concurrency 4 \
             --allow-unauthenticated \
             --set-env-vars "SILVER_ENDPOINT_URL=${SILVER_ENDPOINT_URL},GOLD_ENDPOINT_URL=${GOLD_ENDPOINT_URL}" \
-            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,COHERE_API_KEY=COHERE_API_KEY:latest,ERD_LINK=ERD_LINK:latest,AI_AGENT_RATE_LIMIT=AI_AGENT_RATE_LIMIT:latest,USER_ALLOWLIST=USER_ALLOWLIST:latest,TOKEN_ISSUER_SA=TOKEN_ISSUER_SA:latest,/root/.streamlit/secrets.toml=STREAMLIT_AUTH_TOML_${ENV_NAME^^}:latest
+            --set-secrets MONGO_ALTAS_URI=MONGO_ALTAS_URI:latest,MONGO_DB_NAME=MONGO_DB_NAME:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,COHERE_API_KEY=COHERE_API_KEY:latest,ERD_LINK=ERD_LINK:latest,AI_AGENT_RATE_LIMIT=AI_AGENT_RATE_LIMIT:latest,USER_ALLOWLIST=USER_ALLOWLIST:latest,TOKEN_ISSUER_SA=TOKEN_ISSUER_SA:latest,/etc/streamlit-auth/secrets.toml=STREAMLIT_AUTH_TOML_${ENV_NAME^^}:latest

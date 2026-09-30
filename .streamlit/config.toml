@@ -8,3 +8,11 @@ primaryColor = "#00d4c8"
 [client]
 # 維持streamlit的sidebar自動導航功能但是隱藏自動導航到的頁面名稱、而是改用自定義的頁面名稱。
 showSidebarNavigation = false
+
+[secrets]
+# 前兩個是 Streamlit 的預設位置，供地端開發使用；第三個是雲端部署時掛載 OIDC 設定的位置。
+files = [
+    "~/.streamlit/secrets.toml",
+    ".streamlit/secrets.toml",
+    "/etc/streamlit-auth/secrets.toml",
+]

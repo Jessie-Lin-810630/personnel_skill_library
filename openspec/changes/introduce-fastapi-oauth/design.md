@@ -112,19 +112,49 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 
 ### 7. gunicorn 換 uvicorn，維持單一 worker
 
+兩支 Dockerfile 的啟動指令從
+
 ```
-uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 600
+gunicorn <module>:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 600
 ```
 
-- 路由函式用 `def` 而非 `async def`。底層的 pymongo、google-cloud-storage、genai 都是 blocking client，寫成 `async def` 會把事件迴圈卡住；用 `def` 讓 FastAPI 自動丟到 threadpool，行為與現在的 gunicorn threads 相同。
+改為
 
-- 兩個服務都維持單一 worker，但理由不同：
+```
+uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
+```
 
-        - Silver 的單一 worker 是 `_LLMServiceGuard` 的必要條件。它是 module 層級的單例，狀態存在 process 記憶體裡，開多個 worker 會變成每個 process 各持一份計數，斷路器形同失效。
+- 新指令只保留 `--workers 1`，原本的 `--threads 8` 與 `--timeout 600` 都不再出現，因為這兩個參數在 uvicorn 沒有對應項，照字面搬過去會得到錯的行為。以下逐一說明。
 
-        - Gold 沒有這個限制，但也沒有開多 worker 的理由。兩支 workflow 都沒有指定 `--cpu`，所以兩個服務都只有 1 個 CPU，在 1 個 CPU 上開多 worker 只是讓幾個 process 互搶同一顆核心。需要同時處理更多請求時，Cloud Run 的做法是增加實例，不是在同一個容器裡增加 worker。
+- `--threads 8` 不需要。gunicorn 用它讓單一 worker 能同時處理多個請求；uvicorn 這邊由 FastAPI 接手，只要路由寫成 `def` 而非 `async def`，每個請求就會被丟進 AnyIO 的 threadpool，效果相同。本次兩個端點的路由都維持 `def`，因為底層的 pymongo、google-cloud-storage、genai 都是 blocking client，寫成 `async def` 反而會把事件迴圈卡住，變成一次只能處理一個請求。
 
-- 要留意 worker 數不等於同時能處理的請求數。路由寫成 `def` 之後，FastAPI 會把每個請求丟進 threadpool，所以單一 worker 照樣能同時處理多個請求，行為跟現在的 `gunicorn --workers 1 --threads 8` 一樣。`--workers` 控制的是 process 數量。
+- `--timeout 600` 不能譯成 `--timeout-keep-alive 600`。gunicorn 的 `--timeout` 是「worker 超過這個秒數沒回應就殺掉重啟」，uvicorn 的 `--timeout-keep-alive` 則是「連線閒置超過這個秒數就關閉」（預設 5 秒），兩者管的事情無關。照字面搬過去不會延長請求可用時間，只會讓閒置連線白撐十分鐘。長請求的上限本來就落在 Cloud Run 的 request timeout（預設 300 秒），兩支 workflow 目前都沒有覆寫它，維持預設即可。
+
+- `--workers 1` 保留，兩個服務都是單一 worker，但理由不同：
+
+        - Silver 是必要條件。`_LLMServiceGuard` 是 module 層級的單例，狀態存在 process 記憶體裡，開多個 worker 會變成每個 process 各持一份計數，斷路器形同失效。
+
+        - Gold 沒有這個限制，但也沒有開多 worker 的好處。兩支 workflow 都沒有指定 `--cpu`，所以兩個服務都只有 1 個 CPU，在 1 個 CPU 上開多 worker 只是讓幾個 process 互搶同一顆核心。需要同時處理更多請求時，Cloud Run 的做法是增加實例，不是在同一個容器裡增加 worker。
+
+- 要留意 worker 數不等於同時能處理的請求數。承上，`def` 路由會被丟進 threadpool，所以單一 worker 照樣能同時處理多個請求。`--workers` 控制的只是 process 數量。
+
+### 7.1 Streamlit 的 OIDC 設定檔 secrets.toml 以檔案掛載進雲端，不走環境變數
+
+- Silver 與 Gold 讀設定用 `os.getenv`，所以 `--set-secrets` 注入環境變數就夠。dashboard 不同：`st.login()` 的 `[auth]` 區塊由 `streamlit/auth_util.py` 的 `get_secrets_auth_section()` 取得，它呼叫 `secrets_singleton.load_if_toml_exists()`，只認 TOML 檔案，模組內完全沒有讀環境變數的路徑。把 `OIDC_CLIENT_ID` 之類的值設成環境變數，Streamlit 看不到，症狀是服務起得來但登入按下去沒反應。
+
+- 因此把整份 `secrets.toml` 存成一個 Secret Manager 的 secret，部署時以檔案形式掛進容器。
+
+- `secrets.toml` 掛載點選 `/etc/streamlit-auth/secrets.toml` 這個中性路徑，並在 `.streamlit/config.toml` 的 `secrets.files` 把它加進清單。Streamlit 預設會讀的那兩個位置都不能拿來當掛載點，因為部署 Cloud Run 服務掛載檔案時，實際被掛的是檔案的父目錄，而且掛上去的 volume 是唯讀的：
+
+        - 掛 `/app/.streamlit/` 會蓋住 image 內該目錄的原有檔案，讓 Dockerfile 打包進去的 `config.toml` 消失。
+
+        - 掛 `/root/.streamlit/` 會讓家目錄變成唯讀，而 Streamlit 需要在家目錄寫兩種檔案：`machine_id_v4` 與 `@st.cache_data` 的磁碟快取。前者可用 `browser.gatherUsageStats=false` 關掉，後者關不掉，而審查頁的 `_load_versions()` 與知識工廠頁的 GCS 圖片都在用它。這個問題是實際部署到 dev 之後，才從 log 的 `OSError: [Errno 30] Read-only file system` 看出來的。
+
+- `secrets.files` 清單保留 Streamlit 原本的兩個預設位置，再加上這個掛載點，三者並存。清單中不存在的檔案會被略過，因此地端讀專案目錄那份、雲端讀掛載那份，同一份設定不必分岔。
+
+- `redirect_uri` 必須與該環境實際的服務網址一致，所以 dev 與 prod 各有一份 secret（`STREAMLIT_AUTH_TOML_DEV` 與 `STREAMLIT_AUTH_TOML_PROD`）。
+
+- **其他替代方案**：在容器啟動時以 entrypoint 腳本把環境變數寫入 `secrets.toml` 再啟動 Streamlit 容器。這樣可以維持一組 secrets，設定內容也直接寫在 workflow 裡看得見。不採納的原因是多一支啟動腳本要維護，而且 `redirect_uri` 需要服務知道自己的網址，第一次部署時服務網址鐵定不存在，得刻意做第二次部署，啟動腳本才會抓得到 `redirect_uri`  另外處理那個空值。
 
 ### 8. 登入的 OIDC provider 直接用 Google
 
