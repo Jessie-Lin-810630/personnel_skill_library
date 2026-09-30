@@ -14,7 +14,14 @@ Note:
     本專案兩者是同一個 dashboard runtime service account，等於自己授權給自己。
 
 Required .env keys:
-    TOKEN_ISSUER_SA  Email of the dashboard runtime service account that signs the token.
+    TOKEN_ISSUER_SA               Email of the dashboard runtime service account that signs the token.
+
+Optional .env keys:
+    DASHBOARD_SIGNER_CREDENTIALS  (On-premise only) Path to the dashboard service account JSON key.
+                                  Set it locally, otherwise google.auth.default() falls back to
+                                  GOOGLE_APPLICATION_CREDENTIALS, which points at the read-only
+                                  gcs-viewer key and has no serviceAccountTokenCreator permission.
+                                  Leave it unset on Cloud Run so the runtime service account is used.
 """
 
 import json
@@ -35,6 +42,33 @@ TOKEN_TTL_SECONDS = 300
 
 _SIGN_JWT_URL = "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa}:signJwt"
 
+_CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+def _get_signer_credentials():
+    """取得用來呼叫 signJwt 的 credentials，注意本專案的地端與雲端環境的 credentials 來源不同。
+
+    Note:
+        地端環境，請將 SA JSON KEY 指向環境變數 DASHBOARD_SIGNER_CREDENTIALS，
+        雲端環境無需指向任何環境變數，用 Google ADC 機制預設的 GOOGLE_APPLICATION_CREDENTIALS，
+        此外，SA 身分應該具備 Service Account Token Creator 角色。
+
+    Returns:
+        可呼叫 IAM Credentials 的憑證物件。
+
+    Raises:
+        FileNotFoundError: DASHBOARD_SIGNER_CREDENTIALS 指向的金鑰檔不存在時拋出。
+    """
+    json_path = os.getenv("DASHBOARD_SIGNER_CREDENTIALS", "").strip()
+    if json_path:
+        from google.oauth2.service_account import Credentials
+
+        logger.debug(f"[user_token] 以金鑰檔簽發：{json_path}")
+        return Credentials.from_service_account_file(json_path, scopes=[_CLOUD_PLATFORM_SCOPE])
+
+    credentials, _ = google.auth.default(scopes=[_CLOUD_PLATFORM_SCOPE])
+    return credentials
+
 
 def mint_user_token(email: str) -> str:
     """為登入成功的使用者簽一張短效 token，token 只夾帶使用者的 email。
@@ -50,7 +84,8 @@ def mint_user_token(email: str) -> str:
         簽好的 JWT 字串，供呼叫端放進 header X-User-Token。
 
     Raises:
-        RuntimeError: 未設定 TOKEN_ISSUER_SA，或 IAM Credentials 回非 200。
+        RuntimeError: 未設定 TOKEN_ISSUER_SA，或 signJwt 未回 200，或回 200 但缺少 signedJwt 欄位。
+        FileNotFoundError: 地端設了 DASHBOARD_SIGNER_CREDENTIALS 但檔案不存在時，由讀取金鑰檔的函式拋出。
     """
     issuer = os.getenv("TOKEN_ISSUER_SA", "").strip()
     if not issuer:
@@ -66,18 +101,19 @@ def mint_user_token(email: str) -> str:
     }
 
     # 請 Google 代為使用 issuer 的 SA 私鑰簽發，避免 issuer 要自行管理 SA 私鑰
-    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    session = google.auth.transport.requests.AuthorizedSession(credentials)
+    session = google.auth.transport.requests.AuthorizedSession(_get_signer_credentials())
     resp = session.post(
         _SIGN_JWT_URL.format(sa=issuer),
         json={"payload": json.dumps(payload)},
         timeout=10,
     )
 
-    # 確認 HTTP status code 是否在 400 ~ 600 之間，若是，resp.ok 為 False；若介於 200 ~ 400 則為 True
-    if not resp.ok:
-        logger.error(f"[user_token] signJwt 失敗：{resp.status_code} {resp.text}")
-        raise RuntimeError(f"簽發 X-User-Token 失敗：{resp.status_code}")
+    if resp.status_code != 200:
+        logger.error(f"[user_token] signJwt 未回 200：{resp.status_code} {resp.text}")
+        raise RuntimeError(f"簽發 X-User-Token 失敗，signJwt 回 {resp.status_code}")
 
-    # 若介於 200 ~ 400，取出 signedJwt 欄位值 (token 本身)。
-    return resp.json()["signedJwt"]
+    signed_jwt = resp.json().get("signedJwt")
+    if not signed_jwt:
+        logger.error(f"[user_token] signJwt 回 200 但沒有 signedJwt 欄位：{resp.text}")
+        raise RuntimeError("簽發 X-User-Token 失敗，signJwt 回應缺少 signedJwt 欄位")
+    return signed_jwt
