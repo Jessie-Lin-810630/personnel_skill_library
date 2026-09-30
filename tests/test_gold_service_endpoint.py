@@ -16,8 +16,10 @@ from fastapi.testclient import TestClient
 # ── Inject env vars BEFORE importing gold_service.app ─────────────────────────
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
-os.environ.setdefault("TOKEN_ISSUER_SA", "dashboard-sa@example.iam.gserviceaccount.com")
-os.environ.setdefault("USER_ALLOWLIST", '{"owner@example.com": "Note Owner"}')
+# 這兩個一律覆寫而非 setdefault：其他測試可能已先觸發 load_dotenv 把本機真實設定載進環境，
+# 用 setdefault 會變成空操作，測試就會改用真實允許清單，比對不到下面的假 email 而拿到 403。
+os.environ["TOKEN_ISSUER_SA"] = "dashboard-sa@example.iam.gserviceaccount.com"
+os.environ["USER_ALLOWLIST"] = '{"owner@example.com": "Note Owner"}'
 
 from task07_common import auth  # noqa: E402
 from task07_gold_service import app as gold_app  # noqa: E402

@@ -15,7 +15,9 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-os.environ.setdefault("TOKEN_ISSUER_SA", "dashboard-sa@example.iam.gserviceaccount.com")
+# 一律覆寫而非 setdefault：其他測試可能已先觸發 load_dotenv 把本機真實設定載進環境。
+# 本檔的 setUp 另有 patch.dict 保險，這一行是為了 import 階段就有值。
+os.environ["TOKEN_ISSUER_SA"] = "dashboard-sa@example.iam.gserviceaccount.com"
 
 from task07_common import auth  # noqa: E402
 
