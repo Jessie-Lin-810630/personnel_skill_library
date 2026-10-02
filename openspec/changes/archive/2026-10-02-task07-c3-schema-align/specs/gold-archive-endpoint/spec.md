@@ -1,8 +1,5 @@
-# gold-archive-endpoint Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose after archive.
-## Requirements
 ### Requirement: Approve 觸發歸檔
 
 - 系統 SHALL 提供 FastAPI 端點 `POST /archive`，接收 `page_id`、`dt`、`action`。
@@ -72,41 +69,6 @@ BSON 可編碼的日期時間型別。
 - **WHEN** 歸檔 md 有 3 個 `![]()` 連結，其中 1 個檔名被模型改壞、不落在 `attached_images[].archived_image_path`
 - **THEN** `md_body.valid_img_count` 計為 2（僅命中歸檔圖片者計入）、`dismatched_img_count=1`、`md_has_dismatched_img=true`
 
-### Requirement: 可審閱版本篩選
-
-審查頁（呼叫端）SHALL 只呈現「可審閱」的版本：查 C3 時 MUST 濾掉 `status=review_closed`
-的版本（含 `review_result=rejected` 與 `overwritten`，不論 `dt`）；並依每個 `page_id` 算出
-`lastArchivedAt = max(dateTrunc(archived_at, day))`，只保留 `dt >= lastArchivedAt` 的版本
-（尚無歸檔時全留）。此使歸檔後的新內容（更新的 `dt`）能重新進入審閱與歸檔，而已退役與比最後
-歸檔日更舊的版本自動退出審查佇列。
-
-#### Scenario: 已退役版本不再出現
-- **WHEN** 某版本 `status=review_closed`（`review_result=rejected` 或 `overwritten`）
-- **THEN** 該版本不出現在審查頁的版本清單（不論其 `dt`）；同名其他非 review_closed 版本不受影響
-
-#### Scenario: 歸檔後新內容可重走 Silver→Gold
-- **WHEN** 某 `page_id` 已有一版歸檔，之後 bronze 下載到更新內容（更新的 `dt`）
-- **THEN** 該新 `dt` 版本出現在審查頁、可 on-demand enrich 並再次 approve 歸檔；比最後歸檔日更舊的版本不再顯示
-
-### Requirement: 歸檔把關與逐版本唯讀
-
-端點 MUST 防禦性把關：本 `(page_id, dt)` 已 `archived` 時 approve 為 idempotent（不重做）；
-當存在「更新內容的歸檔版本」（本版 `dt` 日 < 最後歸檔日）時 MUST 拒絕歸檔、不覆寫舊版；
-本版 `dt` 日 ≥ 最後歸檔日（含尚無歸檔）則放行。審查頁 MUST 僅對「選中版本自己已 `archived`」時
-停用該版 `approve`/`reject`/`regenerate` 並標示唯讀，MUST NOT 因同名另一版已歸檔而停用本版。
-
-#### Scenario: approve 較舊版本被拒
-- **WHEN** 某 `page_id` 已有較新內容歸檔，呼叫端 approve 一個 `dt` 日早於最後歸檔日的舊版
-- **THEN** 端點回 `409` 與可辨識錯誤，不覆寫既有歸檔
-
-#### Scenario: 重複 approve 已歸檔版本
-- **WHEN** 呼叫端對一個 `status=archived` 的版本再次 approve
-- **THEN** 端點回 `200` 並回既有歸檔路徑（idempotent），不重複複製或改動
-
-#### Scenario: 審查頁逐版本停用
-- **WHEN** 審查頁選中的版本 `status=archived`
-- **THEN** 僅該版顯示唯讀、其 approve/reject/regenerate 停用；同名其他可審閱版本的按鈕維持可用
-
 ### Requirement: Reject 標記關閉並保存壞 md frontmatter
 
 當 `action=rejected` 時，端點 MUST upsert `onenote_note_metadata`（`status=review_closed`、
@@ -124,34 +86,3 @@ upsert `onenote_note_metadata`，供好 md／壞 md 分析；好壞由 `status` 
 #### Scenario: reject 尚無 md 的版本
 - **WHEN** 退貨一個 `enriched_md_path=null` 的版本
 - **THEN** 僅翻 `review_closed`/`rejected`，不萃取 frontmatter、不報錯，回傳 `200`
-
-### Requirement: 請求驗證
-
-- 端點 MUST 先驗證 `X-User-Token`，未通過者回 `401` 或 `403`，取不到驗簽金鑰回 `503`（規則見 `user-identity-verification`），三者皆不可 (MUST NOT) 呼叫 Gold Load。
-- 通過身分驗證後，端點 MUST 以 Pydantic model 驗證必要欄位與合法 `action`：缺 `page_id`/`dt`/`action` 回 `400`；`action` 非 `approved`/`rejected` 回 `400`；`page_id`+`dt` 查無版本回 `404`。
-- `role` 不再是請求欄位，body 若帶了 `role` MUST 予以忽略。
-- 驗證失敗的狀態碼 MUST 為 `400`，不可 (MUST NOT) 使用 `422`，因為 `422` 已用於「該版本尚未生成 md 或複製失敗」這類業務錯誤，兩者必須可分辨。
-
-#### Scenario: 缺欄位
-- **WHEN** body 缺少 `page_id`、`dt` 或 `action` 任一
-- **THEN** 端點回 `400`，不呼叫 Gold Load
-
-#### Scenario: 非法 action
-- **WHEN** `action` 非 `approved`/`rejected`
-- **THEN** 端點回 `400`
-
-#### Scenario: body 夾帶 role 欄位
-- **WHEN** 呼叫端在 body 帶了 `role`
-- **THEN** 端點忽略該欄位，仍以 `X-User-Token` 推導的角色寫入 `reviewed_by_role`
-
-#### Scenario: 身分驗證未通過
-- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在 `USER_ALLOWLIST` 內
-- **THEN** 端點回 `401` 或 `403`，不呼叫 Gold Load，GCS 與 MongoDB 皆無寫入
-
-#### Scenario: 取不到驗簽金鑰
-- **WHEN** `X-User-Token` 合法，但端點連不上 Google 的 JWK 端點
-- **THEN** 端點回 `503`，不呼叫 Gold Load，GCS 與 MongoDB 皆無寫入
-
-#### Scenario: 驗證失敗與業務錯誤可分辨
-- **WHEN** 一個請求因欄位不合法被擋下，另一個請求因該版本尚未生成 md 被擋下
-- **THEN** 前者回 `400`，後者回 `422`

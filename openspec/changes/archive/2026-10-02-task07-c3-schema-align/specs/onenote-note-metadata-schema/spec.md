@@ -1,22 +1,22 @@
 ## ADDED Requirements
 
-### Requirement: C3 複合唯一鍵與 hash 欄位命名一致
+### Requirement: 複合唯一鍵與 hash 欄位命名一致
 
-`onenote_note_metadata`（C3）SHALL 以 `page_id`+`dt` 為複合唯一鍵 (Upsert key)，支援同頁多版本。C3 的 html 變動判定 hash 欄位 SHALL 命名為 `html_sha_hash`（sha256 hexdigest），GCS html 物件指紋欄位 SHALL 命名為 `html_md5_hash`，silver md 物件指紋欄位 SHALL 命名為 `md_md5_hash`。C1（`onenote_graph_api_logs`）與 C2（`multimodal_llm_enrichment_logs`）寫入的 html sha256 欄位 SHALL 同樣命名為 `html_sha_hash`，跨 collection 命名一致。系統 MUST NOT 再以 `html_hash`／`html_md5`／`md_md5` 作為寫入 MongoDB 的 document key。
+`onenote_note_metadata` SHALL 以 `page_id`+`dt` 為複合唯一鍵 (Upsert key)，支援同頁多版本。html 變動判定 hash 欄位 SHALL 命名為 `html_sha_hash`（sha256 hexdigest），GCS html 物件指紋欄位 SHALL 命名為 `html_md5_hash`，silver md 物件指紋欄位 SHALL 命名為 `md_md5_hash`。`onenote_graph_api_logs` 與 `multimodal_llm_enrichment_logs` 寫入的 html sha256 欄位 SHALL 同樣命名為 `html_sha_hash`，跨 collection 命名一致。系統 MUST NOT 再以 `html_hash`／`html_md5`／`md_md5` 作為寫入 MongoDB 的 document key。
 
 #### Scenario: Bronze 寫入使用一致的 hash 欄位名
 
-- **WHEN** Bronze 偵測到某頁 html 變動並 upsert C3
+- **WHEN** Bronze 偵測到某頁 html 變動並 upsert `onenote_note_metadata`
 - **THEN** 該版本 document 含 `html_sha_hash`、`html_md5_hash`，且不含 `html_hash`、`html_md5`
 
 #### Scenario: 跨 collection hash 欄位名一致
 
-- **WHEN** C1 記一筆下載成功、C2 記一筆 enrichment、C3 upsert 一版本
+- **WHEN** `onenote_graph_api_logs` 記一筆下載成功、`multimodal_llm_enrichment_logs` 記一筆 enrichment、`onenote_note_metadata` upsert 一版本
 - **THEN** 三者表達 html sha256 的 document key 皆為 `html_sha_hash`
 
 ### Requirement: 圖片血緣以 attached_images Object 陣列表達
 
-C3 SHALL 以單一 Array(Object) 欄位 `attached_images` 記錄每個版本引用的圖片血緣，MUST NOT 使用 `img_md5`／`img_path`／`img_archive_path` 平行陣列。每個 Object SHALL 含 `raw_image_path`、`raw_image_md5`（bronze 端），並於歸檔後補 `archived_image_path`、`archived_image_md5`（gold 端）。無引用圖片時 `attached_images` SHALL 為空陣列 `[]`。
+`onenote_note_metadata` SHALL 以單一 Array(Object) 欄位 `attached_images` 記錄每個版本引用的圖片血緣，MUST NOT 使用 `img_md5`／`img_path`／`img_archive_path` 平行陣列。每個 Object SHALL 含 `raw_image_path`、`raw_image_md5`（bronze 端），並於歸檔後補 `archived_image_path`、`archived_image_md5`（gold 端）。無引用圖片時 `attached_images` SHALL 為空陣列 `[]`。
 
 #### Scenario: Bronze 寫入 raw 端圖片血緣
 
@@ -35,7 +35,7 @@ C3 SHALL 以單一 Array(Object) 欄位 `attached_images` 記錄每個版本引�
 
 ### Requirement: topic 主題分類（Must）
 
-C3 每個版本 SHALL 有非空的 `topic`（字串）欄位，其值 SHALL 由 task01 相同的主題分類邏輯（`TOPIC_KEYWORDS` 關鍵字表按鍵順序優先匹配、全不中回 `other`）推導。Bronze 階段（尚無 LLM tags）SHALL 以 `page_title` 為比對來源寫入暫定 `topic`；Gold approve／reject 階段（已有 `md_frontmatter.tags`）MUST 以 tags＋title 重算並覆蓋 `topic`。
+`onenote_note_metadata` 每個版本 SHALL 有非空的 `topic`（字串）欄位，其值 SHALL 由 task01 相同的主題分類邏輯（`TOPIC_KEYWORDS` 關鍵字表按鍵順序優先匹配、全不中回 `other`）推導。Bronze 階段（尚無 LLM tags）SHALL 以 `page_title` 為比對來源寫入暫定 `topic`；Gold approve／reject 階段（已有 `md_frontmatter.tags`）MUST 以 tags＋title 重算並覆蓋 `topic`。
 
 #### Scenario: Bronze 以標題初判 topic
 
@@ -63,7 +63,7 @@ Gold 於 approve／reject 解析 md 正文時 MUST 一併寫入：內嵌 Object 
 
 ### Requirement: created_at / updated_at 稽核時間戳
 
-C3 每個版本 SHALL 有 `created_at`（首次 insert 時間）與 `updated_at`（最近一次任一欄位變更時間），兩者 SHALL 由共用的 upsert 工具集中維護：每次 upsert 的 `$set` MUST 蓋 `updated_at` 為當下 UTC，首次 insert 的 `$setOnInsert` MUST 補 `created_at` 為當下 UTC。呼叫端 MUST NOT 需要逐處手動帶這兩個時間戳。
+`onenote_note_metadata` 每個版本 SHALL 有 `created_at`（首次 insert 時間）與 `updated_at`（最近一次任一欄位變更時間），兩者 SHALL 由共用的 upsert 工具集中維護：每次 upsert 的 `$set` MUST 蓋 `updated_at` 為當下 UTC，首次 insert 的 `$setOnInsert` MUST 補 `created_at` 為當下 UTC。呼叫端 MUST NOT 需要逐處手動帶這兩個時間戳。
 
 #### Scenario: 首次 insert 同時記兩時間戳
 

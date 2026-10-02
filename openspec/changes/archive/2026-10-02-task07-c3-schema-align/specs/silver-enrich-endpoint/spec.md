@@ -1,8 +1,5 @@
-# silver-enrich-endpoint Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change silver-ondemand-review-page. Update Purpose after archive.
-## Requirements
 ### Requirement: On-demand Silver enrich 端點
 
 - 系統 SHALL 提供一個 FastAPI 端點 `POST /enrich`，接收單一版本的 `page_id`、`dt` 與 `trigger`，呼叫 Silver 服務本體 `t_enrich_html_to_markdown` 對該版本做 on-demand enrichment，並回傳 JSON 結果供呼叫端（審查頁）渲染。
@@ -51,20 +48,3 @@ TBD - created by archiving change silver-ondemand-review-page. Update Purpose af
 #### Scenario: 服務級斷路器開啟
 - **WHEN** LLM API 連續失敗達門檻、服務級斷路器 `_LLMServiceGuard` 開啟期間收到 cache miss 請求
 - **THEN** 端點不打 LLM，回傳 `{circuit_open: true, status: "bronze_stored"}`，該版本狀態維持 `bronze_stored`
-
-### Requirement: 斷路器狀態不因並行請求而失真
-
-- 服務級斷路器 `_LLMServiceGuard` 的連續失敗次數與冷卻時間，在同一個 process 內有多個請求並行時 MUST 維持在合理範圍：次數不為負、不超過設定門檻，冷卻時間不為負。
-- 實作上建議 (SHOULD) 以鎖保護 `record_failure` 與 `record_success` 的狀態變更，讓累加與跳脫判斷成為單一不可分割的動作。查詢是否冷卻中的讀取不必加鎖，因為它不改變任何狀態。
-
-#### Scenario: 累計達門檻即跳脫
-- **WHEN** 連續失敗次數累加到設定門檻
-- **THEN** 斷路器進入冷卻，且計數歸零讓冷卻結束後重新累積
-
-#### Scenario: 成功後重新計算
-- **WHEN** 累積若干次失敗但尚未達門檻，接著記錄一次成功
-- **THEN** 連續失敗次數歸零，後續失敗需重新累積到門檻才會跳脫
-
-#### Scenario: 並行呼叫下狀態仍合理
-- **WHEN** 多條執行緒同時對同一個斷路器記錄成功與失敗
-- **THEN** 連續失敗次數不為負且不超過門檻，過程中不拋出例外
