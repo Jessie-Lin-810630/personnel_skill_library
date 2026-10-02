@@ -18,4 +18,4 @@
 ## 4. 收尾
 
 - [x] 4.1 全測試通過。驗證：`poetry run python -m unittest discover -s tests` 回報 0 failures、0 errors
-- [x] 4.2 確認沒有動到任何非測試程式。驗證：`git diff --name-only` 的結果全部位於 `tests/` 底下
+- [x] 4.2 確認沒有動到任何非測試程式。驗證：以 commit 為單位查核本 change 的實作 commit，`git show --name-only --format="" <commit>` 的結果只有 `tests/` 底下的檔案與本 change 自己的 `tasks.md`。不用 `git diff --name-only`，因為同一個分支可能同時在收尾其他 change，那個指令會把無關檔案一起算進來
