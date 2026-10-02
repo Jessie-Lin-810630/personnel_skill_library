@@ -81,7 +81,7 @@ def enrich(body: EnrichRequest, user: Annotated[UserIdentity, Depends(verify_use
         JSONResponse。查無版本回 404，未預期例外回 500，其餘回 200。
 
     Raises:
-        HTTPException: 由 verify_user 拋出，缺 token 或驗簽失敗回 401、不在允許清單回 403、
+        HTTPException: 由 verify_user 拋出，缺 token 或驗簽失敗回 401、不在 USER_ALLOWLIST 回 403、
             取不到驗簽金鑰回 503。
     """
     try:

@@ -86,7 +86,7 @@ task07_common/
 | ---------------------- | ------------------------------------------------------------------- | ----------------- | --- |
 | `MONGO_ALTAS_URI`      | MongoDB Atlas 連線字串                                              | 無，需自訂         | ✅  |
 | `MONGO_DB_NAME`        | 目標 database 名稱                                                  | skill_dashboard | ✅  |
-| `USER_ALLOWLIST`       | 判斷請求由誰發出的清單，內容為 email 對應角色名稱的 JSON object，該角色會寫進 `reviewed_by_role`，不在清單內者一律拒絕 | 無，需自訂 | ✅ |
+| `USER_ALLOWLIST`       | 判斷請求由誰發出，內容為 email 對應角色名稱的 JSON object，該角色會寫進 `reviewed_by_role`，不在其中者與角色為 `Guest` 者一律拒絕 | 無，需自訂 | ✅ |
 | `TOKEN_ISSUER_SA`      | 簽發 `X-User-Token` 的 service account email，本服務向它的公開金鑰端點取金鑰驗簽 | 無，需自訂 | ✅ |
 | `GCS_USER_CREDENTIALS` | **地端執行時**才需要，負責讀寫 GCS 上的物件。雲端執行時不虛此變數。 | 無，地端需自訂 | 地端 ✅ |
 | `ONENOTE_GCS_BUCKET`              | 資料湖 bucket 名稱                                                  |  onenote-vaults  | 選填 (若不定義此環境變數，腳本函式內亦預設傳入 onenote-vaults) |

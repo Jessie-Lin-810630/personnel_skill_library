@@ -86,7 +86,7 @@ task07_common/
 | `MONGO_DB_NAME`                   | 目標 database 名稱                                                  | skill_dashboard | ✅  |
 | `GCP_PROJECT_ID`                  | Agent Platform 專案 ID                      | 無，需自訂         | ✅  |
 | `ENVIRONMENT`              | 執行環境名稱                                              |  無，需自訂<br>([只能賦值為 local、dev、或 prod 其中之一](../task07_common/audit_log.py))  |  ✅  |
-| `USER_ALLOWLIST`                  | 判斷請求由誰發出的清單，內容為 email 對應角色名稱的 JSON object，不在清單內者一律拒絕 | 無，需自訂 | ✅ |
+| `USER_ALLOWLIST`                  | 判斷請求由誰發出，內容為 email 對應角色名稱的 JSON object，不在其中者與角色為 `Guest` 者一律拒絕 | 無，需自訂 | ✅ |
 | `TOKEN_ISSUER_SA`                 | 簽發 `X-User-Token` 的 service account email，本服務向它的公開金鑰端點取金鑰驗簽 | 無，需自訂 | ✅ |
 | `AGENT_PLATFORM_USER_CREDENTIALS` | **地端執行時**才需要：呼叫 Agent Platform Gemini 用的 service account JSON key 檔路徑。雲端執行不需要此變數 | 無，地端需自訂 | 地端 ✅ |
 | `GCS_USER_CREDENTIALS`            | **地端執行時**才需要：讀 `raw-notes/` html、寫 `processed-notes/` md 用的 GCS service account JSON key 檔路徑。雲端執行不需要此變數。 | 無，地端需自訂 | 地端 ✅ |

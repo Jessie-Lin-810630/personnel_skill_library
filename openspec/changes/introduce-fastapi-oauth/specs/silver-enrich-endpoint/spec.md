@@ -32,7 +32,7 @@
 - **THEN** Pydantic 驗證失敗，端點回傳 `400`，不呼叫 Silver 服務
 
 #### Scenario: 身分驗證未通過
-- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在允許清單內
+- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在 `USER_ALLOWLIST` 內
 - **THEN** 端點回 `401` 或 `403`（依 `user-identity-verification` 的規則），不呼叫 Silver 服務，不寫入 GCS 與 MongoDB
 
 #### Scenario: 取不到驗簽金鑰

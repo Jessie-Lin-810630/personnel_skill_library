@@ -39,7 +39,7 @@
 - **THEN** 端點忽略該欄位，仍以 `X-User-Token` 推導的角色寫入 `reviewed_by_role`
 
 #### Scenario: 身分驗證未通過
-- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在允許清單內
+- **WHEN** 請求未帶 `X-User-Token`、token 驗簽失敗，或 email 不在 `USER_ALLOWLIST` 內
 - **THEN** 端點回 `401` 或 `403`，不呼叫 Gold Load，GCS 與 MongoDB 皆無寫入
 
 #### Scenario: 取不到驗簽金鑰

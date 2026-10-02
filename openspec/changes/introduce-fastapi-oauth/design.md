@@ -17,7 +17,8 @@
 - Silver 與 Gold 端點判斷審核者身分時，依據一個可驗簽的憑證，不依據 request body 裡的字串。
 - 兩個服務換成 FastAPI 之後，既有的狀態碼語意一個都不變。
 - 驗證邏輯只寫一份，兩個服務共用，但維持各自獨立部署。
-- 允許清單外的訪客仍能進入審查頁試玩，作品集的展示效果不減。
+- 只有列在 `USER_ALLOWLIST` 內的 Google 帳號能進入審查頁與 AI agent 頁，不在其中的帳號即使登入成功也進不去。
+- 作品集的試玩效果靠 `USER_ALLOWLIST` 內標為 `Guest` 的帳號維持，不靠對所有人開放。
 
 **Non-Goals:**
 
@@ -58,17 +59,21 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 
 - **其他替代方案二**：把 Google 發的原始 ID token 原樣轉傳，後端直接用 Google 的公鑰驗簽。信任鏈上就沒有 dashboard，後端驗的是 Google 的簽章而非 dashboard 的。難點在取得那個 token 的步驟：`st.user` 只提供解碼後的 claims，原始 token 被 Streamlit 寫進名為 `_streamlit_user_tokens` 的 cookie（`streamlit/web/server/server_util.py` 的 `TOKENS_COOKIE_NAME`），要拿到它必須自行從 `st.context.cookies` 撈出、用 `cookie_secret` 解開 `create_signed_value` 的簽章，並把超過瀏覽器大小上限而被切成 `_streamlit_user_tokens_<n>` 的多個區塊拼回去。這三個動作依賴的 cookie 名稱、簽章方式與切塊規則都屬於 Streamlit 的內部實作，不在公開 API 內，升版時可能改動而讓登入後的呼叫全數失敗，且失敗點在 dashboard 而非端點，不容易從服務日誌看出原因。以維護成本考量不採納。
 
-### 2. 允許清單放在環境變數，不放 MongoDB
+### 2. `USER_ALLOWLIST` 放在環境變數，不放 MongoDB
 
-- 清單內容是「email 對應到角色」，預期只有三到五筆，而且幾乎不變。放環境變數（部署時由 Secret Manager 注入）讓 dashboard 與兩個服務都能各自讀取，不需要為了在 MongoDB 新增資料表 (collection)，以及不需查那一筆資料而讓 Silver 與 Gold 多開一條 MongoDB 連線路徑。
+- `USER_ALLOWLIST` 的內容是「email 對應到角色」，預期只有三到五筆，而且幾乎不變。放環境變數（部署時由 Secret Manager 注入）讓 dashboard 與兩個服務都能各自讀取，不需要為了在 MongoDB 新增資料表 (collection)，以及不需查那一筆資料而讓 Silver 與 Gold 多開一條 MongoDB 連線路徑。
 
 - 注入 Secret Manager 時的格式是 JSON 字串：
 
 ```
-{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer"}
+{"me@example.com": "Note Owner", "other@example.com": "ML/DL Engineer", "visitor@example.com": "Guest"}
 ```
 
 存進 Secret Manager 的內容就是上面這一行，前後不加引號。在 shell 裡用引號包住是為了讓大括號與空格不被 shell 解讀，那組引號不屬於值本身；連同引號一起存進去會讓 `json.loads` 在第一個字元就失敗，服務啟動後每個請求都回 500。
+
+- `Guest` 也必須明列在 `USER_ALLOWLIST` 裡。它原本是 email 查不到時的預設角色，那個設計成立的前提是另外還有一道關卡擋住陌生帳號，而決策 8 說明了該關卡實際上並不存在，於是任何 Google 帳號都能登入並取得 Guest。改成必須明列之後，查不到角色就等於拒絕進入，`USER_ALLOWLIST` 成為唯一且完整的授權依據。
+
+- `USER_ALLOWLIST` 本身讀不到的時候也一律拒絕。未設定、不是合法 JSON、解析結果不是 object 這三種情況都讓所有人進不去，包含原本列在其中的人。這裡不退回 `Guest`，因為 Guest 能瀏覽筆記也能與 AI agent 對話，在 `USER_ALLOWLIST` 失效的狀況下把這個身分發給任何登入者，正是整個設計要避免的事。寧可自己也被擋在外面，也不要錯向放行。
 
 - 另需 `TOKEN_ISSUER_SA`，值為 dashboard runtime service account 的 email。Silver 與 Gold 靠它決定要向哪一個 service account 的 JWK 端點取公開金鑰，並用同一個值比對 JWT 的 payload 裡的 `iss`。它不是機密，但仍隨其他設定一起由部署注入，避免寫死在程式碼裡。
 
@@ -85,7 +90,7 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 ### 4. 驗證失敗回 401 與 403，與業務錯誤分開
 
 - 沒帶 `X-User-Token`、驗簽失敗、過期，回 `401`。
-- 驗簽通過但 email 不在允許清單內，回 `403`。
+- 驗簽通過但 email 不在 `USER_ALLOWLIST` 內，回 `403`。
 - 欄位不合法回 `400`。
 - 連不上 Google 的 JWK 端點回 `503`。PyJWT 把 `PyJWKClientConnectionError` 也掛在 `PyJWTError` 底下，一個 `except` 會把它和驗簽失敗混為一談，因此要先單獨攔下。這是本服務對外連線的問題，token 可能完全正常，回 `401` 會讓使用者以為要重新登入，重試多少次都一樣失敗。
 - `422` 保留給 Gold 既有的業務錯誤（該版本尚未生成 md、複製失敗）。FastAPI 預設把 Pydantic 驗證失敗回 `422`，會跟這個語意撞在一起，所以要覆寫 `RequestValidationError` 的 handler 改回 `400`。這件事兩個服務都要做，放在 `task07_common` 裡一併提供。
@@ -96,7 +101,9 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 
 - Guest 對 Silver 則要新增攔截。原本 Guest 是會打 Silver 的，有兩條路徑：選到 `md_path=null` 的版本時自動觸發生成，以及「重試生成」按鈕未針對 Guest 停用。端點加上身分驗證之後，這兩條路徑都會拿到 403 並在畫面顯示錯誤，所以改為在前端就擋下：Guest 選到未生成的版本時顯示提示而不觸發，兩處重試生成按鈕（審查按鈕列、生成失敗時的重試）都對 Guest 停用並附說明。`_call_silver` 開頭再加一道判斷，避免日後新增觸發點時又漏掉。這樣「訪客不消耗 LLM 配額」才真的成立。
 
-- 後端仍然實作「驗簽通過但不在允許清單內就回 403」，理由是後端不該假設前端一定會擋下，不過正常流程下後端的這條實作路徑不會被觸發。
+- 後端仍然實作「驗簽通過但不在 `USER_ALLOWLIST` 內就回 403」，理由是後端不該假設前端一定會擋下，不過正常流程下後端的這條實作路徑不會被觸發。
+
+- Guest 改為明列在 `USER_ALLOWLIST` 之後（見決策 2），後端必須多擋一道。原本 Guest 不在 `USER_ALLOWLIST` 內，`_load_allowlist().get(email)` 回 None，上面那條 403 就擋住了；現在它查得到角色，會一路通過驗證抵達 Gold Load。因此 `verify_user` 在「不在其中」之後再加一條判斷，角色為 Guest 同樣回 403，兜底才真的成立。
 
 ### 6. `_LLMServiceGuard` 只鎖兩個寫入方法
 
@@ -162,7 +169,11 @@ uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
 
 - Google 符合上述條件，discovery 網址為 `https://accounts.google.com/.well-known/openid-configuration`，OAuth Web client 在同一個 GCP 專案建立即可，因此直接以 Google 為 provider。
 
-- 限制登入者的做法是 OAuth 同意畫面的測試使用者名單。本專案的 GCP 帳號沒有 Workspace 組織，同意畫面只能選 External；維持 Testing 狀態時只有列在測試使用者名單內的帳號能完成登入，名單上限 100 人。這道關卡由 Google 執行，不需要在專案內實作或部署任何東西。
+- 限制誰能登入**不能**靠 OAuth 同意畫面的測試使用者名單，這條路對本專案無效。本專案的 GCP 帳號沒有 Workspace 組織，同意畫面只能選 External。維持 Testing 狀態時，規則寫的是只有測試使用者名單內的帳號能存取，但這條規則有一個例外。當應用程式只索取 `openid`、`userinfo.email`、`userinfo.profile` 這組基本身分 scope 時，Google 不套用該名單，使用者不必列在名單內就能完成登入，也不會看到未驗證警告，授權同樣不會七天到期（見 [Manage App Audience](https://support.google.com/cloud/answer/15549945)）。而 `st.login()` 只做身分登入、不碰任何 Google API 資料，索取的正好就是這三個 scope。這個 OAuth client 因此永遠落在例外裡，任何 Google 帳號都能走完登入流程。發布狀態是 Testing 還是 In production，對本專案的存取控制沒有差別，兩者都不是防線。
+
+- 擋人於是只能在應用程式層做，由 `dashboard_ui/utils/auth_gate.py` 的 `require_login` 在登入之後接著執行第二道檢查，以 email 查 `USER_ALLOWLIST`，查無角色就渲染未授權畫面並 `st.stop()`。
+
+- 被擋下的帳號不自動呼叫 `st.logout()` 踢出，而是停在未授權畫面、自行按登出。自動登出會讓瀏覽器立刻回到登入入口，使用者只看到自己按了登入卻什麼都沒發生，無從得知被拒絕的原因。留在未授權畫面則什麼也做不了，因為 Streamlit 每次 rerun 都會重新跑一遍這兩道檢查，一樣是 fail-closed。
 
 - **其他替代方案**：以 GCP Identity Platform（GCIP）作為登入來源。難點在 `st.login()` 這一步：GCIP 在 OIDC 的角色是 relying party 而非 provider，它的設定介面 `create_oidc_provider_config(provider_id, client_id, issuer, ...)` 是讓 GCIP 去承接某個外部 provider，本身不對外提供可供第三方應用程式對接的 `authorization_endpoint` 與 `token_endpoint`，也沒有給應用程式用的 discovery 文件。因此 `secrets.toml` 無從填寫，`st.login()` 用不上，登入流程的轉址、以授權碼換取 token、驗簽、登入狀態 cookie 與 token 續期五個步驟都要自行實作；限制登入者則需另外撰寫並部署一個 `beforeSignIn` blocking function，多一個獨立的 Cloud Function 部署單位。以本次的規模與維護成本考量不採納。
 
@@ -170,8 +181,9 @@ uvicorn <module>:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
 
 - **Dashboard 仍在信任鏈上。** 信任鏈變成「Google 驗人，dashboard 轉述並簽名」。dashboard 的程式碼理論上可以為任何 email 簽 JWT。但這仍比現況 (變更前) 好，因為現況是任何知道 demo 帳密的人都能宣稱自己是 Note Owner 去呼叫 Silver 與 Gold 服務；改完之後，能宣稱身分的只剩我們自己部署的那份程式碼。要完全移除這層信任得自己實作 OAuth code flow 以取得原始 ID token，代價是登入流程的 cookie、session 與 refresh 都要自己維護，因超出目前專案管理人的知識範圍之外，故本次不做。
 - **JWT 到期時間要拿捏。** 太短會讓使用者在審查頁停留久了之後操作失敗，太長則延長被盜用的時間窗。初步取五分鐘，並在每次呼叫端點前重新簽發，而不是登入時簽一次存起來。
-- **允許清單改動要重新部署。** 清單在環境變數裡，加一個 email 要改 Secret Manager 並重新部署三個服務。以預期的異動頻率（幾乎不變）來說可以接受。
-- **測試使用者名單要手動維護。** 要讓新的人登入，必須到 OAuth 同意畫面加入測試使用者，上限 100 人。若日後把同意畫面改成 Published 狀態，這道關卡會消失，屆時擋人就只剩應用程式端的 `USER_ALLOWLIST`。
+- **`USER_ALLOWLIST` 改動要重新部署。** 它放在環境變數裡，加一個 email 要改 Secret Manager 並重新部署三個服務。以預期的異動頻率（幾乎不變）來說可以接受。
+- **`USER_ALLOWLIST` 是唯一的擋人機制。** 既然同意畫面那道關卡並不存在（見決策 8），`USER_ALLOWLIST` 設錯或忘記更新的後果就被放大，不是全部放行就是全部拒絕。本次選擇錯向拒絕（見決策 2），代價是打錯一個字連自己也進不去，得改好 Secret Manager 再重新部署才能恢復。
+- **`Guest` 從誰都能當變成要手動指定。** 作品集要給人試玩，得先把對方的 Google email 加進 `USER_ALLOWLIST`、標成 `Guest`，再重新部署，比原本任何人登入即為 Guest 麻煩不少。但這也是目前唯一能限制模型用量的方式，因為 AI agent 頁的 `RATE_LIMIT` 記在 `st.session_state` 裡，開新對話或換個分頁就歸零，對不特定人開放等於用量沒有上限。
 - **登入依賴 Streamlit 的內建 OIDC 功能。** 它在 1.42 版才加入，升版時若行為改變會直接影響登入流程。`requirements.txt` 目前釘在 `streamlit==1.64.0`。
 - **`st.login` 需要 `auth` 這個 extra。** 依賴要寫成 `streamlit[auth]`，它會帶進 `authlib` 與 `joserfc`；只裝 `streamlit` 的話登入會在執行期才失敗。改動依賴之後必須重新產生 `requirements.txt`，否則 Docker 映像仍會裝到沒有 extra 的版本，地端能跑但雲端登入不了。
 - **本地開發流程會變。** 現在只要填四組帳密就能跑起來，改完之後地端要設定 OIDC 的 `redirect_uri` 與 `cookie_secret`，`.streamlit/secrets.toml` 要另外準備且不可進版控。

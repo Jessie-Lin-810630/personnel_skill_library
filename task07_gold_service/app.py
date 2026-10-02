@@ -83,7 +83,7 @@ def archive(body: ArchiveRequest, user: Annotated[UserIdentity, Depends(verify_u
         當未預期例外回 500；當處理成功則回 200。
 
     Raises:
-        HTTPException: 由 verify_user 拋出，缺 token 或驗簽失敗回 401、不在允許清單回 403、
+        HTTPException: 由 verify_user 拋出，缺 token 或驗簽失敗回 401、不在 USER_ALLOWLIST 回 403、
             取不到驗簽金鑰回 503。
     """
     # ── rejected：呼叫 Gold 層 reject_note ─────────────────────

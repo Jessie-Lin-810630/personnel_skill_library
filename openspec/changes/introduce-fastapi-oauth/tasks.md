@@ -11,7 +11,7 @@
 ## 2. 共用驗證模組 `task07_common/auth.py`
 
 - [x] 2.1 寫 `verify_user` 的 FastAPI dependency：讀 `X-User-Token`，以 dashboard runtime SA 的公開憑證驗簽、驗 `exp`，回傳 email 與角色。驗證：新增 `tests/test_task07_common_auth.py`，以自簽金鑰對造出的 token 測「驗簽通過」「簽章不符」「已過期」三種情形皆符合預期
-- [x] 2.2 加入允許清單比對：驗簽通過但 email 不在 `USER_ALLOWLIST` 內時拋出 403。驗證：`tests/test_task07_common_auth.py` 中清單外 email 的案例取得 403，清單內取得對應角色
+- [x] 2.2 加入 `USER_ALLOWLIST` 比對：驗簽通過但 email 不在 `USER_ALLOWLIST` 內時拋出 403。驗證：`tests/test_task07_common_auth.py` 中 `USER_ALLOWLIST` 外 email 的案例取得 403，`USER_ALLOWLIST` 內取得對應角色
 - [x] 2.3 缺 `X-User-Token`、驗簽失敗、過期一律回 401；連不上 Google 的 JWK 端點改回 503。驗證：同上測試檔三個 401 案例與一個 503 案例都符合預期
 - [x] 2.4 提供共用的 `RequestValidationError` handler，把 FastAPI 預設的 422 改成 400。驗證：單元測試對一個最小 FastAPI app 送出缺欄位的請求，收到 400
 
@@ -37,9 +37,9 @@
 ## 6. Dashboard 登入流程
 
 - [x] 6.1 建立 `.streamlit/secrets.toml` 的範本（`redirect_uri`、`cookie_secret`，以及 `[auth.google]` 底下的 `client_id`、`client_secret`、`server_metadata_url`），加入 `.gitignore` 並更新 `.env.example` 說明。驗證：`git status` 不出現 `secrets.toml`，且地端 `poetry run streamlit run dashboard_ui/app.py` 可跳轉到 Google 登入頁
-- [x] 6.2 `dashboard_ui/pages/onenote_review.py` 以 `st.login()` 取代 `CREDENTIALS` 帳密比對，登入後以 `st.user.email` 對照允許清單決定 `st.session_state.role`，清單外落 `Guest`。驗證：地端以清單內帳號登入取得審查角色，以清單外帳號登入取得 Guest
+- [x] 6.2 `dashboard_ui/pages/onenote_review.py` 以 `st.login()` 取代 `CREDENTIALS` 帳密比對，登入後以 `st.user.email` 對照 `USER_ALLOWLIST` 決定 `st.session_state.role`，`USER_ALLOWLIST` 外落 `Guest`。驗證：地端以 `USER_ALLOWLIST` 內帳號登入取得審查角色，以 `USER_ALLOWLIST` 外帳號登入取得 Guest
 - [x] 6.3 `dashboard_ui/pages/ai_knowledge_agent.py` 加登入 gate，移除檔案頂部的 `# TODO: st.login()` 注解區塊。驗證：未登入時頁面只顯示登入入口，`session_id` 不初始化
-- [x] 6.4 移除 `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*`／`ROLE_GUEST_*` 八個環境變數與相關程式碼（`Guest` 角色本身保留，改由允許清單推導），更新 `.env.example`。驗證：`grep -rn "ROLE_ML_USERNAME\|ROLE_GUEST_USERNAME" dashboard_ui/ .env.example` 無結果
+- [x] 6.4 移除 `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*`／`ROLE_GUEST_*` 八個環境變數與相關程式碼（`Guest` 角色本身保留，改由 `USER_ALLOWLIST` 推導），更新 `.env.example`。驗證：`grep -rn "ROLE_ML_USERNAME\|ROLE_GUEST_USERNAME" dashboard_ui/ .env.example` 無結果
 
 ## 7. Dashboard 簽發與轉傳 token
 
@@ -54,7 +54,7 @@
 - [x] 8.3 dashboard 的 workflow 加上 `USER_ALLOWLIST`、`TOKEN_ISSUER_SA` 的環境變數注入，並把整份 `secrets.toml` 以檔案形式掛到 `/root/.streamlit/secrets.toml`（Streamlit 的 `[auth]` 只讀檔案，環境變數讀不到；掛家目錄以免蓋住 `/app/.streamlit/config.toml`），同時移除八個 `ROLE_*` 的注入。驗證：部署後以測試使用者名單內的 Google 帳號登入成功
 - [x] 8.3.1 在 Secret Manager 建立 `STREAMLIT_AUTH_TOML_DEV` 與 `STREAMLIT_AUTH_TOML_PROD`，內容各為一份完整的 `secrets.toml`，`redirect_uri` 分別指向該環境的 Cloud Run 服務網址。驗證：`gcloud secrets versions access latest` 取得的內容可被 `tomllib.loads` 解析且含 `[auth.google]`
 - [x] 8.4 部署完成後，把 Cloud Run 實際的服務網址補進 OAuth Web client 的 Authorized redirect URIs。驗證：雲端登入不再出現 `redirect_uri_mismatch`
-- [x] 8.5 確認測試使用者名單外的帳號登入被 Google 擋下。驗證：以名單外帳號嘗試登入，停在 Google 的錯誤頁，不進到應用程式
+- [x] 8.5 確認 `USER_ALLOWLIST` 外的帳號進不了兩個頁面。驗證：以 `USER_ALLOWLIST` 外帳號登入，Google 端會放行，應用程式停在未授權畫面，不讀 MongoDB、不呼叫端點、不觸發 LLM
 
 ## 9. 文件與收尾
 
@@ -62,3 +62,14 @@
 - [x] 9.2 更新 `dashboard_ui/README.md` 的登入說明與 Configuration。驗證：README 不再提到四組 demo 帳密
 - [x] 9.3 更新根目錄 `CLAUDE.md` 中提及 Flask 端點與 demo 帳密的段落。驗證：`grep -n "Flask" CLAUDE.md` 的結果與實作一致
 - [x] 9.4 全測試的失敗數不因本次變更而增加。驗證：`poetry run python -m unittest discover -s tests` 的失敗清單與變更前（commit `f349efe`）逐項相同，皆為既有問題；測試總數由 342 增為 393
+
+## 10. 修正： `USER_ALLOWLIST` 成為唯一的擋人機制
+
+> 部署後發現 OAuth 同意畫面的測試使用者名單對本專案無效（理由見 `design.md` 決策 8），原本「`USER_ALLOWLIST` 外落 Guest」的設計因此等於對所有 Google 帳號開放。
+
+- [x] 10.1 `dashboard_ui/utils/auth_gate.py` 的 `_resolve_role` 回傳型別改為 `str | None`，查無角色、`USER_ALLOWLIST` 未設定、JSON 無法解析、解析結果不是 object 四種情況全部回 `None`，不再退回 `Guest`。驗證：`tests/test_dashboard_auth_gate.py` 七個案例通過
+- [x] 10.2 `require_login` 在角色為 `None` 時渲染未授權畫面並 `st.stop()`，新增兩頁共用的 `_render_unauthorized_page`，畫面上附登出按鈕而不自動登出。驗證：以 `USER_ALLOWLIST` 外帳號登入，停在未授權畫面且頁面其餘內容未渲染
+- [x] 10.3 `task07_common/auth.py` 的 `verify_user` 在「不在 `USER_ALLOWLIST` 內」之後補一條「角色為 `Guest` 回 403」，並新增模組常數 `GUEST_ROLE`。驗證：`tests/test_task07_common_auth.py` 的 `test_guest_role_returns_403` 通過
+- [x] 10.4 兩頁登入卡片移除「未列入授權名單者可以訪客身分瀏覽」的文案。驗證：`grep -n "訪客身分瀏覽" dashboard_ui/utils/auth_gate.py` 無結果
+- [x] 10.5 更新 `design.md`（決策 2、5、8 與 Goals、Risks）、`proposal.md`、三份 spec delta 與三份 README 的相關敘述。驗證：`grep -rn "測試使用者名單" openspec/changes/introduce-fastapi-oauth` 的結果只出現在說明「該名單無效」的段落
+- [ ] 10.6 `USER_ALLOWLIST` 補上訪客用的 email 並標為 `Guest`，同步更新 `.env.example`、本機 `.env` 與 Secret Manager，重新部署 dashboard、Silver、Gold 三個服務。驗證：`USER_ALLOWLIST` 內的 Guest 帳號可進入兩頁並正常對話，`USER_ALLOWLIST` 外帳號停在未授權畫面

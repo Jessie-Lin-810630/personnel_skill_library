@@ -11,7 +11,8 @@ Required .env keys:
     MONGO_DB_NAME          MongoDB database name.
     SILVER_ENDPOINT_URL    Silver enrich FastAPI endpoint URL (e.g. http://localhost:8002/enrich).
     GOLD_ENDPOINT_URL      Gold archive FastAPI endpoint URL (e.g. http://localhost:8003/archive).
-    USER_ALLOWLIST         JSON object mapping user email to role name; user mail not in this list falls back to Guest.
+    USER_ALLOWLIST         JSON object mapping user email to role name; the Guest role must be listed
+                           explicitly. Emails not listed are denied access to this page.
     TOKEN_ISSUER_SA        Email of the dashboard runtime service account that signs the X-User-Token.
 
 Login is handled by Streamlit's built-in OIDC (st.login) with Google as the provider.
@@ -53,7 +54,7 @@ render_side_bar()
 
 
 # ── 登入 gate ─────────────────────────────
-# 未登入者在此停住，只看得到登入畫面；已登入者會成功取得 email 與角色
+# 未登入者與 USER_ALLOWLIST 外的帳號都在此停住；通過者取得 email 與 USER_ALLOWLIST 指定的角色
 _user_email, _role = require_login(render_login_page=render_review_login_page)
 
 # ─────────────────────────────────────────

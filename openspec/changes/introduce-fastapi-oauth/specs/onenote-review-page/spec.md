@@ -6,17 +6,21 @@
 
 - 未登入的使用者 SHALL 看到 hero 版面與登入入口。
 - 登入使用 Streamlit 內建的 OIDC 登入（`st.login()`），以 Google 為 OIDC provider。
-- 登入成功後，系統 SHALL 以 `st.user.email` 對照允許清單決定角色並寫入 `st.session_state.role`。
-- 清單外的 email 一律取得 `Guest` 角色，仍可進入頁面瀏覽。
-- 角色由允許清單決定，不另設角色下拉。
+- 登入成功後，系統 SHALL 以 `st.user.email` 對照 `USER_ALLOWLIST` 決定角色並寫入 `st.session_state.role`。
+- 不在 `USER_ALLOWLIST` 內的 email 不可 (MUST NOT) 進入本頁，`Guest` 務必 (MUST) 明列於 `USER_ALLOWLIST` 中才成立。
+- 角色由 `USER_ALLOWLIST` 決定，不另設角色下拉。
 
-#### Scenario: 允許清單內的帳號取得審查角色
-- **WHEN** 使用者以允許清單內的 Google 帳號完成登入
-- **THEN** 頁面顯示完整多版本審查介面，`st.session_state.role` 設為清單中對應的角色
+#### Scenario: `USER_ALLOWLIST` 內的帳號取得審查角色
+- **WHEN** 使用者以 `USER_ALLOWLIST` 內的 Google 帳號完成登入
+- **THEN** 頁面顯示完整多版本審查介面，`st.session_state.role` 設為 `USER_ALLOWLIST` 中對應的角色
 
-#### Scenario: 允許清單外的帳號落到 Guest
-- **WHEN** 使用者以允許清單外的 Google 帳號完成登入
+#### Scenario: `USER_ALLOWLIST` 內的 Guest 帳號可瀏覽但不寫入
+- **WHEN** 使用者以 `USER_ALLOWLIST` 中角色為 `Guest` 的 Google 帳號完成登入
 - **THEN** 頁面顯示審查介面，`st.session_state.role` 設為 `Guest`，approve 與 reject 只更新畫面而不呼叫端點
+
+#### Scenario: `USER_ALLOWLIST` 外的帳號不得進入
+- **WHEN** 使用者以 `USER_ALLOWLIST` 外的 Google 帳號完成登入
+- **THEN** 頁面顯示未授權畫面與登出按鈕並停止渲染，不讀取 `onenote_note_metadata`，不呼叫任何端點
 
 #### Scenario: 未登入不得進入
 - **WHEN** 使用者尚未登入
@@ -70,4 +74,4 @@
 `ROLE_ML_*` / `ROLE_OWNER_*` / `ROLE_SENIOR_*` 六個變數一併退場。
 
 **Migration**: 由本 delta 的 `Requirement: Google OIDC login gate` 取代。原本以帳密區分的三個角色
-改為寫進 email 允許清單，實作時移除 `CREDENTIALS` 比對與相關環境變數。
+改為寫進 email `USER_ALLOWLIST`，實作時移除 `CREDENTIALS` 比對與相關環境變數。

@@ -231,6 +231,6 @@ openspec init
 
 ## What's Next?
 
-- [x] **AI Knowledge Agent 的 OAuth2 驗證**：已改為 Google 帳號登入（`st.login()`），取代原本粗分四層的帳密。角色由 email 允許清單推導，審查頁的操作另以 `X-User-Token` 讓後端端點自行驗證是哪一位使用者下的指令。
+- [x] **AI Knowledge Agent 與 OneNote Review 兩頁改走 OAuth 驗證**：改為 Google 帳號登入（`st.login()`），取代原本四組自己列管的帳密。僅以環境變數 `USER_ALLOWLIST` 核對登入者的角色身份，並由後端服務 Silver & Gold 決定角色的操作權限範圍。
 - [ ] **告警機制**：Cloud Run Job 執行 ETL 遇 4xx/5xx 時捕捉例外並發送通知（Email／Pub/Sub）。
 - [ ] **淘汰 v1 過渡並寫**：task01 v2 過渡期同時並寫 v1 `obsidian_summary`，待 backfill 到 `notes_summary` 後淘汰。

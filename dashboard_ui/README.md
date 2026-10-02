@@ -57,14 +57,14 @@
 
 - **能看到**：登入後檢視與比對原始筆記與 LLM enriched 筆記。
 - **能互動**：生成、歸檔或是退件。訪客身分只看得到已生成的內容，生成類按鈕停用，歸檔與退件只更新畫面不寫入系統。
-- **登入控管**：**有**。以 Google 帳號登入且根據 Google Auth Platform 登記的核可 email 清單來允許特定使用者登入，登入後具有什麼角色係另外依照登入者的 email 與內建權限清單決定，若不在清單內一律視為訪客 (Guest)。訪客與非訪客具備不同層級的審查權限。
+- **登入控管**：**有**。以 Google 帳號登入，登入後依登入者的 email 對照 `USER_ALLOWLIST` 決定角色，角色至少分成訪客 (Guest) 與其他多個非訪客；不在 `USER_ALLOWLIST` 內者將停在未授權畫面，進不了本頁，因此連訪客都不算。
 - **關聯**：task07 Silver、task07 Gold。
 
 ## AI Knowledge Agent — 知識 Agent（`pages/ai_knowledge_agent.py`）
 
 - **能看到**：對話式介面，回答筆記語意查詢、摘要。
 - **能互動**：開新對話 → 輸入問題 → intent router 分流到 RAG agent → 回覆並記錄對話。
-- **登入控管**：**有**。以 Google 帳號登入且根據 Google Auth Platform 登記的核可 email 清單來允許特定使用者登入，但不會區分登入者的角色權限，凡授權合法的登入者皆可使用完整對話功能。
+- **登入控管**：**有**。以 Google 帳號登入，登入後依登入者的 email 對照 `USER_ALLOWLIST` 決定角色，角色至少分成訪客 (Guest) 與其他多個非訪客；不在 `USER_ALLOWLIST` 內者將停在未授權畫面，進不了本頁，因此連訪客都不算。受允登入者皆可使用完整對話功能，而訪客與非訪客的差別只在 Agent 回答的結果是否會顯示向量餘弦相似度分數與重排序的分數。
 - **關聯**：agents/、agent_tools/、task06、task08。
 
 
@@ -128,9 +128,12 @@ dashboard_ui/
 ```json
 {
     "abc1234@gmail.com": "Data-Engineer",
-    "other@gmail.com": "ML/DL Engineer"
+    "other@gmail.com": "ML/DL Engineer",
+    "visitor@gmail.com": "Guest"
  }
 ```
+
+> **`USER_ALLOWLIST` 是唯一的擋人機制**。不在其中的 email 即使在 Google 端登入成功，也會停在未授權畫面，進不了 OneNote 審查頁與 AI Knowledge Agent 頁。Google Auth Platform 的發布狀態與測試使用者名單都擋不住名單外的帳號，請勿依賴它們。要讓某人以訪客身分試玩，必須把對方的 email 明寫進 `USER_ALLOWLIST`、值設為 `Guest`，再重新部署。
 
 
 # Schema — `chat_history`
