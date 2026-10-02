@@ -2,7 +2,8 @@
 
 執行流程：
 1. 登出：
-    - 主函式 render_logout_button 提供登出按鈕，按下後清空本頁自訂的 session_state 並呼叫 st.logout。
+    - 主函式 render_logout_button 提供登出按鈕，按下後清空本頁自訂的 session_state、呼叫 st.logout，
+      並停止整頁渲染，避免呼叫端接著讀到剛被清掉的鍵。
 2. 登入：
     - 主函式 require_login 使用 callback 函式 render_review_login_page 或 render_agent_login_page，
       渲染登入畫面，callback 函式會再呼叫私有函式 _render_login_button，做出登入按鈕。
@@ -163,16 +164,22 @@ def _render_unauthorized_page() -> None:
 def render_logout_button(*clear_keys: str) -> None:
     """渲染登出按鈕，按下後會觸發清理 `clear_keys` 指定的 session_state keys 並登出。
 
+    Note:
+        清理完就以 st.stop 中止整頁，因為被清掉的鍵在同一次 script run 裡還會被呼叫端讀到。
+        以 AI agent 頁為例，messages 在檔案開頭初始化、在這裡被清掉，頁面較下方的重播歷史訊息
+        又以 st.session_state["messages"] 直接索引，不中止就會丟 KeyError。
+
     Args:
         *clear_keys: 登出時要一併清掉的 session_state 鍵，例如頁面自己的暫存狀態。
 
     Returns:
-        None: 只更新畫面與登入狀態，不回傳值。
+        None: 按下按鈕時不會回到呼叫端，整頁在此中止；未按下則只輸出畫面元件。
     """
     if st.button("登出", width="stretch"):
         for key in (*clear_keys, "role", "user_email"):
             st.session_state.pop(key, None)
         st.logout()  # 只是對前端發出「清掉身分 cookie 並轉址」的指令，函式外層的接續程式碼還是會被執行到
+        st.stop()
 
 
 def render_review_login_page() -> None:
