@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -329,7 +330,15 @@ class LeetCodeTransformTests(unittest.TestCase):
 
         summary = t_transform_leetcode.build_leetcode_summary_partial(feature_docs, solved_problem_stats)
 
-        self.assertRegex(summary["snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
+        # snapshot_date 是時分秒歸零的 datetime，供 Load 層以日為粒度 upsert（README schema 標為
+        # Date (ISO 8601)、時間部分均歸零），不是 YYYY-mm-dd 字串
+        snapshot_date = summary["snapshot_date"]
+        self.assertIsInstance(snapshot_date, datetime)
+        self.assertEqual(snapshot_date.tzinfo, timezone.utc)
+        self.assertEqual(
+            (snapshot_date.hour, snapshot_date.minute, snapshot_date.second, snapshot_date.microsecond),
+            (0, 0, 0, 0),
+        )
         self.assertEqual(summary["totalSolvedProblemsOnLeetcode"], 2)
         self.assertEqual(summary["problemDifficultyOnLeetcode"], solved_problem_stats)
         self.assertEqual(summary["topicsPercentOnLeetcode"], {"Array": 66.67, "DP": 33.33})
@@ -388,7 +397,15 @@ class CcClubTransformTests(unittest.TestCase):
 
         summary = t_transform_ccClub.build_ccclub_summary_partial(problem_docs)
 
-        self.assertRegex(summary["snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
+        # snapshot_date 是時分秒歸零的 datetime，供 Load 層以日為粒度 upsert（README schema 標為
+        # Date (ISO 8601)、時間部分均歸零），不是 YYYY-mm-dd 字串
+        snapshot_date = summary["snapshot_date"]
+        self.assertIsInstance(snapshot_date, datetime)
+        self.assertEqual(snapshot_date.tzinfo, timezone.utc)
+        self.assertEqual(
+            (snapshot_date.hour, snapshot_date.minute, snapshot_date.second, snapshot_date.microsecond),
+            (0, 0, 0, 0),
+        )
         self.assertEqual(summary["totalSolvedProblemsOnCCclub"], 3)
         self.assertEqual(
             summary["problemDifficultyOnCCclub"],
