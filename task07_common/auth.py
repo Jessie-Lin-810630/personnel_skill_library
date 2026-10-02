@@ -4,7 +4,7 @@
 1. 主函式 verify_user 作為 FastAPI dependency，從 header X-User-Token 取出 JWT。
 2. 以 dashboard runtime service account 的公開金鑰驗簽取得的 JWT，並檢查 payload 中的 issuer、audience 與到期時間。
 3. JWT 驗簽通過後取出 email (也就是誰下指令的)，對照環境變數 USER_ALLOWLIST 推導出這個人的角色層級，回傳 UserIdentity。
-4. 若缺 token、驗簽失敗或已過期一律回 401；驗簽通過但不在允許清單內回 403；
+4. 若缺 token、驗簽失敗或已過期一律回 401；不在 USER_ALLOWLIST 內或在其中被列為 Guest 回 403；
    連不上 Google 的公鑰端點則回 503，與 token 本身有問題分開。
 5. 另外做一個函式 register_validation_error_handler 把 FastAPI 預設的 422 驗證失敗改回 400，
    讓 422 保留給端點既有的業務錯誤。
@@ -27,6 +27,10 @@ from loguru import logger
 # dashboard 簽發 token 時要寫進 audience，這個值在簽發端和驗證端必須一致，值本身沒有對外意義
 USER_TOKEN_AUDIENCE = "task07-user"
 
+# 訪客角色名稱，與 dashboard_ui/utils/auth_gate.py 的 GUEST_ROLE 同值。
+# dashboard 不 import task07_* 套件，所以兩邊各自宣告一份，改動時要一起改
+GUEST_ROLE = "Guest"
+
 # Google 為每個 service account 公開的 JWK 端點，用來取公鑰。公鑰可用於驗簽 JWT
 _JWK_URL_TEMPLATE = "https://www.googleapis.com/service_accounts/v1/jwk/{service_account_email}"
 
@@ -46,7 +50,7 @@ class UserIdentity(NamedTuple):
 
 
 def _load_allowlist() -> dict[str, str]:
-    """讀取並解析允許清單，取得 email 對應角色的表。
+    """讀取並解析 USER_ALLOWLIST，取得 email 對應角色的表。
 
     Returns:
         email 為鍵、角色名稱為值的 dict。環境變數 USER_ALLOWLIST 未設定或為空字串時回傳空 dict。
@@ -98,14 +102,17 @@ def verify_user(
     Note:
         驗證未通過時以 HTTPException 中斷，Silver/Gold 端點本體完全不會被執行。
 
+        角色為 Guest 時一併拒絕。Guest 明寫在 USER_ALLOWLIST 裡，查得到角色，
+        不會被「不在 USER_ALLOWLIST 內」那一關擋下，需要單獨判斷。
+
     Args:
         x_user_token: header `X-User-Token` 的值，由 FastAPI 注入，未帶時為 None。
 
     Returns:
-        通過驗證的 UserIdentity，含 email 與角色。
+        通過驗證的 UserIdentity，含 email 與角色，角色必為 Guest 以外的審查角色。
 
     Raises:
-        HTTPException: 缺 token、驗簽失敗或已過期回 401；驗簽通過但不在允許清單內回 403；
+        HTTPException: 缺 token、驗簽失敗或已過期回 401；不在 USER_ALLOWLIST 內或角色為 Guest 回 403；
             連不上 Google 的公鑰端點回 503。
     """
     if not x_user_token:
@@ -147,8 +154,12 @@ def verify_user(
     # 推導角色
     role = _load_allowlist().get(email)
     if role is None:
-        logger.warning(f"[auth] {email} 不在允許清單內，拒絕操作")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{email} 不在允許清單內")
+        logger.warning(f"[auth] {email} 不在 USER_ALLOWLIST 內，拒絕操作")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{email} 不在 USER_ALLOWLIST 內")
+
+    if role == GUEST_ROLE:
+        logger.warning(f"[auth] {email} 的角色為 {GUEST_ROLE}，拒絕操作")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"{GUEST_ROLE} 不得執行此操作")
 
     return UserIdentity(email=email, role=role)
 

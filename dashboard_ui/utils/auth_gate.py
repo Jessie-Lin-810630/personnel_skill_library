@@ -1,15 +1,21 @@
 """以 Streamlit 的 `st.login()` 導向至符合標準OIDC 的 IdP，核查哪個帳號可登入後，再判斷登入者的角色。
 
 執行流程：
-1. 函式 resolve_role 讀環境變數 USER_ALLOWLIST，以登入者 email 查出他屬於哪個角色，查無則回 Guest。
-2. 函式 require_login 檢查 st.user.is_logged_in，未登入就渲染登入入口並停止整頁渲染。
-3. 已登入者取得 email 與角色，寫進 session_state 供頁面後續使用。
-4. 函式 render_logout_button 提供登出按鈕，按下後清空本頁自訂的 session_state 並呼叫 st.logout。
-5. 函式 render_review_login_page 與 render_agent_login_page 各自渲染兩個頁面的登入畫面，
-   由頁面以 callback 交給 require_login 呼叫，登入按鈕位置由各自的版面決定。
+1. 登出：
+    - 主函式 render_logout_button 提供登出按鈕，按下後清空本頁自訂的 session_state 並呼叫 st.logout。
+2. 登入：
+    - 主函式 require_login 使用 callback 函式 render_review_login_page 或 render_agent_login_page，
+      渲染登入畫面，callback 函式會再呼叫私有函式 _render_login_button，做出登入按鈕。
+    - 主函式 require_login 接著檢查 st.user.is_logged_in，未登入就渲染登入入口並停止整頁渲染。
+    - 私有函式 _resolve_role 讀環境變數 USER_ALLOWLIST，以登入者 email 查出他屬於哪個角色，查無則回 None。
+    - 主函式 require_login 接收 _resolve_role 回傳值，
+      回傳值是 None，則調用私有函式 _render_unauthorized_page 渲染未授權畫面並停止整頁渲染；
+      回傳值 Not None (=有角色) 則把 email 與角色寫進 session_state 供頁面後續使用。
+    - 私有函式 _render_unauthorized_page 也會調用 render_logout_button 渲染登出按鈕。
 
 Required .env keys:
-    USER_ALLOWLIST  JSON object mapping user email to role name; emails not listed fall back to Guest.
+    USER_ALLOWLIST  JSON object mapping user email to role name; the Guest role must be listed
+                    explicitly. Emails not listed are denied access to both pages.
 """
 
 import json
@@ -26,43 +32,46 @@ GUEST_ROLE = "Guest"
 _OIDC_PROVIDER = "google"
 
 
-def resolve_role(email: str) -> str:
-    """以 email 對照環境變數 USER_ALLOWIST 解析登入者是哪個角色，若不在清單內一律視為訪客。
+def _resolve_role(email: str) -> str | None:
+    """以 email 對照環境變數 USER_ALLOWLIST 解析登入者是哪個角色，不在其中則無角色。
 
     Note:
-        清單解析失敗時只記一筆警告並讓所有人落到 Guest，不中斷頁面。Guest 不會呼叫任何端點，
-        因此這個保守作法不會造成未授權的寫入；真正的把關在 Silver 與 Gold 端點，
-        它們各自驗證 token 並重新查一次清單。
+        USER_ALLOWLIST 未設定、不是合法 JSON，或解析結果不是 JSON object 時，一律記一筆警告
+        並回 None，連原本列在其中的人也一併拒絕。訪客要有 Guest 角色，必須在 USER_ALLOWLIST
+        裡明寫成 Guest，這支函式不會在查無結果時補上任何預設角色。
 
     Args:
         email: 經 Google 驗證的登入者 email。
 
     Returns:
-        清單中對應的角色名稱，查無或清單無法解析時回 Guest。
+        USER_ALLOWLIST 中對應的角色名稱；email 不在其中，或 USER_ALLOWLIST 未設定、
+        無法解析時回 None。
     """
     raw = os.getenv("USER_ALLOWLIST", "").strip()
     if not raw:
-        return GUEST_ROLE
+        logger.warning("[auth_gate] USER_ALLOWLIST 未設定，所有帳號一律拒絕進入")
+        return None
 
     try:
-        allowlist = json.loads(raw)
+        USER_ALLOWLIST = json.loads(raw)
     except json.JSONDecodeError as e:
-        logger.warning(f"[auth_gate] USER_ALLOWLIST 不是合法 JSON，所有登入者一律視為 Guest：{e}")
-        return GUEST_ROLE
+        logger.warning(f"[auth_gate] USER_ALLOWLIST 不是合法 JSON，所有帳號一律拒絕進入：{e}")
+        return None
 
-    if not isinstance(allowlist, dict):
-        logger.warning("[auth_gate] USER_ALLOWLIST 必須是 JSON object，所有登入者一律視為 Guest")
-        return GUEST_ROLE
+    if not isinstance(USER_ALLOWLIST, dict):
+        logger.warning("[auth_gate] USER_ALLOWLIST 必須是 JSON object，所有帳號一律拒絕進入")
+        return None
 
-    return allowlist.get(email, GUEST_ROLE)
+    return USER_ALLOWLIST.get(email)
 
 
-def render_login_button(label: str = "使用 Google 帳號登入") -> None:
+def _render_login_button(label: str = "使用 Google 帳號登入") -> None:
     """渲染登入按鈕，按下後導向 Google 登入頁。
 
     Note:
-        這支刻意獨立出來，讓各頁面自己決定按鈕擺在版面的哪個位置，例如放進登入卡片的欄位內。
-        由 require_login 傳入的 render_login_page 負責在適當位置呼叫它。
+        這支刻意獨立出來，讓每個登入畫面自己決定按鈕擺在版面的哪個位置，例如放進登入卡片的欄位內。
+        由 render_review_login_page 與 render_agent_login_page 各自在適當位置呼叫，
+        require_login 未收到登入畫面的 callback 時也會直接呼叫它。
 
     Args:
         label: 按鈕文字。
@@ -75,33 +84,80 @@ def render_login_button(label: str = "使用 Google 帳號登入") -> None:
 
 
 def require_login(render_login_page: Callable[[], None] | None = None) -> tuple[str, str]:
-    """擋下未登入者，已登入則進一步回傳 email 與角色。
+    """擋下未登入者與 USER_ALLOWLIST 外的帳號，兩關都通過才回傳 email 與角色。
 
     Note:
-        未登入時以 `st.stop` 中止整頁，呼叫這支函式的腳本的後續程式碼完全不會被執行，
+        這支函式連續把關兩次。第一關讀 st.user.is_logged_in，未登入者渲染登入畫面後中止。
+        第二關把第一關取得的 email 交給 _resolve_role 對照 USER_ALLOWLIST，查不到角色者
+        渲染未授權畫面後中止。兩關都通過才拿到角色，頁面也才繼續往下渲染。
+
+        兩關都以 st.stop 中止整頁，呼叫這支函式的腳本的後續程式碼完全不會被執行，
         因此這支必須放在讀取 MongoDB 或呼叫任何 endpoint 之前。
+
+        被第二關擋下的人仍保有 Streamlit 的登入狀態，要按未授權畫面上的登出按鈕才會登出。
 
     Args:
         render_login_page: 未登入時用來渲染整個登入畫面的 callback，不收參數也不回傳值，
-            由這支函式在判定未登入後呼叫。該 callback 需自行呼叫 render_login_button
+            由這支函式在判定未登入後呼叫。該 callback 需自行呼叫 _render_login_button
             決定按鈕在版面上的位置。傳 None 則只渲染一顆按鈕。
 
     Returns:
-        (email, role) tuple。email 來自 st.user，role 由 USER_ALLOWLIST 推導。
+        (email, role) tuple。email 來自 st.user，role 由 USER_ALLOWLIST 推導，必為其中登記的值。
     """
     if not st.user.is_logged_in:
         if render_login_page is not None:
             render_login_page()
         else:
-            render_login_button()
+            _render_login_button()
         st.stop()
 
     email = st.user.email or ""
-    role = resolve_role(email)
+    role = _resolve_role(email)
+    if role is None:
+        logger.warning(f"[auth_gate] {email} 不在 USER_ALLOWLIST 內，拒絕進入頁面")
+        _render_unauthorized_page()
+        st.stop()
+
     # 存入 session_state，只有關閉瀏覽器標籤頁或是點選 log out 才會清掉 role & email
     st.session_state.role = role
     st.session_state.user_email = email
     return email, role
+
+
+def _render_unauthorized_page() -> None:
+    """渲染登入成功但不在 USER_ALLOWLIST 內時的拒絕畫面，附一顆登出按鈕讓對方換帳號。
+
+    Note:
+        這支只負責畫面，中止渲染由呼叫端 require_login 以 st.stop 執行。
+        被拒絕者的 email 不顯示在畫面上，要查是哪個帳號被擋下，看 require_login 記的那筆警告。
+
+    Returns:
+        None: 只輸出畫面元件，不回傳值。
+    """
+    _, body_col, _ = st.columns([1, 2, 1])
+    with body_col:
+        st.markdown(
+            f"""
+<div style="
+    background: rgba(200,100,0,0.03);
+    border: 1px solid #2a3550;
+    border-radius: 16px;
+    padding: 2rem 2rem 1.5rem;
+    text-align: center;
+">
+    <div style="font-size:2.4rem; margin-bottom:0.6rem;">🚫</div>
+    <p style="color:{color_map["ORANGE"]}; font-weight:700; font-size:1.05rem; margin:0 0 1rem 0;">
+        此帳號未取得存取權限
+    </p>
+    <p style="color:{color_map["FONT_CLR"]}; font-size:0.86rem; line-height:1.7; margin:0;">
+        這個帳號不在本平台的授權名單內。<br>
+        本平台僅供授權名單內的 Google 帳號使用，需要存取權請與平台管理者聯繫。
+    </p>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        render_logout_button()
 
 
 def render_logout_button(*clear_keys: str) -> None:
@@ -116,7 +172,7 @@ def render_logout_button(*clear_keys: str) -> None:
     if st.button("登出", width="stretch"):
         for key in (*clear_keys, "role", "user_email"):
             st.session_state.pop(key, None)
-        st.logout()
+        st.logout()  # 只是對前端發出「清掉身分 cookie 並轉址」的指令，函式外層的接續程式碼還是會被執行到
 
 
 def render_review_login_page() -> None:
@@ -281,13 +337,13 @@ LLM 擴寫後的版本，逐頁比對。滿意就點 <strong>核可（Approve）
             unsafe_allow_html=True,
         )
 
-        render_login_button()
+        _render_login_button()
 
         st.markdown(
             """
     <p style="color:#e0e8f8; font-size:0.78rem; text-align:center; margin-top:1rem;">
         此平台僅供被授權之 Google 帳號使用<br>登入即代表您同意以指定角色進行審核操作<br>
-        未列入授權名單者可以訪客身分瀏覽，審查操作不會寫入系統
+        未列入授權名單者無法進入本頁面
     </p>
 </div>
 """,
@@ -339,13 +395,13 @@ def render_agent_login_page() -> None:
             unsafe_allow_html=True,
         )
 
-        render_login_button()
+        _render_login_button()
 
         st.markdown(
             """
     <p style="color:#e0e8f8; font-size:0.78rem; text-align:center; margin-top:1rem;">
         此平台僅供被授權之 Google 帳號使用<br>登入即代表您同意以指定角色進行操作<br>
-        未列入授權名單者可以訪客身分瀏覽
+        未列入授權名單者無法進入本頁面
     </p>
 </div>
 """,
