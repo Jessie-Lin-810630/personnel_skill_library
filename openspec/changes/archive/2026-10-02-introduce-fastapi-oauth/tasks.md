@@ -72,4 +72,6 @@
 - [x] 10.3 `task07_common/auth.py` 的 `verify_user` 在「不在 `USER_ALLOWLIST` 內」之後補一條「角色為 `Guest` 回 403」，並新增模組常數 `GUEST_ROLE`。驗證：`tests/test_task07_common_auth.py` 的 `test_guest_role_returns_403` 通過
 - [x] 10.4 兩頁登入卡片移除「未列入授權名單者可以訪客身分瀏覽」的文案。驗證：`grep -n "訪客身分瀏覽" dashboard_ui/utils/auth_gate.py` 無結果
 - [x] 10.5 更新 `design.md`（決策 2、5、8 與 Goals、Risks）、`proposal.md`、三份 spec delta 與三份 README 的相關敘述。驗證：`grep -rn "測試使用者名單" openspec/changes/introduce-fastapi-oauth` 的結果只出現在說明「該名單無效」的段落
-- [ ] 10.6 `USER_ALLOWLIST` 補上訪客用的 email 並標為 `Guest`，同步更新 `.env.example`、本機 `.env` 與 Secret Manager，重新部署 dashboard、Silver、Gold 三個服務。驗證：`USER_ALLOWLIST` 內的 Guest 帳號可進入兩頁並正常對話，`USER_ALLOWLIST` 外帳號停在未授權畫面
+- [x] 10.6 `USER_ALLOWLIST` 補上訪客用的 email 並標為 `Guest`，同步更新 `.env.example`、本機 `.env` 與 Secret Manager，重新部署 dashboard、Silver、Gold 三個服務。驗證：`USER_ALLOWLIST` 內的 Guest 帳號可進入兩頁並正常對話，`USER_ALLOWLIST` 外帳號停在未授權畫面
+- [x] 10.7 `render_logout_button` 在 `st.logout()` 後補 `st.stop()`。`st.logout()` 只對前端發出清 cookie 與轉址的指令，Python 這側會把腳本跑完，於是 AI agent 頁在登出清掉 `messages` 之後，頁面較下方重播歷史訊息那段仍會索引該鍵。驗證：在 AI agent 頁按登出不再出現 `KeyError: 'messages'`
+- [x] 10.8 dev 部署驗證完成後移除 `flask` 與 `gunicorn`，重新產生 `requirements.txt`。驗證：`poetry run python -c "import flask"` 拋 ImportError，且兩支服務的 FastAPI app 仍能建立並掛上 `/enrich`、`/archive`

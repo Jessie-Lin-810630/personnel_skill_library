@@ -206,7 +206,7 @@ class GithubTransformTests(unittest.TestCase):
                 {
                     "sha": "abcdef1",
                     "message": "initial commit",
-                    "committed_at": "2026-04-20T12:00:00Z",
+                    "committed_at": datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc),
                 }
             ],
         )
@@ -241,7 +241,7 @@ class GithubTransformTests(unittest.TestCase):
                 "role": "owner",
                 "language": "Python",
                 "commit_counts": 5,
-                "pushed_at": "2026-04-21T10:00:00Z",
+                "pushed_at": datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc),
                 "description": "alpha desc",
             },
             {
@@ -249,7 +249,7 @@ class GithubTransformTests(unittest.TestCase):
                 "role": "collaborator",
                 "language": "Go",
                 "commit_counts": 2,
-                "pushed_at": "2026-04-25T10:00:00Z",
+                "pushed_at": datetime(2026, 4, 25, 10, 0, tzinfo=timezone.utc),
                 "description": "beta desc",
             },
             {
@@ -265,14 +265,22 @@ class GithubTransformTests(unittest.TestCase):
                 "role": "owner",
                 "language": "Rust",
                 "commit_counts": 1,
-                "pushed_at": "2026-04-24T10:00:00Z",
+                "pushed_at": datetime(2026, 4, 24, 10, 0, tzinfo=timezone.utc),
                 "description": "delta desc",
             },
         ]
 
         summary = t_transform_github.build_summary_document(all_repo_docs)
 
-        self.assertRegex(summary["snapshot_date"], r"^\d{4}-\d{2}-\d{2}$")
+        # snapshot_date 是時分秒歸零的 datetime，供 Load 層以日為粒度 upsert（README schema 標為
+        # Date (ISO 8601)、時間部分均歸零），不是 YYYY-mm-dd 字串
+        snapshot_date = summary["snapshot_date"]
+        self.assertIsInstance(snapshot_date, datetime)
+        self.assertEqual(snapshot_date.tzinfo, timezone.utc)
+        self.assertEqual(
+            (snapshot_date.hour, snapshot_date.minute, snapshot_date.second, snapshot_date.microsecond),
+            (0, 0, 0, 0),
+        )
         self.assertEqual(summary["total_repos"], 4)
         self.assertEqual(summary["by_role"], {"owner": 3, "collaborator": 1})
         self.assertEqual(summary["by_language"], {"Python": 2, "Go": 1, "Rust": 1})
@@ -282,19 +290,19 @@ class GithubTransformTests(unittest.TestCase):
             [
                 {
                     "repo_name": "beta",
-                    "pushed_at": "2026-04-25T10:00:00Z",
+                    "pushed_at": datetime(2026, 4, 25, 10, 0, tzinfo=timezone.utc),
                     "language": "Go",
                     "description": "beta desc",
                 },
                 {
                     "repo_name": "delta",
-                    "pushed_at": "2026-04-24T10:00:00Z",
+                    "pushed_at": datetime(2026, 4, 24, 10, 0, tzinfo=timezone.utc),
                     "language": "Rust",
                     "description": "delta desc",
                 },
                 {
                     "repo_name": "alpha",
-                    "pushed_at": "2026-04-21T10:00:00Z",
+                    "pushed_at": datetime(2026, 4, 21, 10, 0, tzinfo=timezone.utc),
                     "language": "Python",
                     "description": "alpha desc",
                 },
