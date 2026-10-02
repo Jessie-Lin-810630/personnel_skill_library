@@ -63,7 +63,7 @@
 - **Docker 與部署**：`docker/Dockerfile.task07_silver_service`、`docker/Dockerfile.task07_gold_service` 的啟動指令改用 uvicorn。兩支 workflow 的 Cloud Run 參數不變，SA 與 secrets 不變。
 - **依賴**：
     - 新增 `fastapi`、`uvicorn`、JWT 驗簽用的 `pyjwt`
-    - `flask` 與 `gunicorn` 在部署完成與 archive change 之前不移除。
+    - `flask` 與 `gunicorn` 在 dev 部署驗證完成後移除，連帶退場的傳遞依賴有 `blinker` 與 `werkzeug`。
 - **GCP 資源**：需要設定 OAuth 同意畫面（External；發布狀態不影響存取控制，擋人靠 `USER_ALLOWLIST`）、建立 OAuth Web client（兩個 redirect URI：地端與 Cloud Run）、授予 dashboard runtime SA 對自己的 `roles/iam.serviceAccountTokenCreator`。`identitytoolkit.googleapis.com` 與 `iamcredentials.googleapis.com` 已啟用，不需另外開通。
 - **環境變數**：
     - `ROLE_ML_*`／`ROLE_OWNER_*`／`ROLE_SENIOR_*` 共六個 demo 帳密變數退場

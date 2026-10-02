@@ -77,7 +77,9 @@ X-User-Token: <短效 JWT>              ← 應用程式檢查「哪個人」
 
 - 另需 `TOKEN_ISSUER_SA`，值為 dashboard runtime service account 的 email。Silver 與 Gold 靠它決定要向哪一個 service account 的 JWK 端點取公開金鑰，並用同一個值比對 JWT 的 payload 裡的 `iss`。它不是機密，但仍隨其他設定一起由部署注入，避免寫死在程式碼裡。
 
-- JWT 的 payload 裡的 `aud` 固定為 `task07-user`，定義在 `task07_common/auth.py` 的常數 `USER_TOKEN_AUDIENCE`。簽發端與驗證端引用同一個常數，避免兩邊各寫一份字串而不一致。
+- JWT 的 payload 裡的 `aud` 固定為 `task07-user`，常數名為 `USER_TOKEN_AUDIENCE`。驗證端定義在 `task07_common/auth.py`，簽發端定義在 `dashboard_ui/utils/user_token_for_silver_and_gold.py`，兩邊各自宣告同一個值，並在註解互相指認對方。這裡不共用一份定義，是因為 dashboard 不得 import 任何 `task07_*` 套件（見專案的常駐約束），簽發端取不到驗證端的常數。角色名稱 `GUEST_ROLE` 出於同一個理由也是兩邊各一份。
+
+- 兩處重複宣告的代價是改值時要同時改兩邊，漏改會讓 `aud` 比對失敗、所有請求回 401，或讓前端與端點對訪客的判定不一致。以這兩個值幾乎不會變動來說可以接受，但註解必須寫明對應位置，否則下一個人只會看到其中一邊。
 
 - **其他替代方案**：把角色寫進登入 token 的 claims，後端不必再查對照表。但 Google 發的 ID token claims 內容由 Google 決定，應用程式無法在其中加入自訂的角色欄位；要做到這件事得改用能設定 custom claims 的身分服務，連帶放棄 `st.login()`（理由見決策 8）。為了三筆資料不划算。
 
