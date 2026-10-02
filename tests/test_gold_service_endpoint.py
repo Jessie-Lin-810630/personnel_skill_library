@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
 # 這兩個一律覆寫而非 setdefault：其他測試可能已先觸發 load_dotenv 把本機真實設定載進環境，
-# 用 setdefault 會變成空操作，測試就會改用真實允許清單，比對不到下面的假 email 而拿到 403。
+# 用 setdefault 會變成空操作，測試就會改用真實 USER_ALLOWLIST，比對不到下面的假 email 而拿到 403。
 os.environ["TOKEN_ISSUER_SA"] = "dashboard-sa@example.iam.gserviceaccount.com"
 os.environ["USER_ALLOWLIST"] = '{"owner@example.com": "Note Owner"}'
 
@@ -96,7 +96,7 @@ class TestArchiveEndpoint(unittest.TestCase):
             resp = self.post({"page_id": "p1", "dt": "2026-07-01", "action": "approved"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "archived")
-        # 角色取自 token 對照允許清單的結果，不是呼叫端指定的
+        # 角色取自 token 對照 USER_ALLOWLIST 的結果，不是呼叫端指定的
         m.assert_called_once_with(page_id="p1", dt="2026-07-01", role="Note Owner")
 
     def test_role_in_body_is_ignored(self):

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("ONENOTE_GCS_BUCKET", "fake-bucket")
 os.environ.setdefault("ENVIRONMENT", "local")
 # 這兩個一律覆寫而非 setdefault：其他測試可能已先觸發 load_dotenv 把本機真實設定載進環境，
-# 用 setdefault 會變成空操作，測試就會改用真實允許清單，比對不到下面的假 email 而拿到 403。
+# 用 setdefault 會變成空操作，測試就會改用真實 USER_ALLOWLIST，比對不到下面的假 email 而拿到 403。
 os.environ["TOKEN_ISSUER_SA"] = "dashboard-sa@example.iam.gserviceaccount.com"
 os.environ["USER_ALLOWLIST"] = '{"owner@example.com": "Note Owner"}'
 

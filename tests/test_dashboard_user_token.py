@@ -77,7 +77,7 @@ class TestPayload(_MintTestCase):
         self.assertEqual(payload["exp"] - payload["iat"], ut.TOKEN_TTL_SECONDS)
 
     def test_payload_does_not_carry_role(self):
-        # 角色由端點自己查允許清單推導，簽進 token 會變成沒人讀的欄位
+        # 角色由端點自己查 USER_ALLOWLIST 推導，簽進 token 會變成沒人讀的欄位
         _, session = self.mint_with(_FakeResponse(200, {"signedJwt": "fake.jwt.value"}))
         payload = json.loads(session.sent_payload["payload"])
         self.assertNotIn("role", payload)

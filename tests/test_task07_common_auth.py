@@ -1,6 +1,6 @@
 """tests/test_task07_common_auth.py
 
-Unit tests for task07_common.auth — 驗證 X-User-Token 的驗簽、到期、允許清單比對，
+Unit tests for task07_common.auth — 驗證 X-User-Token 的驗簽、到期、 USER_ALLOWLIST 比對，
 以及請求驗證失敗改回 400 的 handler。以自造的 RSA 金鑰對簽 token，不連網、不打 Google。
 """
 
@@ -22,7 +22,7 @@ os.environ["TOKEN_ISSUER_SA"] = "dashboard-sa@example.iam.gserviceaccount.com"
 from task07_common import auth  # noqa: E402
 
 ISSUER = "dashboard-sa@example.iam.gserviceaccount.com"
-ALLOWLIST = '{"owner@example.com": "Note Owner", "ml@example.com": "ML/DL Engineer"}'
+ALLOWLIST = '{"owner@example.com": "Note Owner", "ml@example.com": "ML/DL Engineer", "visitor@example.com": "Guest"}'
 
 _PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _OTHER_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -129,6 +129,10 @@ class TestVerifyUser(unittest.TestCase):
 
     def test_email_not_in_allowlist_returns_403(self):
         self.assertEqual(self.post(make_token(email="stranger@example.com")).status_code, 403)
+
+    def test_guest_role_returns_403(self):
+        # Guest 明寫在 USER_ALLOWLIST 裡才能登入 dashboard，過得了「不在其中」那一關，需單獨擋
+        self.assertEqual(self.post(make_token(email="visitor@example.com")).status_code, 403)
 
     def test_empty_allowlist_returns_403(self):
         with patch.dict(os.environ, {"USER_ALLOWLIST": ""}):
