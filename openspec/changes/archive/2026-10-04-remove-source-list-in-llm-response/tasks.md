@@ -17,4 +17,4 @@
 
 ## 4. 收尾
 
-- [ ] 4.1 確認實作只動到 `SYSTEM_PROMPT`。驗證：以 commit 為單位查核本 change 的實作 commit，`git show --name-only --format="" <commit>` 的結果只有 `dashboard_ui/agents/rag_agent.py` 與本 change 自己的 `tasks.md`，且 `git show <commit>` 的 diff 只落在 `SYSTEM_PROMPT` 字串內
+- [x] 4.1 確認實作只動到 `SYSTEM_PROMPT`。驗證：以 commit 為單位查核本 change 的實作 commit，`git show --name-only --format="" <commit>` 的結果只有 `dashboard_ui/agents/rag_agent.py` 與本 change 自己的 `tasks.md`，且 `git show <commit>` 的 diff 只落在 `SYSTEM_PROMPT` 字串內
