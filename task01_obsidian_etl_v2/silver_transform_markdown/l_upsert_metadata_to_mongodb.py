@@ -20,12 +20,12 @@ from .e_get_changed_files import NOTE_METADATA
 def upsert_note(db: Database, note_doc: dict) -> None:
     """以 raw_md_path 為唯一鍵，把 note document 冪等 upsert 進 obsidian_note_metadata。
 
-    1. 一律把 status 設為 archived，並更新 updated_at。
-    2. embedded_status 與 created_at 只在第一次寫入時設定。
+    1. 一律把 status 設為 archived、embedded_status 設為 false，並更新 updated_at。
+    2. created_at 只在第一次寫入時設定。
 
     Note:
-        embedded_status 之所以只在第一次寫入時設定，是因為 task06 完成向量化後會把它翻成 true，
-        這裡若每次都覆寫，已向量化的筆記會被誤判成尚未處理而反覆重做。
+        embedded_status 每次都覆寫成 false，是為了讓同名筆記改版重新歸檔後，task06 會把新版內容重新向量化。
+        這不會讓已向量化的筆記反覆重做，因為只有 select_changed_blobs 判定為新增或變更的筆記才會走到這裡。
 
     Args:
         db: pymongo Database 物件。
@@ -36,12 +36,12 @@ def upsert_note(db: Database, note_doc: dict) -> None:
     """
     collection = db[NOTE_METADATA]
     now = datetime.now(timezone.utc)
-    set_fields = {**note_doc, "status": "archived", "updated_at": now}
+    set_fields = {**note_doc, "status": "archived", "embedded_status": False, "updated_at": now}
     collection.update_one(
         {"raw_md_path": note_doc["raw_md_path"]},
         {
             "$set": set_fields,
-            "$setOnInsert": {"embedded_status": False, "created_at": now},
+            "$setOnInsert": {"created_at": now},
         },
         upsert=True,
     )

@@ -302,8 +302,23 @@ class UpsertNoteTests(unittest.TestCase):
         filter_doc, update, upsert = col.last_update_one
         self.assertEqual(filter_doc, {"raw_md_path": "gs://b/raw-notes/u/x.md"})
         self.assertEqual(update["$set"]["status"], "archived")
-        self.assertIs(update["$setOnInsert"]["embedded_status"], False)
+        self.assertIs(update["$set"]["embedded_status"], False)
+        self.assertNotIn("embedded_status", update["$setOnInsert"])
         self.assertTrue(upsert)
+
+    def test_rearchive_resets_embedded_status_for_revised_note(self):
+        db = FakeDb()
+        raw_md_path = "gs://b/raw-notes/u/x.md"
+        db.preset(
+            l_upsert_metadata_to_mongodb.NOTE_METADATA,
+            [{"raw_md_path": raw_md_path, "raw_md_md5_hash": "OLD", "status": "archived", "embedded_status": True}],
+        )
+
+        l_upsert_metadata_to_mongodb.upsert_note(db, {"raw_md_path": raw_md_path, "raw_md_md5_hash": "NEW"})
+
+        doc = db.collections[l_upsert_metadata_to_mongodb.NOTE_METADATA].docs[0]
+        self.assertEqual(doc["raw_md_md5_hash"], "NEW")
+        self.assertIs(doc["embedded_status"], False)
 
     def test_upsert_is_idempotent_on_same_raw_md_path(self):
         db = FakeDb()
