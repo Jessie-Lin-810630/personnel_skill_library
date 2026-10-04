@@ -30,11 +30,8 @@ LOGOS: dict[str, str] = {
     + '<rect x="4" y="5.5" width="3" height="7" rx="1.5" fill="#130754"/>'
     + '<rect x="9" y="5.5" width="3" height="7" rx="1.5" fill="#E70488"/>'
     + '<rect x="5.5" y="7" width="5" height="2.5" rx="1" fill="#9CA3AF"/></svg>',
-    "css": _SVG_OPEN
-    + '<rect width="16" height="16" rx="2.5" fill="#264DE4"/>'
-    + '<text x="2.5" y="12" font-size="7" fill="white" font-weight="700" font-family="DM Sans, sans-serif">CSS</text></svg>',
     # Layer 2 — APIs & Backend
-    "flask": _SVG_OPEN
+    "fastapi": _SVG_OPEN
     + '<path d="M6 1.5V6.5L2.5 12.5C2 13.6 2.9 15 5 15H11C13.1 15 14 13.6 13.5 12.5L10 6.5V1.5" stroke="#1F2937" stroke-width="1.4" stroke-linejoin="round" fill="none"/>'
     + '<line x1="5" y1="3.5" x2="11" y2="3.5" stroke="#1F2937" stroke-width="1.4"/>'
     + '<circle cx="5.5" cy="12" r="1.2" fill="#22C55E"/>'
@@ -64,10 +61,6 @@ LOGOS: dict[str, str] = {
     "requests": _SVG_OPEN
     + '<path d="M2.5 8H13.5" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"/>'
     + '<path d="M10 4.5L13.5 8L10 11.5" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    "rapidfuzz": _SVG_OPEN
-    + '<path d="M2 4.5H14M2 8H10M2 11.5H7" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>'
-    + '<circle cx="12.5" cy="11" r="2.5" stroke="#8B5CF6" stroke-width="1.5" fill="none"/>'
-    + '<path d="M14.3 12.8L15.5 14" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round"/></svg>',
     # Layer 3 — Database & Storage
     "mongodb": _SVG_OPEN
     + '<path d="M8 1C8 1 4.5 5.5 4.5 9.5C4.5 11.43 6.07 13 8 13C9.93 13 11.5 11.43 11.5 9.5C11.5 5.5 8 1 8 1Z" fill="#00ED64"/>'
@@ -75,10 +68,6 @@ LOGOS: dict[str, str] = {
     "gcs": _SVG_OPEN
     + '<path d="M5 12.5H3.5A3.5 3.5 0 013.5 5.5h.1A4 4 0 0112.2 6.5a3 3 0 01-.2 6H5Z" fill="#4285F4"/>'
     + '<path d="M5 12.5H3.5A3.5 3.5 0 013.5 5.5h.1A4 4 0 0112.2 6.5a3 3 0 01-.2 6H5Z" fill="white" opacity="0.2"/></svg>',
-    "atlas_vector": _SVG_OPEN
-    + '<path d="M7 1.5C7 1.5 4 5 4 8C4 9.66 5.34 11 7 11C8.66 11 10 9.66 10 8C10 5 7 1.5 7 1.5Z" fill="#00ED64" opacity="0.8"/>'
-    + '<circle cx="11.5" cy="12" r="3" stroke="#00684A" stroke-width="1.5" fill="none"/>'
-    + '<path d="M13.6 14.1L15 15.5" stroke="#00684A" stroke-width="1.5" stroke-linecap="round"/></svg>',
     "pymongo": _SVG_OPEN
     + '<path d="M8 2C6.5 2 5.5 3 5.5 4.5V7.5C5.5 8.33 4.83 9 4 9H3.5V10.5H4C4.83 10.5 5.5 11.17 5.5 12V14" stroke="#3776AB" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
     + '<path d="M8 2C9.5 2 10.5 3 10.5 4.5V7.5C10.5 8.33 11.17 9 12 9H12.5V10.5H12C11.17 10.5 10.5 11.17 10.5 12V14" stroke="#FFD43B" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
@@ -100,14 +89,14 @@ LOGOS: dict[str, str] = {
     + '<rect x="1" y="8.5" width="6.5" height="6.5" fill="#0078D4" opacity="0.6"/>'
     + '<rect x="8.5" y="8.5" width="6.5" height="6.5" fill="#0078D4" opacity="0.3"/>'
     + '<text x="3" y="11" font-size="5.5" fill="white" font-weight="700" font-family="DM Sans, sans-serif">Az</text></svg>',
-    "google_oauth": _SVG_OPEN
+    "google_oidc": _SVG_OPEN
     + '<path d="M15.36 8.18c0-.57-.05-1.11-.14-1.64H8v3.1h4.3a3.67 3.67 0 01-1.59 2.41v2h2.58C14.48 12.66 15.36 10.61 15.36 8.18z" fill="#4285F4"/>'
     + '<path d="M8 16c2.16 0 3.97-.72 5.29-1.95l-2.58-2a4.8 4.8 0 01-2.71.76 4.79 4.79 0 01-4.5-3.31H.83v2.07A7.998 7.998 0 008 16z" fill="#34A853"/>'
     + '<path d="M3.5 9.5a4.86 4.86 0 010-3L.83 4.43a8 8 0 000 7.14L3.5 9.5z" fill="#FBBC05"/>'
     + '<path d="M8 3.21a4.33 4.33 0 013.06 1.2l2.3-2.3A7.68 7.68 0 008 0a8 8 0 00-7.17 4.43L3.5 6.5A4.77 4.77 0 018 3.21z" fill="#EA4335"/></svg>',
     "github_pat": _SVG_OPEN
     + '<path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" fill="#1F2937"/></svg>',
-    "cookie": _SVG_OPEN
+    "streamlit_oidc": _SVG_OPEN
     + '<circle cx="8" cy="8" r="6.5" fill="#D97706" opacity="0.2" stroke="#D97706" stroke-width="1.4"/>'
     + '<circle cx="5.5" cy="6.5" r="1" fill="#D97706"/>'
     + '<circle cx="9.5" cy="5.5" r="0.8" fill="#D97706"/>'
@@ -138,12 +127,6 @@ LOGOS: dict[str, str] = {
     + '<rect x="7" y="4" width="2.5" height="2.5" rx="0.4" fill="#2496ED"/>'
     + '<path d="M13.5 8.5C13.5 8.5 12.8 8 11.5 8.2C11.3 7.2 10.6 6.5 9.7 6.3L9.5 6.2L9.4 6.5C9.1 7.3 9.2 8.3 9.7 9C9 9.3 8 9.3 7 9.3H1.5C1.5 10.5 2 11.5 2.9 12.2C3.8 12.9 5 13.3 6.3 13.3C9.8 13.3 12.5 11.7 13.8 9C13.8 9 14.2 9 14.5 8.7L13.5 8.5Z" fill="#2496ED"/></svg>',
     # Layer 6 — Cloud & Compute (AI/ML)
-    "gcp": _SVG_OPEN
-    + '<path d="M10.5 5.5H5.5L3 9L5.5 12.5H10.5L13 9L10.5 5.5Z" stroke="#4285F4" stroke-width="1.3" fill="none"/>'
-    + '<path d="M10.5 5.5L8 2L5.5 5.5" stroke="#EA4335" stroke-width="1.3" fill="none"/>'
-    + '<path d="M13 9L16 8L14.5 5" stroke="#FBBC05" stroke-width="1.3" fill="none" stroke-linecap="round"/>'
-    + '<path d="M3 9L0 8L1.5 5" stroke="#34A853" stroke-width="1.3" fill="none" stroke-linecap="round"/>'
-    + '<circle cx="8" cy="9" r="1.5" fill="#4285F4"/></svg>',
     "vertex_ai": _SVG_OPEN
     + '<path d="M8 1.5L10.5 6L15 6.5L11.5 10L12.5 14.5L8 12L3.5 14.5L4.5 10L1 6.5L5.5 6L8 1.5Z" fill="#1A73E8" opacity="0.2" stroke="#1A73E8" stroke-width="1.3" stroke-linejoin="round"/>'
     + '<circle cx="8" cy="8" r="2" fill="#1A73E8"/></svg>',
@@ -176,13 +159,6 @@ LOGOS: dict[str, str] = {
     + '<circle cx="10.5" cy="10.5" r="4" fill="white"/>'
     + '<circle cx="10.5" cy="10.5" r="3" fill="#2088FF" opacity="0.15" stroke="#2088FF" stroke-width="1"/>'
     + '<path d="M9.5 10.5L10.3 11.3L12 9.5" stroke="#2088FF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    "branch": _SVG_OPEN
-    + '<circle cx="4" cy="4" r="1.8" fill="#6366F1"/>'
-    + '<circle cx="4" cy="12" r="1.8" fill="#6366F1"/>'
-    + '<circle cx="12" cy="8" r="1.8" fill="#6366F1" opacity="0.6"/>'
-    + '<path d="M4 5.8V10.2" stroke="#6366F1" stroke-width="1.4" stroke-linecap="round"/>'
-    + '<path d="M5.3 4.8C6.5 4.8 8 5.2 9.3 6.3" stroke="#6366F1" stroke-width="1.4" stroke-linecap="round" fill="none"/>'
-    + '<path d="M5.3 11.2C6.5 11.2 8 10.8 9.3 9.7" stroke="#6366F1" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>',
     "poetry": _SVG_OPEN
     + '<path d="M2 12L8 2L14 12H2Z" fill="#60A5FA" opacity="0.2" stroke="#3B82F6" stroke-width="1.4" stroke-linejoin="round"/>'
     + '<path d="M5 12L8 6.5L11 12H5Z" fill="#3B82F6" opacity="0.4"/>'
@@ -191,6 +167,12 @@ LOGOS: dict[str, str] = {
     + '<path d="M8 2C6.5 2 5.5 3 5.5 4.5V7.5C5.5 8.33 4.83 9 4 9H3.5V10.5H4C4.83 10.5 5.5 11.17 5.5 12V13" stroke="#3776AB" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
     + '<path d="M8 2C9.5 2 10.5 3 10.5 4.5V7.5C10.5 8.33 11.17 9 12 9H12.5V10.5H12C11.17 10.5 10.5 11.17 10.5 12V13" stroke="#FFD43B" stroke-width="1.5" fill="none" stroke-linecap="round"/>'
     + '<circle cx="8" cy="2.8" r="1" fill="#3776AB"/></svg>',
+    "ruff": _SVG_OPEN
+    + '<rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="#D946EF" opacity="0.12" stroke="#D946EF" stroke-width="1.3"/>'
+    + '<path d="M4.5 5H8C9.1 5 10 5.9 10 7C10 8.1 9.1 9 8 9H4.5V5Z" stroke="#D946EF" stroke-width="1.3" fill="none"/>'
+    + '<path d="M7.5 9L10.5 12" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/>'
+    + '<path d="M11 5H12.5" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/>'
+    + '<path d="M11 7H12.5" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/></svg>',
     # Layer 8 — Security
     "secret_manager": _SVG_OPEN
     + '<rect x="3" y="7" width="10" height="8" rx="2" fill="#E11D48" opacity="0.15" stroke="#E11D48" stroke-width="1.4"/>'
@@ -204,13 +186,6 @@ LOGOS: dict[str, str] = {
     + '<line x1="8" y1="11.5" x2="8" y2="15" stroke="#BE185D" stroke-width="1.4" stroke-linecap="round"/>'
     + '<line x1="1" y1="8" x2="4.5" y2="8" stroke="#BE185D" stroke-width="1.4" stroke-linecap="round"/>'
     + '<line x1="11.5" y1="8" x2="15" y2="8" stroke="#BE185D" stroke-width="1.4" stroke-linecap="round"/></svg>',
-    "dotenv": _SVG_OPEN
-    + '<rect x="1.5" y="3" width="13" height="10" rx="2" stroke="#BE185D" stroke-width="1.4" fill="none"/>'
-    + '<rect x="3.5" y="6" width="4" height="1.5" rx="0.75" fill="#BE185D" opacity="0.7"/>'
-    + '<rect x="8.5" y="6" width="4" height="1.5" rx="0.75" fill="#BE185D" opacity="0.35"/>'
-    + '<rect x="3.5" y="8.5" width="3" height="1.5" rx="0.75" fill="#BE185D" opacity="0.5"/>'
-    + '<rect x="7.5" y="8.5" width="5" height="1.5" rx="0.75" fill="#BE185D" opacity="0.25"/>'
-    + '<text x="3" y="5.5" font-size="4" fill="#BE185D" font-weight="700" font-family="DM Sans, sans-serif">.env</text></svg>',
     "claude_hooks": _SVG_OPEN
     + '<circle cx="8" cy="8" r="6.5" fill="#D97706" opacity="0.15" stroke="#D97706" stroke-width="1.4"/>'
     + '<path d="M5.5 10.5C5.5 8.5 6.5 7 8 7C9.5 7 10.5 8.5 10.5 10.5" stroke="#D97706" stroke-width="1.4" stroke-linecap="round" fill="none"/>'
@@ -240,37 +215,13 @@ LOGOS: dict[str, str] = {
     + '<path d="M8 2L15 13H1L8 2Z" fill="#FF4B4B" opacity="0.7"/>'
     + '<rect x="4.5" y="9" width="7" height="4.5" rx="1" fill="#0EA5E9" opacity="0.3"/>'
     + '<path d="M6 11.5H10M6 10.5H8.5" stroke="#0EA5E9" stroke-width="1.2" stroke-linecap="round"/></svg>',
-    "gcs_versioning": _SVG_OPEN
-    + '<path d="M5 12H3.5A3.5 3.5 0 013.5 5.5h.1A4 4 0 0112.2 6.5a3 3 0 01-.2 6H5Z" fill="#4285F4" opacity="0.25" stroke="#0EA5E9" stroke-width="1.3"/>'
-    + '<text x="5.5" y="11" font-size="5" fill="#0EA5E9" font-weight="700" font-family="DM Sans, sans-serif">v2</text></svg>',
-    "html_hash": _SVG_OPEN
-    + '<rect x="1.5" y="2" width="13" height="12" rx="2" stroke="#0EA5E9" stroke-width="1.3" fill="none"/>'
-    + '<path d="M4 7H6M10 7H12M4 9H12" stroke="#0EA5E9" stroke-width="1.3" stroke-linecap="round"/>'
-    + '<path d="M7 5V11M9 5V11" stroke="#0EA5E9" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    "md5_cas": _SVG_OPEN
-    + '<rect x="3" y="7" width="10" height="7.5" rx="2" fill="#0EA5E9" opacity="0.15" stroke="#0EA5E9" stroke-width="1.3"/>'
-    + '<path d="M5.5 7V5.5A2.5 2.5 0 0110.5 5.5V7" stroke="#0EA5E9" stroke-width="1.3" stroke-linecap="round" fill="none"/>'
-    + '<text x="4" y="12.5" font-size="4.5" fill="#0EA5E9" font-weight="700" font-family="DM Sans, sans-serif">md5</text></svg>',
     # Layer 11 — Scaling
-    "autoscaling": _SVG_OPEN
-    + '<path d="M8 3V13M3 8H13" stroke="#64748B" stroke-width="1.5" stroke-linecap="round"/>'
-    + '<path d="M6 5L8 3L10 5" stroke="#64748B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="M11 6L13 8L11 10" stroke="#64748B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="M10 11L8 13L6 11" stroke="#64748B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="M5 10L3 8L5 6" stroke="#64748B" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     "microservice_split": _SVG_OPEN
     + '<rect x="1" y="5.5" width="5" height="5" rx="1.5" stroke="#64748B" stroke-width="1.3" fill="none"/>'
     + '<rect x="10" y="2" width="5" height="5" rx="1.5" stroke="#64748B" stroke-width="1.3" fill="none"/>'
     + '<rect x="10" y="9" width="5" height="5" rx="1.5" stroke="#64748B" stroke-width="1.3" fill="none"/>'
     + '<path d="M6 8H8L8 4.5H10" stroke="#64748B" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
     + '<path d="M8 8V11.5H10" stroke="#64748B" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
-    "container_per_task": _SVG_OPEN
-    + '<rect x="1" y="7" width="2.5" height="2.5" rx="0.4" fill="#64748B"/>'
-    + '<rect x="4" y="7" width="2.5" height="2.5" rx="0.4" fill="#64748B"/>'
-    + '<rect x="7" y="7" width="2.5" height="2.5" rx="0.4" fill="#64748B"/>'
-    + '<path d="M13.5 8.5C13.5 8.5 12.8 8 11.5 8.2C11.3 7.2 10.6 6.5 9.7 6.3L9.5 6.2L9.4 6.5C9.1 7.3 9.2 8.3 9.7 9C9 9.3 8 9.3 7 9.3H1.5C1.5 10.5 2 11.5 2.9 12.2C3.8 12.9 5 13.3 6.3 13.3C9.8 13.3 12.5 11.7 13.8 9C13.8 9 14.2 9 14.5 8.7L13.5 8.5Z" fill="#64748B" opacity="0.6"/>'
-    + '<circle cx="13" cy="4" r="2.5" fill="#22C55E" opacity="0.8"/>'
-    + '<path d="M12 4L12.7 4.7L14 3.3" stroke="white" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     # Layer 12 — Error Tracking & Logs
     "loguru": _SVG_OPEN
     + '<rect x="2" y="2" width="12" height="12" rx="2.5" fill="#D946EF" opacity="0.12" stroke="#D946EF" stroke-width="1.3"/>'
@@ -290,18 +241,7 @@ LOGOS: dict[str, str] = {
     + '<path d="M6 1.5C6 1.5 7 3 7 4C7 3 6 1.5 6 1.5Z" stroke="#00ED64" stroke-width="1" stroke-linecap="round"/>'
     + '<path d="M11 1.5C11 1.5 10.4 4 10.4 5.5C10.4 4 11 1.5 11 1.5Z" fill="#00ED64" opacity="0.7"/>'
     + '<rect x="10.5" y="9.5" width="1.2" height="2" rx="0.6" fill="#00ED64"/></svg>',
-    "ruff": _SVG_OPEN
-    + '<rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="#D946EF" opacity="0.12" stroke="#D946EF" stroke-width="1.3"/>'
-    + '<path d="M4.5 5H8C9.1 5 10 5.9 10 7C10 8.1 9.1 9 8 9H4.5V5Z" stroke="#D946EF" stroke-width="1.3" fill="none"/>'
-    + '<path d="M7.5 9L10.5 12" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/>'
-    + '<path d="M11 5H12.5" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/>'
-    + '<path d="M11 7H12.5" stroke="#D946EF" stroke-width="1.3" stroke-linecap="round"/></svg>',
     # Layer 13 — Availability & Recovery
-    "upsert": _SVG_OPEN
-    + '<rect x="2" y="9" width="12" height="5" rx="1.5" stroke="#10B981" stroke-width="1.3" fill="none"/>'
-    + '<rect x="2" y="3" width="12" height="4" rx="1.5" stroke="#10B981" stroke-width="1.3" fill="#10B981" opacity="0.15"/>'
-    + '<path d="M8 1V5M6 3L8 1L10 3" stroke="#10B981" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="M5 11.5H7M9 11.5H11" stroke="#10B981" stroke-width="1.3" stroke-linecap="round"/></svg>',
     "soft_delete": _SVG_OPEN
     + '<rect x="2" y="4" width="12" height="9" rx="2" stroke="#10B981" stroke-width="1.3" fill="none"/>'
     + '<path d="M5 8H11" stroke="#10B981" stroke-width="1.5" stroke-linecap="round"/>'
@@ -314,9 +254,6 @@ LOGOS: dict[str, str] = {
     + '<rect x="1.5" y="11" width="13" height="3" rx="1" stroke="#10B981" stroke-width="1.3" fill="none" opacity="0.5"/>'
     + '<text x="3" y="5" font-size="4" fill="#10B981" font-weight="700" font-family="DM Sans, sans-serif">dt=v1</text>'
     + '<text x="3" y="9.5" font-size="4" fill="#10B981" font-weight="700" font-family="DM Sans, sans-serif">dt=v2</text></svg>',
-    "gcs_version_history": _SVG_OPEN
-    + '<path d="M5 12H3.5A3.5 3.5 0 013.5 5.5h.1A4 4 0 0112.2 6.5a3 3 0 01-.2 6H5Z" fill="#4285F4" opacity="0.2" stroke="#10B981" stroke-width="1.3"/>'
-    + '<path d="M7 9.5L8.5 11L11 8" stroke="#10B981" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     "medallion": _SVG_OPEN
     + '<circle cx="8" cy="8" r="6.5" stroke="#10B981" stroke-width="1.3" fill="none"/>'
     + '<circle cx="8" cy="8" r="4.5" stroke="#10B981" stroke-width="1" fill="none" opacity="0.5"/>'
@@ -339,7 +276,6 @@ LAYERS: list[dict] = [
             ("Streamlit", "streamlit"),
             ("Plotly", "plotly"),
             ("Pandas", "pandas"),
-            ("CSS (st.markdown)", "css"),
         ],
     },
     {
@@ -351,14 +287,13 @@ LAYERS: list[dict] = [
         "pillBorder": "#86EFAC",
         "accent": "#22C55E",
         "techs": [
-            ("Flask", "flask"),
+            ("FastAPI", "fastapi"),
             ("GitHub REST API", "github"),
             ("LeetCode GraphQL API", "leetcode"),
             ("Microsoft Graph API", "microsoft"),
             ("Google Sheets API", "google"),
             ("BeautifulSoup4", "bs4"),
             ("Requests", "requests"),
-            ("RapidFuzz", "rapidfuzz"),
         ],
     },
     {
@@ -372,7 +307,6 @@ LAYERS: list[dict] = [
         "techs": [
             ("MongoDB Atlas", "mongodb"),
             ("Google Cloud Storage (GCS)", "gcs"),
-            ("Atlas Vector Search", "atlas_vector"),
             ("PyMongo", "pymongo"),
         ],
     },
@@ -388,9 +322,9 @@ LAYERS: list[dict] = [
             ("GCP Workload Identity Federation", "gcp_workload"),
             ("GCP Service Account", "gcp_sa"),
             ("MSAL (Azure OAuth)", "msal"),
-            ("Google OAuth", "google_oauth"),
+            ("Google OIDC Provider", "google_oidc"),
             ("GitHub PAT", "github_pat"),
-            ("Cookie-based Auth", "cookie"),
+            ("Streamlit OIDC", "streamlit_oidc"),
         ],
     },
     {
@@ -417,8 +351,7 @@ LAYERS: list[dict] = [
         "pillBorder": "#5EEAD4",
         "accent": "#14B8A6",
         "techs": [
-            ("Google Cloud Platform", "gcp"),
-            ("Agent Platform / Vertex AI", "vertex_ai"),
+            ("GCP Agent Platform / Vertex AI", "vertex_ai"),
             ("gemini-flash series multimodal models", "gemini_embed"),
             ("gemini-embedding-2 model", "gemini_embed"),
             ("Cohere", "cohere"),
@@ -436,9 +369,9 @@ LAYERS: list[dict] = [
         "techs": [
             ("Git", "git"),
             ("GitHub Actions", "github_actions"),
-            ("Multi-branch Strategy", "branch"),
             ("Poetry", "poetry"),
             ("pyenv", "pyenv"),
+            ("Ruff", "ruff"),
         ],
     },
     {
@@ -452,7 +385,6 @@ LAYERS: list[dict] = [
         "techs": [
             ("GCP Secret Manager", "secret_manager"),
             ("pre-commit Hooks", "precommit"),
-            ("python-dotenv", "dotenv"),
             ("CLAUDE code hooks", "claude_hooks"),
         ],
     },
@@ -465,9 +397,9 @@ LAYERS: list[dict] = [
         "pillBorder": "#BEF264",
         "accent": "#84CC16",
         "techs": [
-            ("LLM Circuit Breaker", "circuit_breaker"),
-            ("CDC Gate (md5 incremental)", "cdc_gate"),
-            ("Lazy Loading / On-demand Trigger", "lazy_load"),
+            ("Circuit Breaker for LLM calls", "circuit_breaker"),
+            ("Incremental Load by CDC", "cdc_gate"),
+            ("FastAPI-POST", "lazy_load"),
         ],
     },
     {
@@ -480,9 +412,6 @@ LAYERS: list[dict] = [
         "accent": "#0EA5E9",
         "techs": [
             ("st.cache_resource", "st_cache"),
-            ("GCS Object Versioning", "gcs_versioning"),
-            ("html_hash Idempotent Cache", "html_hash"),
-            ("md5 CAS Guard", "md5_cas"),
         ],
     },
     {
@@ -494,9 +423,7 @@ LAYERS: list[dict] = [
         "pillBorder": "#CBD5E1",
         "accent": "#64748B",
         "techs": [
-            ("Cloud Run Auto-scaling", "autoscaling"),
-            ("Microservice Split (port 8002 / 8003)", "microservice_split"),
-            ("Container-per-task Architecture", "container_per_task"),
+            ("Cloud Run Microservice", "microservice_split"),
         ],
     },
     {
@@ -511,7 +438,6 @@ LAYERS: list[dict] = [
             ("Loguru", "loguru"),
             ("onenote_graph_api_logs (MongoDB)", "onenote_mongo"),
             ("multimodal_llm_enrichment_logs (MongoDB)", "multimodal_llm"),
-            ("Ruff (Linter + Formatter)", "ruff"),
         ],
     },
     {
@@ -523,10 +449,8 @@ LAYERS: list[dict] = [
         "pillBorder": "#6EE7B7",
         "accent": "#10B981",
         "techs": [
-            ("Upsert Idempotency", "upsert"),
             ("Soft Delete (status=deleted)", "soft_delete"),
             ("dt= Partition Multi-version", "partition"),
-            ("GCS Object Versioning History", "gcs_version_history"),
             ("Medallion Architecture (Bronze / Silver / Gold)", "medallion"),
         ],
     },
@@ -575,7 +499,7 @@ def _pill(name: str, logo_key: str, colors: dict[str, str]) -> str:
     return (
         '<div style="display:inline-flex;align-items:center;gap:7px;'
         f"background:{colors['pill_bg']};border:1.5px solid {colors['pill_border']};"
-        "border-radius:999px;padding:7px 16px 7px 11px;font-size:14px;font-weight:500;"
+        "border-radius:999px;padding:1px 14px 1px 10px;font-size:14px;font-weight:500;"
         f'color:{colors["text"]};line-height:1;letter-spacing:-0.01em;white-space:nowrap;">'
         '<span style="display:flex;align-items:center;flex-shrink:0;line-height:0;">'
         f"{img}</span>{name}</div>"
@@ -594,26 +518,21 @@ def _layer_card(layer: dict) -> str:
     accent = layer["accent"]
     colors = _dark(accent)
     pills = "".join(_pill(n, k, colors) for n, k in layer["techs"])
-    count = len(layer["techs"])
     return (
         f'<div style="background:{colors["card"]};border-radius:18px;'
         f'border:1.5px solid {colors["border"]};display:flex;overflow:hidden;">'
         # 左側 accent 色條
         f'<div style="width:5px;background:{accent};flex-shrink:0;"></div>'
         # 標籤欄
-        '<div style="width:196px;min-width:196px;padding:26px 24px 26px 20px;display:flex;'
+        '<div style="width:196px;min-width:196px;padding:5px 24px 26px 20px;display:flex;'
         "flex-direction:column;justify-content:center;gap:1px;"
         f'border-right:1.5px solid {colors["border"]};">'
         f'<div style="font-size:10.5px;font-weight:700;letter-spacing:0.2em;'
         f'text-transform:uppercase;color:{accent};">Layer {layer["num"]}</div>'
         f'<div style="font-size:14.5px;font-weight:700;color:{colors["text"]};'
-        f'line-height:1.3;letter-spacing:-0.02em;">{layer["category"]}</div>'
-        '<div style="margin-top:4px;">'
-        f'<div style="font-size:11px;font-weight:500;color:{accent};'
-        f"background:{accent}1f;border-radius:999px;padding:2px 8px;"
-        f'display:inline-block;">{count} technologies</div></div></div>'
+        f'line-height:1.3;letter-spacing:-0.02em;">{layer["category"]}</div></div>'
         # pills 區
-        '<div style="flex:1;padding:22px 28px;display:flex;flex-wrap:wrap;gap:15px;'
+        '<div style="flex:1;padding:5px 22px 5px 28px;display:flex;flex-wrap:wrap;gap:15px;'
         f'align-content:center;">{pills}</div></div>'
     )
 
