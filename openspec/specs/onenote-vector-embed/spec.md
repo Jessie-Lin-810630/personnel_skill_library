@@ -1,7 +1,8 @@
 # onenote-vector-embed Specification
 
 ## Purpose
-TBD - created by archiving change task08-onenote-embed. Update Purpose after archive.
+規範 task08 將 OneNote 歸檔版本向量化的行為，涵蓋從 `onenote_note_metadata` 挑出已歸檔且未向量化的版本、以 archived 副本的 md 與圖片做多模態 embedding、寫入與 task06 共用的 `note_vectors_multimodal` 並以 archived md 路徑作為 data lineage 依據，以及以 md5 比對確認版本一致後才翻 `embedded_status`，讓 AI 知識 Agent 能在同一個向量表中同時檢索 Obsidian 與 OneNote 的歸檔筆記。
+
 ## Requirements
 ### Requirement: Embedding gate 讀 onenote_note_metadata 挑待向量化版本
 

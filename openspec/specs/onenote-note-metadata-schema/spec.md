@@ -1,7 +1,8 @@
 # onenote-note-metadata-schema Specification
 
 ## Purpose
-TBD - created by archiving change task07-c3-schema-align. Update Purpose after archive.
+規範 `onenote_note_metadata` 的欄位契約，涵蓋 `page_id` 與 `dt` 組成的複合唯一鍵、命名一致的 hash 欄位、以 `attached_images` 記錄的圖片血緣、`topic` 主題分類、`md_body` 與失效圖片統計，以及 `created_at` 與 `updated_at` 稽核時間戳，讓 task07 的 Bronze、Silver、Gold 三個服務與下游 task08 依同一份 schema 讀寫 OneNote 每個頁面的每個版本。
+
 ## Requirements
 ### Requirement: 複合唯一鍵與 hash 欄位命名一致
 

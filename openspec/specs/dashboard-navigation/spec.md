@@ -1,7 +1,7 @@
 # dashboard-navigation Specification
 
 ## Purpose
-TBD - normalized from legacy archived delta format.
+規範 dashboard 側邊欄的頁面導覽連結與排列順序，讓使用者從任一頁面都能直接切換到 OneNote 審查頁與 AI 知識 Agent 頁。
 
 ## Requirements
 

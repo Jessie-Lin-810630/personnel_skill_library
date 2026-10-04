@@ -1,7 +1,8 @@
 # obsidian-note-soft-delete Specification
 
 ## Purpose
-TBD - created by archiving change task01-v2-medallion-etl. Update Purpose after archive.
+規範 task01 在原始筆記從 `raw-notes/` 消失時，將 `obsidian_note_metadata` 對應文件標為 `status=deleted` 的軟刪除行為，以及據此提供給 task06 的向量清除訊號，讓被刪除的筆記保留 metadata 紀錄，同時讓下游能一致地找出仍殘留向量、需要清除的筆記。
+
 ## Requirements
 
 ### Requirement: raw 筆記消失時對 metadata 做軟刪除
