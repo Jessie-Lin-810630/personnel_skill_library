@@ -1,7 +1,8 @@
 # ai-knowledge-agent-page Specification
 
 ## Purpose
-TBD - created by archiving change sprint6-ai-agent-page3. Update Purpose after archive.
+規範頁面 `AI 知識問答 Agent (ai_knowledge_agent)`從登入、提問到呈現回答的使用者可見行為，涵蓋對話介面、回答下方的來源筆記、以 session 區隔的多輪對話與重置、LLM 請求次數上限，以及依問題意圖分派至筆記摘要，這個頁面讓只有落在環境變數 `USER_ALLOWLIST` 內的登入者能在受控的請求量下，取得附有可追溯來源的筆記知識回應。
+
 ## Requirements
 
 ### Requirement: Chat interface renders conversation
@@ -18,7 +19,7 @@ Page 3 (`ai_knowledge_agent.py`) SHALL 提供 `st.chat_input` 輸入框與 `st.c
 ---
 
 ### Requirement: Sources displayed under agent response
-當 agent 回傳非空的 `sources` 清單時，Page 3 SHALL 在回應氣泡下方顯示可展開的「📎 來源筆記」欄位，內含每筆來源的 `file_name`、`section`、`score`。
+當 agent 回傳非空的 `sources` 清單時，Page 3 SHALL 在回應氣泡下方顯示可展開的「📎 來源筆記」欄位，內含每筆來源的 `file_name`、`section`、`score`。RAG agent 回傳的 `answer` 正文 SHALL NOT 包含由模型自行列出的來源清單，來源資訊只透過「📎 來源筆記」呈現，使同一則回應中的來源只出現一次。
 
 #### Scenario: Agent returns sources
 - **WHEN** `rag_query()` 或 `generate_learning_map()` / `refine_learning_map()` 回傳非空 `sources`
@@ -27,6 +28,10 @@ Page 3 (`ai_knowledge_agent.py`) SHALL 提供 `st.chat_input` 輸入框與 `st.c
 #### Scenario: Agent returns no sources
 - **WHEN** agent 回傳空 `sources`（例如向量搜尋無結果）
 - **THEN** 回應氣泡下方不顯示 expander
+
+#### Scenario: RAG answer omits source list
+- **WHEN** 使用者在新對話中提出筆記查詢，`rag_query()` 檢索到 chunk 並回傳模型生成的 `answer`
+- **THEN** `answer` 正文不以「來源：」開頭的段落列出檔案名稱與章節，回應氣泡中的來源只出現在「📎 來源筆記」
 
 ---
 

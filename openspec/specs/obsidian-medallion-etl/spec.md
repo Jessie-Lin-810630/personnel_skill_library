@@ -1,7 +1,8 @@
 # obsidian-medallion-etl Specification
 
 ## Purpose
-TBD - created by archiving change task01-v2-medallion-etl. Update Purpose after archive.
+規範 task01 將 Obsidian 筆記依 Bronze、Silver、Gold 三層處理的行為，涵蓋 rsync 同步並保留版本、以 md5 判定變更的增量下載、清洗與圖片血緣解析、歸檔到 `archived-notes/`、metadata upsert 到 `obsidian_note_metadata`，以及每日寫入 `notes_summary` 快照，讓只有內容變更的筆記會被重新處理，且每份歸檔筆記都能追溯回原始檔與其引用圖片。
+
 ## Requirements
 
 ### Requirement: Bronze 層以 rsync 覆蓋同步並保留版本

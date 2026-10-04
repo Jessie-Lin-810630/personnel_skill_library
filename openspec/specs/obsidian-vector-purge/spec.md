@@ -1,7 +1,8 @@
 # obsidian-vector-purge Specification
 
 ## Purpose
-TBD - created by archiving change task06-v2-embed-purge. Update Purpose after archive.
+規範 task06 消費 task01 軟刪除訊號的行為，清除已刪除筆記在 `note_vectors_multimodal` 中的向量，並把 `embedded_status` 翻回 `false`，讓 AI 知識 Agent 不會檢索到已刪除筆記的內容，且同一筆記不會被重複清除。
+
 ## Requirements
 
 ### Requirement: 消費軟刪除訊號清除對應向量

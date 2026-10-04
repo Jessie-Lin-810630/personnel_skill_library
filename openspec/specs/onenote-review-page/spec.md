@@ -1,7 +1,8 @@
 # onenote-review-page Specification
 
 ## Purpose
-TBD - normalized from legacy archived delta format.
+規範 OneNote 審查頁從登入、選擇筆記版本、並排比對 html 與 md，到送出 approve 或 reject 的使用者可見行為，讓 `USER_ALLOWLIST` 內的審查者能逐版本確認 LLM 轉換結果，再決定是否歸檔。
+
 ## Requirements
 ### Requirement: Google OIDC login gate
 

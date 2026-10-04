@@ -1,7 +1,8 @@
 # silver-enrich-endpoint Specification
 
 ## Purpose
-TBD - created by archiving change silver-ondemand-review-page. Update Purpose after archive.
+規範 Silver 端點 `POST /enrich` 對單一 OneNote 版本做 on-demand html 轉 md 的行為，涵蓋請求驗證、首次轉換與重新生成兩種觸發方式，以及並行請求下仍維持正確狀態的 LLM 服務斷路器，讓 LLM 只在審查者實際開啟某個版本時才被呼叫，並在 LLM 服務連續失敗時暫停呼叫。
+
 ## Requirements
 ### Requirement: On-demand Silver enrich 端點
 

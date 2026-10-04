@@ -1,7 +1,8 @@
 # gold-archive-endpoint Specification
 
 ## Purpose
-TBD - created by archiving change gold-archive-onenote-versioned. Update Purpose after archive.
+規範 Gold 端點 `POST /archive` 接收審查結果後的行為，涵蓋 approve 時把 silver md 與引用圖片歸檔並萃取 frontmatter、同頁其他候選版本的退役、reject 時的關閉標記，以及身分與請求欄位的驗證，讓每個 OneNote 頁面在 `onenote_note_metadata` 中只有經過人工審核的版本進入 `archived-notes/`，並成為下游向量化的唯一來源。
+
 ## Requirements
 ### Requirement: Approve 觸發歸檔
 

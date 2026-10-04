@@ -1,7 +1,8 @@
 # obsidian-vector-embed-v2 Specification
 
 ## Purpose
-TBD - created by archiving change task06-v2-embed-purge. Update Purpose after archive.
+規範 task06 將 Obsidian 歸檔筆記向量化的行為，涵蓋從 `obsidian_note_metadata` 挑出已歸檔且未向量化的筆記、以 archived 副本的 md 與圖片做多模態 embedding、寫入 `note_vectors_multimodal` 時以筆記為單位先刪後插，以及以 md5 比對確認版本一致後才翻 `embedded_status`，讓向量內容始終對應最新的歸檔版本，不留下舊版本的 chunk。
+
 ## Requirements
 
 ### Requirement: Embedding gate 讀 obsidian_note_metadata 挑待向量化筆記
