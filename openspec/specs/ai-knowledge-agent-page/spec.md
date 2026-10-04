@@ -1,7 +1,8 @@
 # ai-knowledge-agent-page Specification
 
 ## Purpose
-TBD - created by archiving change sprint6-ai-agent-page3. Update Purpose after archive.
+規範頁面 `AI 知識問答 Agent (ai_knowledge_agent)`從登入、提問到呈現回答的使用者可見行為，涵蓋對話介面、回答下方的來源筆記、以 session 區隔的多輪對話與重置、LLM 請求次數上限，以及依問題意圖分派至筆記摘要，這個頁面讓只有落在環境變數 `USER_ALLOWLIST` 內的登入者能在受控的請求量下，取得附有可追溯來源的筆記知識回應。
+
 ## Requirements
 
 ### Requirement: Chat interface renders conversation
