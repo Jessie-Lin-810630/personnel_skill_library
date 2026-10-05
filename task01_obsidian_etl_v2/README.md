@@ -129,7 +129,7 @@ task01_obsidian_etl_v2/
 | `topic` | 從 tags 推斷出的主分類 | String | markdown frontmatter + Transform 自訂字典 |
 | `word_count` | 筆記總字數 | Integer | markdown body + Transform 自訂函數 |
 | `status` | 流程處置狀態（archived / deleted / error） | String | ETL 流程判斷後指派 |
-| `embedded_status` | 自上次更新後是否已向量化 | Bool | Load 初始化 false，task06 v2 完成後翻 true |
+| `embedded_status` | 自上次更新後是否已向量化 | Bool | Load 每次歸檔（含同名改版）設為 false，task06 v2 完成後翻 true |
 | `error_msg` | 處理過程錯誤訊息（無則空字串） | String | 系統錯誤捕捉例外訊息 |
 | `created_at` | 該筆文檔建立時間 | Date (ISO 8601) | Load task 執行時間 |
 | `updated_at` | 該筆文檔更新時間 | Date (ISO 8601) | 任何新增/更新欄位的發生時間 |
